@@ -314,6 +314,10 @@ async def _process_chat(
                 return
             if not isinstance(result, dict):
                 raise TypeError("structured chat must return a non-streaming result")
+            if "hecate_correlation" in result:
+                correlation_chunk = ChatCompletionChunk(model=result["model"], choices=[]).model_dump()
+                correlation_chunk["hecate_correlation"] = result["hecate_correlation"]
+                yield "data: " + json.dumps(correlation_chunk) + "\n\n"
             chunk = ChatCompletionChunk(
                 model=result["model"],
                 choices=[
@@ -672,7 +676,8 @@ async def _process_chat_impl(
                 # OpenAI-safe frame: an empty choices array is a no-op for
                 # strict chunk consumers, while the correlation rides the
                 # payload for clients that read it.
-                correlation_event = {"choices": [], "hecate_correlation": outcome.correlation.to_dict()}
+                correlation_event = ChatCompletionChunk(model=effective_model, choices=[]).model_dump()
+                correlation_event["hecate_correlation"] = outcome.correlation.to_dict()
                 yield "data: " + json.dumps(correlation_event) + "\n\n"
 
                 if isinstance(result_gen, dict):
@@ -690,7 +695,7 @@ async def _process_chat_impl(
                     and correlation.run_ref is not None
                 )
                 if use_mapped:
-                    mapper = RunEventMapper(correlation.task_ref, correlation.run_ref, event_store=event_store)
+                    mapper = RunEventMapper(correlation.task_ref, correlation.run_ref)
                     async for envelope in _map_stream(result_gen, mapper):
                         payload = envelope.payload
                         if payload.get("type") == "message":
@@ -751,30 +756,9 @@ async def _process_chat_impl(
                 media_type="text/event-stream",
             )
 
-        # Non-streaming with enhanced features
-        outcome = await entry.execute(
-            agent_mode="chat",
-            messages=msg_dicts,
-            model=effective_model,
-            tools=effective_tools,
-            stream=False,
-            session_id=request.session_id,
-            agent_id=parsed_agent_id,
-            # Tenant scope for the engine's session-state persistence.
-            user_id=user_id,
-            kb_ids=parsed_kb_ids,
-            generate_opening=request.generate_opening,
-            enable_suggestions=request.generate_suggestions,
-            skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
-            correlation=correlation_input,
-        )
-        result = outcome.result
-
-        if not isinstance(result, dict):
-            msg = f"Expected dict result for non-streaming chat, got {type(result)}"
-            raise TypeError(msg)
-
-        if request.output_schema is not None:
+        async def validate_final_result(result: dict[str, Any]) -> dict[str, Any]:
+            if request.output_schema is None:
+                return result
 
             async def retry_final(feedback: str) -> Any:
                 # Repair only the final answer: restarting the graph with tools
@@ -799,6 +783,27 @@ async def _process_chat_impl(
                     retry_final,
                 )
                 result = {**result, "content": repaired.content, "finish_reason": repaired.finish_reason or "stop"}
+            return result
+
+        outcome = await entry.execute(
+            agent_mode="chat",
+            messages=msg_dicts,
+            model=effective_model,
+            tools=effective_tools,
+            stream=False,
+            session_id=request.session_id,
+            agent_id=parsed_agent_id,
+            user_id=user_id,
+            kb_ids=parsed_kb_ids,
+            generate_opening=request.generate_opening,
+            enable_suggestions=request.generate_suggestions,
+            skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
+            correlation=correlation_input,
+            process_result=validate_final_result,
+        )
+        result = outcome.result
+        if not isinstance(result, dict):
+            raise TypeError(f"Expected dict result for non-streaming chat, got {type(result)}")
 
         suggested_questions = result.get("suggested_questions")
 
@@ -1143,10 +1148,15 @@ class _LoopStopError(ExecutionStoppedError):
 
 def _as_loop_stop(exc: Exception) -> _LoopStopError:
     if isinstance(exc, ExecutionStoppedError):
-        return _LoopStopError(exc.reason_category, exc.detail, exc.action_ref)
-    if isinstance(exc, BudgetRefusedError):
-        return _LoopStopError("budget_exhausted", str(exc))
-    return _LoopStopError("iteration_limit", str(exc))
+        stop = _LoopStopError(exc.reason_category, exc.detail, exc.action_ref)
+    elif isinstance(exc, BudgetRefusedError):
+        stop = _LoopStopError("budget_exhausted", str(exc))
+    else:
+        stop = _LoopStopError("iteration_limit", str(exc))
+    correlation = getattr(exc, "platform_correlation", None)
+    if isinstance(correlation, dict):
+        stop.platform_correlation = correlation
+    return stop
 
 
 async def _stop_safe_stream(source):

@@ -112,7 +112,6 @@
 - **WHEN** 同一入口分别以非流式与流式执行同类请求并按各自 run 引用读取事件页
 - **THEN** 两种形状产生的信封经同一映射与持久化路径可分页读取,视图语义一致(配对校验、游标、后端详情保留)
 
-## ADDED Requirements
 ### Requirement: 入口层禁止新增引擎具体导入
 
 被迁移的入口层模块(channel/api、tools/mcp、channel/im、channel/a2a/server)MUST NOT 直接 import 引擎具体实现类(`PregelRuntime`、`GraphCompiler`);执行装配只发生在入口服务与共享装配内。该约束 SHALL 由分层测试自动化执行,违规时测试失败并指出模块与符号。

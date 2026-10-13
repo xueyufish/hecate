@@ -162,7 +162,11 @@ async def test_generic_failure_maps_to_stable_category(
 
 
 async def test_missing_correlation_skips_finalization(db_session: AsyncSession, fake_service, event_store):
-    fake_service["behavior"] = {"content": "ok", "finish_reason": "stop"}
+    fake_service["behavior"] = {
+        "content": "ok",
+        "finish_reason": "stop",
+        "_engine_events": [{"type": "values", "state": {"secret": "internal"}}],
+    }
     entry = EntryExecutionService(port=None, entry_name="contract-test", db=db_session, event_store=event_store)
     outcome = await entry.execute(
         agent_mode="chat",
@@ -172,6 +176,37 @@ async def test_missing_correlation_skips_finalization(db_session: AsyncSession, 
     )
     assert not outcome.correlated
     assert outcome.result["content"] == "ok"
+    assert "_engine_events" not in outcome.result
+
+
+async def test_non_http_stream_persists_envelopes_and_bounded_summary(
+    db_session: AsyncSession, default_workspace, fake_service, event_store
+):
+    """Persistence belongs to the shared entry, independent of HTTP rendering."""
+    agent = await _agent_with_deployment(db_session, default_workspace.id)
+
+    async def stream():
+        yield {"type": "message", "content": "a" * 400}
+        yield {"type": "message", "content": "b" * 400}
+
+    fake_service["behavior"] = stream()
+    entry = EntryExecutionService(port=None, entry_name="mcp", db=db_session, event_store=event_store)
+    outcome = await entry.execute(
+        stream=True, correlation=CorrelationInput(workspace_id=default_workspace.id, agent_id=agent.id)
+    )
+    chunks = [chunk async for chunk in outcome.result]
+    assert len(chunks) == 2
+    reader = RunEventMapper(outcome.correlation.task_ref, outcome.correlation.run_ref, event_store=event_store)
+    page = await reader.read_events(limit=1)
+    assert page.events[0].payload["content"] == "a" * 400
+    assert page.has_more
+    next_page = await reader.read_events(cursor=page.next_cursor)
+    assert next_page.events[0].payload["content"] == "b" * 400
+    assert not next_page.has_more
+    from hecate.execution.task_run_registry import TaskRunRegistry
+
+    run = await TaskRunRegistry(db_session).get_run(uuid.UUID(outcome.correlation.run_ref.id), default_workspace.id)
+    assert run.projection == {"state": "succeeded", "summary": "a" * 400 + "b" * 100}
 
 
 async def test_streaming_failure_finalizes_cancelled(
@@ -213,6 +248,27 @@ async def test_streaming_failure_finalizes_cancelled(
     assert run.projection["state"] == "cancelled"
     assert run.projection["error_category"] == "cancelled"
     await db_session.commit()
+
+
+async def test_values_only_stream_retains_final_assistant_summary(
+    db_session: AsyncSession, default_workspace, fake_service, event_store
+):
+    """A graph may publish its answer as state without provider token deltas."""
+    agent = await _agent_with_deployment(db_session, default_workspace.id)
+
+    async def stream():
+        yield {"type": "values", "state": {"messages": [{"role": "assistant", "content": "graph answer"}]}}
+
+    fake_service["behavior"] = stream()
+    entry = EntryExecutionService(port=None, entry_name="workflow", db=db_session, event_store=event_store)
+    outcome = await entry.execute(
+        stream=True, correlation=CorrelationInput(workspace_id=default_workspace.id, agent_id=agent.id)
+    )
+    assert len([chunk async for chunk in outcome.result]) == 1
+    from hecate.execution.task_run_registry import TaskRunRegistry
+
+    run = await TaskRunRegistry(db_session).get_run(uuid.UUID(outcome.correlation.run_ref.id), default_workspace.id)
+    assert run.projection == {"state": "succeeded", "summary": "graph answer"}
 
 
 async def test_envelopes_persist_to_store_and_page_across_mappers(

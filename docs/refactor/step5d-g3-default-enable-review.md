@@ -4,7 +4,7 @@
 
 本记录对应演进计划 step5d 剩余项"G3 实际入口的多轮、拒绝、取消、断连/恢复及默认启用证据；复用现有开关和路由，旧循环限制须显式保留"。本轮只补证据与决策记录，不改路由解析、开关机制或入口装配。
 
-**决策：全局默认 `CHAT_TOOL_LOOP_ENGINE_ENABLED` 维持关闭。**HTTP 入口的引擎路径证据已齐备（下表）；MCP `agent_chat` 与 workflow 入口的引擎路径真实入口证据仍缺，按 `unified-chat-execution` 规格"逐入口证据积累、缺证据不切默认"的约束，默认不翻转。翻转前置条件：逐入口真实证据齐备 + 本决策记录更新为翻转结论 + 放量记录就位。
+**决策：全局默认 `CHAT_TOOL_LOOP_ENGINE_ENABLED` 维持关闭。**HTTP 确定性多轮、拒绝与模型边界取消已有证据；真实中途断连、MCP `agent_chat` 与 workflow 入口的完整引擎路径证据仍缺。按 `unified-chat-execution` 规格“逐入口证据积累、缺证据不切默认”，默认不翻转。翻转前置条件：逐入口真实证据齐备 + 本决策记录更新为翻转结论 + 放量记录就位。
 
 ## 逐入口证据清单
 
@@ -16,7 +16,7 @@
 | 多轮工具调用（流式，中间迭代静默） | `test_chat_engine_g3_entry.py::test_real_http_streaming_multi_round_silent_intermediates` | 仅最终答案流式下发 |
 | 审批拒绝传递 | `test_chat_engine_g3_entry.py::test_real_http_approval_denial_surfaces` | 工具不执行，拒绝以工具消息闭环，APPROVAL_ASKED/DECIDED 落事件 |
 | 确定性策略拒绝（非审批） | `test_chat_engine_g3_entry.py::test_engine_deterministic_policy_denial_does_not_terminate` | 工具不执行，拒绝以工具消息闭环且对话不终止，无审批事件对 |
-| 断线/恢复 | `test_chat_engine_g3_entry.py::test_stream_disconnect_persists_state_and_resume_is_clean` | 服务端完成进行中轮，快照持久，恢复不重做副作用，配对完整 |
+| 完成后的续轮/恢复 | `test_chat_engine_g3_entry.py::test_stream_disconnect_persists_state_and_resume_is_clean` | ASGITransport 在客户端读到首段前已缓冲完整服务端响应；证明完成后的快照和续轮，不证明中途断线 |
 | 会话中取消（模型边界） | `test_chat_engine_g3_entry.py::test_engine_cancel_at_model_boundary_stops_and_resume_is_clean` | 边界取消检查生效，SSE 呈现 `execution_stopped`/`cancelled`，进行中轮恰好一次，恢复干净 |
 | 跨请求多轮会话连续 | `test_chat_engine_g3_entry.py::test_engine_multi_turn_session_continuity` | 续轮恢复前轮工具环，亲缘保持 engine，前轮回执不重执行，配对跨轮完整 |
 | 会话亲缘与放量覆盖 | `test_chat_engine_g3_entry.py::test_session_keeps_engine_path_after_override_flip` | 覆盖翻转后续轮不切换路径 |
@@ -47,10 +47,10 @@ workspace 覆盖变更写 `CHAT_ENGINE_ROLLOUT_CHANGED` 放量记录（workspace
 ## 本轮证据测试暴露的行为边界（未修复，如实登记）
 
 1. **跨轮回执内容为对账标记**：引擎路径续轮恢复的前轮工具回执内容为 `[reconciliation required]`（运行时账本记录成功但结果内容不可用的既有 G2 边界），非真实结果内容。多轮连续性用例按"存在性"断言该回执，不断言内容。默认翻转评估时该边界需先行收敛或显式接受。
-2. **ASGI 测试传输不投递中途断连**：取消证据在传输接缝注入断连信号（与 S12 取消场景同构），下游（入口接线、边界检查、SSE 终止渲染、恢复）全部真实。真实服务器上断连经 starlette 断连监听呈现，语义一致。
+2. **ASGI 测试传输不投递中途断连**：取消证据在传输接缝注入信号，下游入口接线、边界检查、SSE 终止渲染与恢复为真实路径。`client.stream` 用例在首段读取前已经耗尽服务端生成器，不能证明 disconnect 分支被执行。真实服务器的断连监听及投影/存储行为需要独立传输证据，不能据此宣称语义一致。
 3. **真实模型维度不在本轮范围**：全部证据基于确定性桩；模型质量维度归 step5e 已登记的 skipped 真实轨。
 
 ## 验证
 
-- `tests/test_channel/test_chat_engine_g3_entry.py`：10 passed（6 既有 + 4 新增）。
+- `tests/test_channel/test_chat_engine_g3_entry.py`：确定性入口回归已通过；修正后的停止关联、输出校验与流式摘要证据见 `step5d-review-hardening` 的复核记录。
 - 定向回归与门槛结果见 change 复核记录。

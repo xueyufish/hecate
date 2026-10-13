@@ -117,9 +117,9 @@ class HecateAgentExecutor:
     async def _resolve_agent(self) -> AgentModel | None:
         """Resolve the single agent inside the configured workspace scope.
 
-        ``A2A_AGENT_WORKSPACE_ID`` must name a workspace holding exactly
-        one non-deleted agent; empty, invalid, zero-hit, or ambiguous
-        scopes all refuse (``None``) with the reason recorded in
+        ``A2A_AGENT_WORKSPACE_ID`` must name a workspace holding one live
+        agent, or a unique agent with a live default deployment. Empty,
+        invalid, zero-hit, or ambiguous scopes refuse with the reason in
         ``self._resolution_failure`` for the protocol response.
         """
         import uuid as uuid_mod

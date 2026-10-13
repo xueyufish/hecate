@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -138,7 +139,13 @@ class EntryExecutionService:
             action_hook=action_hook,
         )
 
-    async def execute(self, *, correlation: CorrelationInput | None = None, **execute_kwargs: Any) -> ExecutionOutcome:
+    async def execute(
+        self,
+        *,
+        correlation: CorrelationInput | None = None,
+        process_result: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None,
+        **execute_kwargs: Any,
+    ) -> ExecutionOutcome:
         """Delegate to the platform adapter and correlate the execution.
 
         Keyword arguments are forwarded to ``WorkflowExecutionService.execute``
@@ -147,6 +154,8 @@ class EntryExecutionService:
         executed. Correlation runs BEFORE execution (step5d contract
         closure): a failed execution leaves a registered Task/Run whose
         projection this service then finalizes, instead of vanishing.
+        ``process_result`` validates or repairs the final synchronous
+        response before the Run can be projected as successful.
         """
         correlation = correlation or CorrelationInput()
         session_id = execute_kwargs.get("session_id")
@@ -167,6 +176,12 @@ class EntryExecutionService:
         workspace_id = correlation.workspace_id
         try:
             result = await self._service.execute(**execute_kwargs)
+            if not hasattr(result, "__aiter__"):
+                await self._record_engine_events(correlation_result, result)
+                if process_result is not None:
+                    if not isinstance(result, dict):
+                        raise TypeError("result processing requires a non-streaming dict")
+                    result = await process_result(result)
         except Exception as exc:
             await self._finalize_failure(correlation_result, workspace_id, exc)
             raise
@@ -175,7 +190,6 @@ class EntryExecutionService:
                 result=self._finalizing_stream(result, correlation_result, workspace_id),
                 correlation=correlation_result,
             )
-        await self._record_engine_events(correlation_result, result)
         await self._finalize_success(correlation_result, workspace_id, result)
         return ExecutionOutcome(result=result, correlation=correlation_result)
 
@@ -208,11 +222,11 @@ class EntryExecutionService:
         ``platform_correlation`` so protocol adapters can render the
         Task/Run references in terminal payloads.
         """
-        if correlation_result.run_ref is None or workspace_id is None:
-            return
         with contextlib.suppress(Exception):
             # The annotation must never mask the original error.
             exc.platform_correlation = correlation_result.to_dict()
+        if correlation_result.run_ref is None or workspace_id is None:
+            return
         category = self._stop_category(exc)
         state = "cancelled" if category == "cancelled" else "failed"
         try:
@@ -269,13 +283,32 @@ class EntryExecutionService:
         """Wrap a streaming result so its terminal projection is written."""
 
         async def wrapped():
+            from hecate.execution.entry_events import RunEventMapper
+
+            mapper = (
+                RunEventMapper(correlation_result.task_ref, correlation_result.run_ref, event_store=self._event_store)
+                if correlation_result.task_ref is not None and correlation_result.run_ref is not None
+                else None
+            )
+            summary = ""
             try:
                 async for chunk in gen:
+                    if isinstance(chunk, dict):
+                        if mapper is not None:
+                            await mapper.map_stream_event(chunk)
+                        if chunk.get("type") == "message" and isinstance(chunk.get("content"), str):
+                            summary = (summary + chunk["content"])[:500]
+                        elif chunk.get("type") == "values":
+                            messages = (chunk.get("state") or {}).get("messages")
+                            if isinstance(messages, list) and messages:
+                                last = messages[-1]
+                                if isinstance(last, dict) and last.get("role") == "assistant":
+                                    summary = self._result_summary({"content": last.get("content")}) or summary
                     yield chunk
             except Exception as exc:
                 await self._finalize_failure(correlation_result, workspace_id, exc)
                 raise
-            await self._finalize_success(correlation_result, workspace_id, None)
+            await self._finalize_success(correlation_result, workspace_id, {"content": summary})
 
         return wrapped()
 
@@ -287,11 +320,11 @@ class EntryExecutionService:
         streaming executions the same envelope view over one Task/Run.
         The key is popped, so engine events never reach protocol output.
         """
-        if correlation_result.task_ref is None or correlation_result.run_ref is None:
-            return
         if not isinstance(result, dict):
             return
         events = result.pop("_engine_events", None)
+        if correlation_result.task_ref is None or correlation_result.run_ref is None:
+            return
         if not isinstance(events, list) or not events:
             return
         from hecate.execution.entry_events import RunEventMapper
@@ -370,7 +403,7 @@ class EntryExecutionService:
             run_ref_result = BackendRef(RefKind.RUN, run.issuer_domain, str(run.id))
         await self._link_conversation(registry, correlation, task.id)
         return CorrelationResult(
-            status=CORRELATION_REGISTERED,
+            status=CORRELATION_REGISTERED if run_ref_result is not None else CORRELATION_MISSING,
             reason=reason,
             task_ref=BackendRef(RefKind.TASK, task.issuer_domain, str(task.id)),
             run_ref=run_ref_result,

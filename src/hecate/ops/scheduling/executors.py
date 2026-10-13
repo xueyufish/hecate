@@ -13,7 +13,6 @@ Provides:
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
@@ -213,13 +212,11 @@ class AgentExecutor(TaskExecutor):
 class WorkflowExecutor(TaskExecutor):
     """Execute a scheduled workflow run through the platform entry path.
 
-    step5d closure: the scheduler previously drove the studio test
-    runner directly (no Task/Run correlation, no identity chain, no
-    governance or events). The execution now goes through the platform
-    entry execution service — the same path as the scheduled agent
-    executor — while that test runner remains the studio test-run
-    endpoint's own runner. ``ScheduledTaskExecution.result_summary``
-    binding semantics are unchanged (the returned dict flows there).
+    Uses the shared entry service and preserves explicit workflow input
+    channels. A standalone workflow currently has no deployment identity,
+    so correlation records a Task and explicitly reports the missing Run.
+    The studio runner remains dedicated to its test endpoint. The returned
+    dict is bound to ``ScheduledTaskExecution.result_summary``.
 
     Expected task_config keys:
 
@@ -237,7 +234,7 @@ class WorkflowExecutor(TaskExecutor):
         workflow_id: uuid.UUID | str | None = None,
     ) -> dict[str, Any]:
         """Run a workflow with the configured input."""
-        del workspace_id, agent_id  # workflow execution resolves its own context
+        del agent_id
         resolved_workflow_id = workflow_id or task_config.get("workflow_id")
 
         if not resolved_workflow_id:
@@ -247,6 +244,7 @@ class WorkflowExecutor(TaskExecutor):
             from hecate_llm.service import llm_service
 
             from hecate.core.composition.entry_assembly import (
+                build_tool_registry,
                 get_shared_event_store,
                 get_shared_session_state_store,
             )
@@ -258,13 +256,17 @@ class WorkflowExecutor(TaskExecutor):
             async with async_session_factory() as db:
                 workflow_uuid = uuid.UUID(str(resolved_workflow_id))
                 workflow = await db.get(WorkflowModel, workflow_uuid)
-                if workflow is None or workflow.deleted:
+                if (
+                    workflow is None
+                    or workflow.deleted
+                    or (workspace_id is not None and workflow.workspace_id != workspace_id)
+                ):
                     return {"status": "failed", "error": f"Workflow {resolved_workflow_id} not found"}
 
                 port = create_runtime_port(
                     db,
                     llm_service,
-                    tool_registry=None,
+                    tool_registry=build_tool_registry(db, workspace_id=workflow.workspace_id),
                     workspace_id=workflow.workspace_id,
                     agent_id=None,
                 )
@@ -276,17 +278,12 @@ class WorkflowExecutor(TaskExecutor):
                     checkpoint_store=get_shared_session_state_store(),
                 )
                 input_data = task_config.get("input_data") or {}
-                prompt = (
-                    json.dumps(input_data, ensure_ascii=False, default=str)
-                    if input_data
-                    else f"Run workflow {resolved_workflow_id}"
-                )
                 outcome = await entry.execute(
                     agent_mode="workflow",
                     workflow_id=workflow_uuid,
                     workspace_id=workflow.workspace_id,
                     session_id=uuid.uuid4(),
-                    messages=[{"role": "user", "content": prompt}],
+                    input_data=input_data,
                     stream=False,
                     correlation=CorrelationInput(
                         workspace_id=workflow.workspace_id,

@@ -9,6 +9,7 @@ and late callbacks are explicitly rejected without consuming the token.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -51,7 +52,10 @@ class _EntryDouble:
 
 
 @pytest.fixture
-def entry_stub(monkeypatch: pytest.MonkeyPatch):
+async def entry_stub(monkeypatch: pytest.MonkeyPatch):
+    from hecate.execution.task_control import _background_tasks
+
+    previous_tasks = set(_background_tasks)
     double = _EntryDouble()
     real = PlatformTaskDispatcher._execute
 
@@ -60,6 +64,11 @@ def entry_stub(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(PlatformTaskDispatcher, "_execute", _execute)
     yield double
+    # A wake returns before its dispatch finishes. Keep the provider stub
+    # installed until those tasks stop using the shared test database.
+    async with asyncio.timeout(10):
+        while pending := _background_tasks - previous_tasks:
+            await asyncio.gather(*pending)
     monkeypatch.setattr(PlatformTaskDispatcher, "_execute", real, raising=False)
 
 

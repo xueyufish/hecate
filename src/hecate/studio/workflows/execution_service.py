@@ -219,12 +219,14 @@ class WorkflowExecutionService:
         grounding_scoring: dict | None = None,
         skill_ref_manifest: list[dict[str, Any]] | None = None,
         resume_interrupted: bool = False,
+        input_data: dict[str, Any] | None = None,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute an agent through the unified graph engine.
 
         Args:
             agent_mode: "chat", "three_layer", or "workflow".
             messages: Conversation messages.
+            input_data: Explicit workflow channel values; runtime-owned keys are forbidden.
             model: LLM model identifier.
             system_prompt: System prompt for the agent.
             tools: Available tools for the agent.
@@ -275,6 +277,12 @@ class WorkflowExecutionService:
             Response dict (non-streaming) or AsyncGenerator (streaming).
         """
         from hecate.studio.workflows.templates import build_chat_graph, build_three_layer_graph
+
+        if input_data is not None:
+            if agent_mode != "workflow" or not isinstance(input_data, dict):
+                raise ValueError("input_data requires workflow mode and a channel mapping")
+            if any(not isinstance(key, str) or key.startswith(("_", "sys.")) for key in input_data):
+                raise ValueError("input_data cannot override runtime-owned channels")
 
         if messages is None:
             messages = []
@@ -424,6 +432,8 @@ class WorkflowExecutionService:
         )
         runtime = assembled.runtime
         initial_input = assembled.initial_input
+        if input_data is not None:
+            initial_input = {**initial_input, **input_data}
         evidence_tracker = assembled.evidence_tracker
 
         # Native continuation (step6d): re-drive an interrupted attempt on the

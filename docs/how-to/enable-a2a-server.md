@@ -51,8 +51,9 @@ A2A_AGENT_NAME=Hecate Agent
 A2A_AUTH_MODE=api_key
 
 # Workspace the A2A server executes agents from. The executor refuses to
-# run unless this workspace contains exactly one non-deleted agent — it
-# never falls back to a global first-agent pick (that would let an A2A
+# run unless this workspace contains one live agent, or a unique agent
+# with a live default deployment. Multiple default agents refuse execution.
+# It never falls back to a global first-agent pick (that would let an A2A
 # caller cross workspace/tenant boundaries). Required: A2A tasks fail
 # with "No agent configured for A2A execution" until this is set.
 A2A_AGENT_WORKSPACE_ID=00000000-0000-0000-0000-000000000000

@@ -265,6 +265,115 @@ def _tool_events(store):
     ]
 
 
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("repair_succeeds", [False, True])
+async def test_output_validation_controls_run_projection(
+    client, db_session, llm, tool_executor, monkeypatch, stream, repair_succeeds
+):
+    """Final validation stays inside the correlated execution boundary."""
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0), with_deployment=True)
+    repaired_content = '{"answer": 5}' if repair_succeeds else "still invalid"
+
+    async def repair(**kwargs):
+        assert kwargs["tools"] is None
+        return SimpleNamespace(
+            content=repaired_content, model="stub-model", tool_calls=None, finish_reason="stop", usage={}
+        )
+
+    monkeypatch.setattr(llm, "chat", repair)
+    response = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "add 2 and 3"}],
+            "stream": stream,
+            "output_schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "number"}},
+                "required": ["answer"],
+            },
+        },
+    )
+    if stream:
+        frames = _parse_sse(response.text)
+        correlation = next(
+            frame.get("hecate_correlation") or frame.get("correlation")
+            for frame in frames
+            if "hecate_correlation" in frame or "correlation" in frame
+        )
+        if not repair_succeeds:
+            assert frames[-1]["error"]["reason_category"] == "invalid_output"
+    else:
+        assert response.status_code == (200 if repair_succeeds else 409)
+        payload = response.json()
+        correlation = payload.get("hecate_correlation") or payload["correlation"]
+        if not repair_succeeds:
+            assert payload["error"]["reason_category"] == "invalid_output"
+
+    assert correlation["status"] == "registered"
+    run = await TaskRunRegistry(db_session).get_run(uuid.UUID(correlation["run_ref"]["id"]), uuid.UUID(int=0))
+    if repair_succeeds:
+        assert run.projection == {"state": "succeeded", "summary": repaired_content}
+    else:
+        assert run.projection == {"state": "failed", "error_category": "invalid_output"}
+    assert tool_executor.calls == [(TOOL_NAME, {"a": 2, "b": 3})]
+
+
+async def test_streamed_run_has_summary_and_persisted_envelopes(client, db_session, llm, tool_executor):
+    """The real HTTP stream persists once and finalizes its content summary."""
+    from hecate.contracts.execution.references import BackendRef
+    from hecate.execution.entry_events import RunEventMapper
+
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0), with_deployment=True)
+    response = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={"messages": [{"role": "user", "content": "add 2 and 3"}], "stream": True},
+    )
+    assert response.status_code == 200
+    first_chunk = _parse_sse(response.text)[0]
+    assert first_chunk["object"] == "chat.completion.chunk"
+    assert first_chunk["model"] == "stub-model"
+    assert first_chunk["id"].startswith("chatcmpl-")
+    assert isinstance(first_chunk["created"], int)
+    correlation = first_chunk["hecate_correlation"]
+    run = await TaskRunRegistry(db_session).get_run(uuid.UUID(correlation["run_ref"]["id"]), uuid.UUID(int=0))
+    assert run.projection == {"state": "succeeded", "summary": "The answer is 5"}
+    reader = RunEventMapper(
+        BackendRef.from_dict(correlation["task_ref"]),
+        BackendRef.from_dict(correlation["run_ref"]),
+        event_store=app.state.event_store,
+    )
+    page = await reader.read_events()
+    assert page.events
+    assert [envelope.source_sequence for envelope in page.events] == list(range(len(page.events)))
+    assert "".join(e.payload.get("content", "") for e in page.events if e.payload.get("type") == "message") == (
+        "The answer is 5"
+    )
+
+
+@pytest.mark.parametrize("with_deployment", [False, True])
+async def test_non_streaming_cancel_preserves_correlation(
+    client, db_session, llm, tool_executor, monkeypatch, with_deployment
+):
+    """Stop conversion retains either registered refs or the missing marker."""
+    import hecate.channel.api.v1.chat as chat_module
+
+    async def cancelled():
+        return True
+
+    monkeypatch.setattr(chat_module, "_disconnect_check", lambda request: cancelled)
+    monkeypatch.setattr("hecate.channel.api.v1.agents._disconnect_check", lambda request: cancelled)
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0), with_deployment=with_deployment)
+    response = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions", json={"messages": [{"role": "user", "content": "cancel"}]}
+    )
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["error"]["reason_category"] == "cancelled"
+    assert payload["correlation"]["status"] == ("registered" if with_deployment else "missing")
+    assert "task_ref" in payload["correlation"]
+    assert tool_executor.calls == []
+
+
 # --- G3 6.1: real HTTP streaming / non-streaming multi-round ----------------
 
 
