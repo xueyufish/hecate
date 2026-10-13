@@ -51,4 +51,6 @@
 
 环境使用 worktree 的 Python 3.12 venv；已安装仓库声明的 Runner、Feishu、Slack workspace 包，以消除收集缺依赖。首次宽回归失败已调查并修正 callback fixture 竞态与 timing 测试的不确定性，最终重新执行全范围通过。
 
-修正位于 `feat/step5d-review-hardening` worktree。尚未提交、推送或归档。
+GitHub Actions 后续发现 S12 流式场景解析了入口新增的 metadata-only correlation frame；该帧合法地带有 `choices=[]`，旧断言直接访问 `choices[0]`。测试现仅消费有内容的 choice 帧，并在 tasks.md 登记为 3.3。
+
+修正位于 `feat/step5d-review-hardening`，主修正 commit 已推送；OpenSpec change 尚未归档。

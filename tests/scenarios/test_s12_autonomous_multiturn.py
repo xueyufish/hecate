@@ -130,7 +130,12 @@ async def test_s12_feedback_driven_multiturn_structured(
             for line in response.text.splitlines()
             if line.startswith("data: ") and line != "data: [DONE]"
         ]
-        content = "".join(chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or "" for chunk in chunks)
+        # The entry contract emits a metadata-only correlation frame with an
+        # empty ``choices`` list before content frames.  Only content frames
+        # contribute to the reconstructed assistant response.
+        content = "".join(
+            chunk["choices"][0].get("delta", {}).get("content", "") or "" for chunk in chunks if chunk.get("choices")
+        )
         assert response.text.endswith("data: [DONE]\n\n")
     else:
         content = response.json()["choices"][0]["message"]["content"]
