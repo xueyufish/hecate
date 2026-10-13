@@ -120,8 +120,12 @@ async def test_run_no_version(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_result_has_timing(db_session: AsyncSession) -> None:
-    """Test that result includes timing information."""
+async def test_run_result_has_timing(db_session: AsyncSession, monkeypatch) -> None:
+    """Verify elapsed milliseconds without depending on wall-clock speed."""
+    from types import SimpleNamespace
+
+    ticks = iter([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    monkeypatch.setattr("hecate.studio.workflows.test_runner.time", SimpleNamespace(monotonic=lambda: next(ticks)))
     wf_id = await _create_workflow_with_dsl(db_session, LINEAR_DSL)
     runner = WorkflowTestRunner(db_session)
 
@@ -131,12 +135,12 @@ async def test_run_result_has_timing(db_session: AsyncSession) -> None:
         mock=True,
     )
 
-    assert result.total_duration_ms > 0
+    assert result.total_duration_ms == 5000
     assert result.run_id is not None
 
     for node in result.nodes:
         if node.status == "completed":
-            assert node.duration_ms >= 0
+            assert node.duration_ms == 1000
 
 
 @pytest.mark.asyncio

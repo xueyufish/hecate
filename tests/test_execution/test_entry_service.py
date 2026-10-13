@@ -197,7 +197,8 @@ async def test_per_request_correlation_without_deployment_still_records_task(db_
         messages=[{"role": "user", "content": "hello"}],
         correlation=CorrelationInput(workspace_id=workspace_id, agent_id=agent.id),
     )
-    assert outcome.correlated
+    assert not outcome.correlated
+    assert outcome.correlation.status == "missing"
     assert outcome.correlation.task_ref is not None
     assert outcome.correlation.run_ref is None
     assert "no default deployment" in outcome.correlation.reason

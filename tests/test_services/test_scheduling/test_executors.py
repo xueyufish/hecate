@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -249,6 +250,7 @@ class TestWorkflowExecutor:
         execute_kwargs = captured["execute"]
         assert execute_kwargs["agent_mode"] == "workflow"
         assert execute_kwargs["workflow_id"] == workflow_id
+        assert execute_kwargs["input_data"] == {"topic": "reorder"}
         assert execute_kwargs["workspace_id"] == uuid.UUID(int=0)
         assert execute_kwargs["correlation"].workspace_id == uuid.UUID(int=0)
         assert execute_kwargs["session_id"] is not None
@@ -295,3 +297,95 @@ class TestWorkflowExecutor:
         source = inspect.getsource(WorkflowExecutor)
         assert "WorkflowTestRunner" not in source
         assert "test_runner" not in source
+
+
+async def test_real_scheduled_workflow_preserves_business_channels(db_session, default_workspace, monkeypatch):
+    """The real graph branches on business input, with no service replacement."""
+    from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+    from hecate.runtime.eventstore import InMemoryEventStore
+    from hecate.runtime.session_state import InMemorySessionStateStore
+
+    workflow = WorkflowModel(name="channel-driven", workspace_id=default_workspace.id, execution_mode="task")
+    db_session.add(workflow)
+    await db_session.flush()
+    db_session.add(
+        WorkflowVersionModel(
+            workflow_id=workflow.id,
+            version=1,
+            graph_dsl={
+                "version": "1.0",
+                "name": "channel-driven",
+                "state": {
+                    "messages": {"type": "topic", "reduce": "append"},
+                    "topic": {"type": "last_value"},
+                },
+                "nodes": {
+                    "choose": {"type": "condition", "config": {"expression": "topic == 'reorder'"}},
+                    "accepted": {
+                        "type": "variable-set",
+                        "config": {
+                            "variable_name": "messages",
+                            "value": [{"role": "assistant", "content": "accepted"}],
+                        },
+                    },
+                    "rejected": {
+                        "type": "variable-set",
+                        "config": {
+                            "variable_name": "messages",
+                            "value": [{"role": "assistant", "content": "rejected"}],
+                        },
+                    },
+                },
+                "edges": [{"source": "choose", "target": {"true": "accepted", "false": "rejected"}}],
+                "entry": "choose",
+            },
+        )
+    )
+    await db_session.flush()
+    store = InMemoryEventStore()
+    monkeypatch.setattr("hecate.core.composition.entry_assembly.get_shared_event_store", lambda: store)
+    monkeypatch.setattr(
+        "hecate.core.composition.entry_assembly.get_shared_session_state_store", lambda: InMemorySessionStateStore()
+    )
+    input_data = {"messages": [{"role": "user", "content": "original input"}], "topic": "reorder"}
+    with patch("hecate.core.database.async_session_factory", _session_factory(db_session)):
+        result = await WorkflowExecutor().execute(
+            uuid.uuid4(), {"workflow_id": str(workflow.id), "input_data": input_data}, workspace_id=default_workspace.id
+        )
+    assert result["status"] == "success", result
+    assert result["result"]["content"] == "accepted"
+    correlation = result["result"]["correlation"]
+    assert correlation["status"] == "missing"
+    assert "task_ref" in correlation
+    assert "run_ref" not in correlation
+    task = await db_session.get(TaskModel, uuid.UUID(correlation["task_ref"]["id"]))
+    assert task.workspace_id == default_workspace.id
+    all_events = [event for events in store._store.values() for event in events]
+    assert any(event.payload.get("channel") == "topic" for event in all_events)
+
+
+async def test_scheduled_workflow_rejects_foreign_workspace_before_dispatch(db_session, default_workspace):
+    """Foreign and nonexistent targets produce the same response, without dispatch."""
+    from hecate.models.workflow import WorkflowModel
+
+    foreign = WorkflowModel(name="foreign private workflow", workspace_id=uuid.uuid4())
+    db_session.add(foreign)
+    await db_session.flush()
+    with (
+        patch("hecate.core.database.async_session_factory", _session_factory(db_session)),
+        patch("hecate.execution.entry_service.EntryExecutionService") as entry,
+    ):
+        result = await WorkflowExecutor().execute(
+            uuid.uuid4(), {"workflow_id": str(foreign.id)}, workspace_id=default_workspace.id
+        )
+    assert result == {"status": "failed", "error": f"Workflow {foreign.id} not found"}
+    entry.assert_not_called()
+
+
+@pytest.mark.parametrize("key", ["_user_id", "_tools", "sys.execution_mode"])
+async def test_workflow_input_cannot_override_runtime_context(key):
+    from hecate.studio.workflows.execution_service import WorkflowExecutionService
+
+    service = WorkflowExecutionService(port=None)
+    with pytest.raises(ValueError, match="runtime-owned"):
+        await service.execute(agent_mode="workflow", input_data={key: "untrusted"})
