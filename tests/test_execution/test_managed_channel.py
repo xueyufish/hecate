@@ -259,6 +259,111 @@ async def test_delivery_queue_pull_accept_reconciliation(client: AsyncClient, db
     assert conflict.status_code == 409
 
 
+async def test_config_drift_rejects_new_work_but_not_events(client: AsyncClient, db_session: AsyncSession, secrets):
+    """Expected-configuration gate (I-Cb): an operator-refreshed fingerprint
+    arms the work-delivery boundary — a drifted (or silent) host gets no
+    deliveries/commands/leases, while evidence upload stays ungated."""
+
+    await _seed_workspace(db_session)
+    await _enroll_host(client, db_session)
+    credential = await _host_credential(client)
+    headers = _auth_header(credential)
+
+    registry = TrustRootRegistry(db_session)
+    await registry.refresh_config_fingerprint(WS, ROOT_NAME, "expected-fp")
+    await db_session.commit()
+
+    ok = await client.get("/managed/host/pull?cursor=0&config_fingerprint=expected-fp", headers=headers)
+    assert ok.status_code == 200
+    drift = await client.get("/managed/host/pull?cursor=0&config_fingerprint=stale-fp", headers=headers)
+    assert drift.status_code == 409
+    assert drift.json()["detail"]["error"]["code"] == "config-drift"
+    silent = await client.get("/managed/host/pull?cursor=0", headers=headers)
+    assert silent.status_code == 409
+
+    events = await client.post(
+        "/managed/host/events",
+        json={"local_task_ref": {"issuer_domain": "host", "id": "missing"}, "envelopes": []},
+        headers=headers,
+    )
+    assert events.status_code != 409 or events.json()["detail"]["error"]["code"] != "config-drift"
+
+
+async def test_config_drift_blocks_accept_boundary(client: AsyncClient, db_session: AsyncSession, secrets):
+    """A drifted host cannot turn a pulled delivery into accepted work."""
+
+    await _seed_workspace(db_session)
+    info = await _enroll_host(client, db_session)
+    credential = await _host_credential(client)
+    headers = _auth_header(credential)
+
+    registry = TrustRootRegistry(db_session)
+    await registry.refresh_config_fingerprint(WS, ROOT_NAME, "expected-fp")
+    await db_session.commit()
+
+    from hecate.execution.managed_channel import ManagedDeliveryService
+
+    platform_task_ref = {"issuer_domain": "hecate", "id": str(uuid.uuid4())}
+    platform_run_ref = {"issuer_domain": "hecate", "id": str(uuid.uuid4())}
+    async with test_session_factory() as session:
+        service = ManagedDeliveryService(session)
+        await service.queue_delivery(
+            workspace_id=WS,
+            enrollment_id=uuid.UUID(info["enrollment_id"]),
+            delivery_id=uuid.uuid4(),
+            task_ref=platform_task_ref,
+            run_ref=platform_run_ref,
+            input_payload={"messages": [{"role": "user", "content": "go"}]},
+        )
+        await session.commit()
+
+    pulled = await client.get("/managed/host/pull?cursor=0&config_fingerprint=expected-fp", headers=headers)
+    assert pulled.status_code == 200
+    delivery_row_id = pulled.json()["deliveries"][0]["delivery_row_id"]
+    local_task_ref = {"issuer_domain": "host", "id": str(uuid.uuid4())}
+    local_run_ref = {"issuer_domain": "host", "id": str(uuid.uuid4())}
+
+    drifted = await client.post(
+        "/managed/host/accept",
+        json={
+            "delivery_row_id": delivery_row_id,
+            "local_task_ref": local_task_ref,
+            "local_run_ref": local_run_ref,
+            "config_fingerprint": "stale-fp",
+        },
+        headers=headers,
+    )
+    assert drifted.status_code == 409
+    assert drifted.json()["detail"]["error"]["code"] == "config-drift"
+
+    matched = await client.post(
+        "/managed/host/accept",
+        json={
+            "delivery_row_id": delivery_row_id,
+            "local_task_ref": local_task_ref,
+            "local_run_ref": local_run_ref,
+            "config_fingerprint": "expected-fp",
+        },
+        headers=headers,
+    )
+    assert matched.status_code == 200
+
+
+async def test_config_gate_disarmed_without_operator_refresh(client: AsyncClient, db_session: AsyncSession, secrets):
+    """Roots provisioned before the gate (or never refreshed) keep the gate
+    disarmed: pulls pass with or without a reported fingerprint."""
+
+    await _seed_workspace(db_session)
+    await _enroll_host(client, db_session)
+    credential = await _host_credential(client)
+    headers = _auth_header(credential)
+
+    bare = await client.get("/managed/host/pull?cursor=0", headers=headers)
+    assert bare.status_code == 200
+    reported = await client.get("/managed/host/pull?cursor=0&config_fingerprint=whatever", headers=headers)
+    assert reported.status_code == 200
+
+
 async def test_projection_deduplicates_and_maps_to_platform_run(client: AsyncClient, db_session: AsyncSession, secrets):
     await _seed_workspace(db_session)
     info = await _enroll_host(client, db_session)

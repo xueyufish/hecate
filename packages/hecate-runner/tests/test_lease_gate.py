@@ -11,7 +11,17 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from hecate_durable.contracts.credentials import CredentialError, lease_claims
-from hecate_runner.managed import LeaseGate
+from hecate_governance.clock import TimeAnchor, TrustedClock
+from hecate_runner.managed import LeaseGate, LeaseRefusedError
+
+
+class _Posture:
+    """Duck-typed managed lease posture (the profile's LeasePolicyConfig)."""
+
+    def __init__(self, expected_policy_version=None, max_staleness_seconds=None):
+        self.expected_policy_version = expected_policy_version
+        self.max_staleness_seconds = max_staleness_seconds
+
 
 SECRET = b"lease-gate-secret"
 ISSUER = "lease-issuer"
@@ -167,3 +177,177 @@ async def test_nonce_write_failure_refuses_authorization(tmp_path):
     gate.update(_lease(scope=["domain_a"]))
     with pytest.raises(CredentialError, match="persistence failed"):
         await gate.check()
+
+
+async def test_policy_version_mismatch_refused_immediately():
+    """A lease minted under an unadopted operator policy is structurally
+    invalid: the gate refuses with LeaseRefusedError (immediate, no renewal
+    wait) and the nonce stays unconsumed."""
+
+    now = {"t": datetime.now(UTC)}
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: now["t"],
+        lease_policy=_Posture(expected_policy_version="mp-2026.10"),
+    )
+    gate.update(_lease(policy_version="mp-2026.09", scope=["domain_a"]))
+    with pytest.raises(LeaseRefusedError, match="policy version"):
+        await gate.check()
+    # The refused lease was not burned: adopting the version admits it.
+    gate2 = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: now["t"],
+        lease_policy=_Posture(expected_policy_version="mp-2026.10"),
+    )
+    gate2.update(_lease(policy_version="mp-2026.10", scope=["domain_a"]))
+    claims = await gate2.check()
+    assert claims.policy_version == "mp-2026.10"
+
+
+async def test_legacy_lease_without_version_refused_under_adopted_policy():
+    now = {"t": datetime.now(UTC)}
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: now["t"],
+        lease_policy=_Posture(expected_policy_version="mp-2026.10"),
+    )
+    gate.update(_lease(scope=["domain_a"]))  # no policy_version claim
+    with pytest.raises(LeaseRefusedError, match="'none'"):
+        await gate.check()
+
+
+async def test_no_policy_config_keeps_step6_posture():
+    """Without a lease_policy block the gate validates expiry only — the
+    step6 semantics the managed assembly opt into explicitly."""
+
+    now = {"t": datetime.now(UTC)}
+    gate = LeaseGate(SECRET, deployment_domain=DEPLOYMENT, clock=lambda: now["t"])
+    gate.update(_lease(scope=["domain_a"]))
+    claims = await gate.check()
+    assert claims.policy_version is None
+
+
+async def test_staleness_window_refuses_before_expiry():
+    """Offline validity = min(exp, iat + staleness): the lease is not yet
+    expired but the staleness deadline passed — refused, nonce unburned."""
+
+    moment = datetime(2026, 10, 13, 12, 0, 0, tzinfo=UTC)
+    lease = lease_claims(
+        SECRET,
+        iss=ISSUER,
+        deployment_domain=DEPLOYMENT,
+        sub="host-1",
+        ttl_seconds=3600,
+        scope=["domain_a"],
+        now=moment,
+    )[0]
+    mono = {"t": 1000.0}
+    # The anchor is stamped at install; trusted time judges the window.
+    clock = TrustedClock(now_fn=lambda: moment, monotonic_fn=lambda: mono["t"])
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: moment,
+        lease_policy=_Posture(expected_policy_version=None, max_staleness_seconds=60.0),
+        trusted_clock=clock,
+    )
+    gate.update(lease)
+    # 30s in: inside the window.
+    clock_now = {"t": moment + timedelta(seconds=30)}
+    gate._trusted_clock = TrustedClock(now_fn=lambda: clock_now["t"], monotonic_fn=lambda: mono["t"] + 30.0)
+    claims = await gate.check()
+    assert claims.iat is not None
+
+
+async def test_staleness_window_exhausted_refuses():
+    moment = datetime(2026, 10, 13, 12, 0, 0, tzinfo=UTC)
+    lease = lease_claims(
+        SECRET,
+        iss=ISSUER,
+        deployment_domain=DEPLOYMENT,
+        sub="host-1",
+        ttl_seconds=3600,
+        scope=["domain_a"],
+        now=moment,
+    )[0]
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: moment,
+        lease_policy=_Posture(expected_policy_version=None, max_staleness_seconds=60.0),
+        trusted_clock=TrustedClock(now_fn=lambda: moment + timedelta(seconds=90), monotonic_fn=lambda: 1090.0),
+    )
+    gate.update(lease)
+    with pytest.raises(CredentialError, match="window exhausted"):
+        await gate.check()
+
+
+async def test_untrusted_time_refuses_window_judgment():
+    """A rolled-back wall clock must not extend the managed window: the
+    gate refuses the deadline judgment instead of trusting the clock."""
+
+    moment = datetime(2026, 10, 13, 12, 0, 0, tzinfo=UTC)
+    lease = lease_claims(
+        SECRET,
+        iss=ISSUER,
+        deployment_domain=DEPLOYMENT,
+        sub="host-1",
+        ttl_seconds=3600,
+        scope=["domain_a"],
+        policy_version="mp-2026.10",
+        now=moment,
+    )[0]
+    # The anchor is stamped at install; the wall clock then rolls back
+    # beyond tolerance — the gate refuses the deadline judgment instead of
+    # trusting a clock that moved backwards relative to its own anchor.
+    wall = {"t": moment}
+    clock = TrustedClock(now_fn=lambda: wall["t"], monotonic_fn=lambda: 1000.0)
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: wall["t"],
+        lease_policy=_Posture(expected_policy_version="mp-2026.10", max_staleness_seconds=3600.0),
+        trusted_clock=clock,
+    )
+    gate.update(lease)
+    wall["t"] = moment - timedelta(hours=2)
+    with pytest.raises(CredentialError, match="time cannot be trusted"):
+        await gate.check()
+
+
+async def test_new_install_rebuilds_the_trusted_anchor():
+    """A restart empties the gate; the next successful pull installs a new
+    lease and re-anchors trusted time — the profile never judges a window
+    against an anchor it did not observe."""
+
+    moment = datetime(2026, 10, 13, 12, 0, 0, tzinfo=UTC)
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: moment,
+        lease_policy=_Posture(expected_policy_version="mp-2026.10", max_staleness_seconds=60.0),
+    )
+    assert gate.anchor() is None and gate.facts() is None
+    gate.update(_lease(policy_version="mp-2026.10", scope=["domain_a"]))
+    anchor = gate.anchor()
+    assert isinstance(anchor, TimeAnchor)
+    facts = gate.facts()
+    assert facts is not None and facts.policy_version == "mp-2026.10"
+    # A legacy (never-verified) install clears both: no anchor, no facts.
+    # The invalid lease is minted relative to the gate's frozen clock so it
+    # genuinely fails verification there.
+    invalid = lease_claims(
+        SECRET,
+        iss=ISSUER,
+        deployment_domain=DEPLOYMENT,
+        sub="host-1",
+        ttl_seconds=-10,
+        scope=["domain_a"],
+        policy_version="mp-2026.10",
+        now=moment,
+    )[0]
+    gate.update(invalid)
+    assert gate.anchor() is None and gate.facts() is None

@@ -382,7 +382,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **未完成的治理与认证：**
 
-- [ ] step7：合法审批、工具级动作范围、撤权/断连与真实时钟偏移窗口；跟踪平台 EventStore 迟到追加的 fencing 缺口，不以租约续租或 PG 矩阵完成代替修复证据。
+- [ ] step7：工具级动作范围的策略认证、撤权/断连窗口与真实时钟偏移的实钟认证（陈旧窗口与回拨判定的确定性分支已由 `managed-lease-profile` 交付）；平台 EventStore 位置唯一约束与并发分配收敛已交付（SQLite 验证），PostgreSQL 进程级并发认证随 CI 条件作业执行。
 - [ ] step7/10：本地证据失败时只读继续策略、中心缓冲与补传限额；按实际范围完成 SC03/SC04/SC05/SC06 整场景认证，不仅翻转技术切片。
 
 **落点与迁移：**`hecate-durable` 管本地存储/worker，Runner 管宿主装配，`execution/` 管登记、投影与命令；kernel 不导入平台存储。升级前 drain 并迁移 schema，旧 outbox 重放由投影去重。缺定义摘要的历史非终态任务不自动恢复，不以当前定义补签；保留已消费 token/nonce 和动作来源，降级不得重开已完成或待对账动作。
@@ -391,7 +391,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **目标：**先完成内置执行与独立宿主必需的身份、动作授权、审批、凭据及预算闭环，与 step5e 并行。受管断连策略随 I-Cb 验证；新协议及外部 Agent 集成暂缓，先验证主流程与已有入口。
 
-**状态：本地治理切片已交付（#245，change `runtime-independent-governance`，含评审修复与 CI 修复）：统一受控动作边界贯通平台与独立宿主（readonly 不豁免）、审批绑定与本地审批权威、本地 policy profile 与撤销、预算预留/结算与凭据引用、SC03 场景翻转为 implemented 并登记支持矩阵。受管授权租约 profile 认证（I-Cb）、Sandbox 包装与旁路封闭验证、真实模型多轮验收（step5e）仍开放；交付范围与未验证项见该 change 的 support-matrix.md 与四份新主 spec。**
+**状态：本地治理切片已交付（#245，change `runtime-independent-governance`）：统一受控动作边界贯通平台与独立宿主（readonly 不豁免）、审批绑定与本地审批权威、本地 policy profile 与撤销、预算预留/结算与凭据引用、SC03 场景翻转为 implemented 并登记支持矩阵。受管授权租约 profile 切片已交付（change `managed-lease-profile`）：租约签名集扩展（policy_version/iat 参与 HMAC）、受管 profile 事实门与可信时间陈旧窗口（时钟回拨拒绝、重启重锚）、引擎本地审批绑定断连桥（不消耗租约 nonce）、重连期望配置指纹门（pull/accept 比对、证据补传不受阻）、平台事件位置唯一约束与分配冲突收敛（含历史同位修复迁移）。I-Cb 里程碑其余组成（step11 中心发布、step14 平台最小视图、step16 断连故障集）、Sandbox 包装与旁路封闭验证、真实模型多轮验收（step5e）仍开放；交付范围与未验证项见各 change 的 support-matrix.md 与对应主 spec。**
 
 **操作：**
 

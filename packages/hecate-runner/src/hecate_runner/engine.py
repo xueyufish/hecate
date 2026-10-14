@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 from hecate_durable.contracts.credentials import CredentialError
+from hecate_durable.contracts.durable import canonical_request_digest
 from hecate_durable.contracts.references import BackendRef
 from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_runtime.action_ledger import ActionLedgerHook, tool_arguments_digest
@@ -57,7 +58,7 @@ from .durable import (
     record_outcome_async,
 )
 from .evidence import OUTCOME_FAILED, EvidenceStore
-from .managed import MANAGED_ISSUER, LeaseGate, ManagedIdentity
+from .managed import MANAGED_ISSUER, LeaseGate, LeaseRefusedError, ManagedIdentity
 from .profile import BUILTIN_TOOL_SCHEMAS, Profile
 
 # step7 2.5: dispatch outcome status → governance error category. The four
@@ -225,6 +226,7 @@ class ExecutionEngine:
         dispatch_binding: str | None = None,
         lease_refresh_wait_seconds: float = _LEASE_REFRESH_WAIT_SECONDS,
         approval_gate: Any = None,
+        approval_finder: Any = None,
         budget_gate: Any = None,
         governance_service: Any = None,
     ) -> None:
@@ -244,6 +246,10 @@ class ExecutionEngine:
         # approval_ref) -> bool. Injected by the local policy assembly (5.x);
         # None keeps the step6 grant semantics unchanged.
         self._approval_gate = approval_gate
+        # step7 I-Cb: optional approval locator — ActionRequest -> approval_ref
+        # | None. Lets a valid pre-approved binding authorize a protected
+        # dispatch before the lease gate (disconnect bridge).
+        self._approval_finder = approval_finder
         # step7 4.2: optional budget gate for metered model calls.
         self._budget_gate = budget_gate
         # step7 5.2: optional local governance service (shared governance
@@ -508,17 +514,24 @@ class ExecutionEngine:
     async def _lease_refusal(self, state: RunState, tool_name: str, arguments: dict) -> dict | None:
         """Lease-gate one managed protected dispatch; ``None`` = authorized.
 
-        Verifies the CURRENT lease (signature, expiry, deployment binding,
-        unconsumed nonce) and that the requested data domain is inside the
-        lease's scope. Each lease authorizes exactly one protected
-        dispatch, so a multi-action run consumes the current lease and the
-        NEXT dispatch waits (bounded) for the channel's next pull to
-        install a fresh one — "not yet refreshed" is transient, not a
-        denial. After the wait budget the refusal is an explicit,
-        evidenced denial with zero business side effects; nonce consumption
-        on a scope denial is deliberate conservatism — a used lease
-        authorizes nothing further.
+        Authorization order (step7 I-Cb): a valid local approval binding
+        authorizes first — it consumes the binding's one-time CAS and never
+        the lease nonce, bridging disconnects for pre-approved actions.
+        Otherwise the CURRENT lease is verified (signature, expiry,
+        deployment binding, unconsumed nonce) and the requested data domain
+        must be inside the lease's scope. Each lease authorizes exactly one
+        protected dispatch, so a multi-action run consumes the current
+        lease and the NEXT dispatch waits (bounded) for the channel's next
+        pull to install a fresh one — "not yet refreshed" is transient, not
+        a denial. Structural refusals (identity/policy-version mismatch)
+        deny immediately: no pull will heal them. After the wait budget the
+        refusal is an explicit, evidenced denial with zero business side
+        effects; nonce consumption on a scope denial is deliberate
+        conservatism — a used lease authorizes nothing further.
         """
+
+        if await self._authorize_via_local_approval(state, tool_name, arguments):
+            return None
 
         requested_domain = arguments.get("domain")
         denial: dict | None = None
@@ -537,6 +550,10 @@ class ExecutionEngine:
                     }
                 else:
                     return None
+            except LeaseRefusedError as exc:
+                # Structural: waiting cannot heal it — deny now.
+                denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: {exc}"}
+                break
             except CredentialError as exc:
                 denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: {exc}"}
                 if time.monotonic() < deadline:
@@ -552,6 +569,55 @@ class ExecutionEngine:
         )
         self.record_tool_result(state, tool_name, denial)
         return denial
+
+    async def _authorize_via_local_approval(self, state: RunState, tool_name: str, arguments: dict) -> bool:
+        """True when a valid local approval binding authorizes this dispatch.
+
+        The finder locates an unconsumed binding matching the verified
+        action request (subject, tool, parameter digest); the approval gate
+        is the authority — it re-validates the binding under trusted time
+        and consumes it atomically. Authorization is evidenced with its
+        source (``local_approval``); the lease nonce is not consumed, so
+        this path bridges disconnects without spending lease validity.
+        """
+
+        if self._approval_finder is None:
+            return False
+        from hecate_governance.action import target_resources_for
+        from hecate_governance.approval import ActionRequest
+        from hecate_governance.principal import ActionPrincipal, PrincipalSource
+
+        digest = canonical_request_digest(arguments)
+        principal = ActionPrincipal.from_verified_claims(
+            {"sub": state.principal}, source=PrincipalSource.RUNNER_LOCAL, domains=tuple(state.domains)
+        )
+        persisted = self._durable.store.get_task_input(state.task_ref) or {} if self._durable and state.task_ref else {}
+        origins = persisted.get("_action_origins") or {}
+        request = ActionRequest(
+            invocation_id=action_key_for(origins.get(tool_name, state.run_id), tool_name),
+            principal_fingerprint=principal.fingerprint(),
+            tool_name=tool_name,
+            arguments_digest=digest,
+            target_resources=target_resources_for(arguments),
+            domains=tuple(state.domains),
+            task_scope=state.task_ref.id if state.task_ref else None,
+        )
+        approval_ref = await self._approval_finder(request)
+        if approval_ref is None:
+            return False
+        if self._approval_gate is None or not await self._approval_gate(approval_ref, request):
+            return False
+        try:
+            self._evidence.append(
+                "approval_basis",
+                state.principal,
+                state.run_id,
+                "granted",
+                {"tool": tool_name, "approval_ref": approval_ref, "source": "local_approval"},
+            )
+        except Exception:  # noqa: BLE001 — evidence failure handled by its own gate
+            logger.debug("approval basis evidence failed", exc_info=True)
+        return True
 
     async def _consume_wake_grant(self, state: RunState, tool_name: str, digest: str, arguments: dict) -> bool:
         """True when the persisted input carries a matching one-shot grant.

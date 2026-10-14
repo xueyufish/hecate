@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Index, Integer, String, Text
+from sqlalchemy import Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -32,9 +32,10 @@ class PlatformEventModel(BaseModel):
     - **kind** — ``event`` or ``gap`` (explicit gap markers survive).
     - **ref columns** — task/run ``BackendRef`` split into issuer domain
       + id for indexed lookup; the envelope keeps the full refs.
-    - **source_sequence** — per-run monotonically increasing sequence as
-      emitted by the writer; cursor reads resume from it. Readers never
-      rebuild a global order from it.
+    - **source_sequence** — per-run arrival-order label as allocated by the
+      writer; cursor reads resume from it (``WHERE source_sequence > after``),
+      so a hole means a lost allocation race, never a lost event. Readers
+      never rebuild a global order from it.
     - **actor / source** — governance profile fields; nullable at the
       column level because run-stream envelopes may omit them, but the
       governance emitter validates them non-empty before persisting.
@@ -45,12 +46,16 @@ class PlatformEventModel(BaseModel):
     __tablename__ = "platform_events"
     __table_args__ = (
         Index("uq_platform_events_event_id", "event_id", unique=True),
-        Index(
-            "ix_platform_events_run_sequence",
+        # Position uniqueness (step7 managed slice): one row per (workspace,
+        # run, sequence). Concurrent writers collide explicitly instead of
+        # silently co-locating; a sequence hole means a lost allocation race
+        # (arrival-order labels), never a lost event.
+        UniqueConstraint(
             "workspace_id",
             "run_issuer_domain",
             "run_ref_id",
             "source_sequence",
+            name="uq_platform_events_run_position",
         ),
         Index("ix_platform_events_task_ref", "task_issuer_domain", "task_ref_id"),
     )

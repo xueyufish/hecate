@@ -307,13 +307,17 @@ sc_scenarios:
     tier: 1
     responsible_step: 4/6/7
     blocked_by: runner managed dispatch loop, action-time lease enforcement and process restart acceptance
-    implemented_slices: [delivery_acceptance, event_projection, lease_gate, managed_loop, action_authorization, managed_wake_chain, managed_command_receipt]
+    implemented_slices: [delivery_acceptance, event_projection, lease_gate, managed_loop, action_authorization, managed_wake_chain, managed_command_receipt, managed_lease_profile, config_drift_gate]
     gaps: >-
       The managed wake-chain and reconnect suites run on both SQLite and
       PostgreSQL in CI (step6-pg-process-matrix job, per-test schema
-      isolation on the shared database). Connection-loss stale window and
-      legal approval authority still need step7; the central buffer /
-      backlog-limit policy remains step10.
+      isolation on the shared database). The managed lease profile
+      (policy version, trusted-time staleness window, local-approval
+      disconnect bridge, expected-configuration gate) is delivered and
+      scenario-covered; disconnect staleness against REAL clock skew,
+      platform EventStore fencing under PostgreSQL concurrency, and the
+      full I-Cb milestone (central release, minimal platform view, the
+      step16 disconnect fault set) remain open.
     assertions: >-
       After re-verifying trust and authorization the host accepts new work;
       historical events are deduplicated on replay; duplicate commands and

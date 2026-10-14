@@ -205,6 +205,45 @@ def subject_fingerprint_for_run(principal: str, domains: tuple[str, ...]) -> str
     ).fingerprint()
 
 
+def make_local_approval_finder(
+    session_factory,
+    *,
+    approvers: Any,
+) -> Callable[[ActionRequest], Any]:
+    """Build the engine's approval locator over the local authority (step7 I-Cb).
+
+    Returns ``async def find(request) -> approval_ref | None``: the ref of
+    an unconsumed, unrevoked, decided-approved binding matching the request
+    (subject fingerprint, tool, parameter digest). The locator only
+    prefilters — the approval gate remains the authority that validates the
+    binding under trusted time and consumes it atomically.
+    """
+
+    async def _find(request: ActionRequest) -> str | None:
+        with session_factory() as session:
+            row = session.execute(
+                select(LocalApprovalRow)
+                .where(
+                    LocalApprovalRow.principal_fingerprint == request.principal_fingerprint,
+                    LocalApprovalRow.tool_name == request.tool_name,
+                    LocalApprovalRow.arguments_digest == request.arguments_digest,
+                    LocalApprovalRow.revoked.is_(False),
+                    LocalApprovalRow.judgment == "approved",
+                    LocalApprovalRow.consumed_by_invocation_id.is_(None),
+                )
+                .order_by(LocalApprovalRow.issued_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            registered = approvers() if callable(approvers) else approvers
+            if registered is not None and row.decided_by not in registered:
+                return None
+            return row.approval_ref
+
+    return _find
+
+
 def make_local_approval_gate(
     session_factory,
     *,

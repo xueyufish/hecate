@@ -36,7 +36,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -84,6 +84,17 @@ def managed_run_ref(delivery_row_id: str) -> BackendRef:
     return BackendRef(RefKind.RUN, MANAGED_ISSUER, f"managed-run-{delivery_row_id}")
 
 
+class LeaseRefusedError(CredentialError):
+    """A lease refusal that waiting cannot heal (managed lease profile).
+
+    Identity/policy-version mismatches are structural: the platform keeps
+    issuing leases the host must refuse, so the dispatch boundary denies
+    immediately instead of burning the bounded renewal wait on a lease no
+    pull will ever fix. Transient refusals (absent/expired lease, consumed
+    nonce) stay plain ``CredentialError`` and keep the renewal-wait path.
+    """
+
+
 class LeaseGate:
     """Host-side authorization gate for managed protected actions.
 
@@ -109,6 +120,8 @@ class LeaseGate:
         workspace_id: str | None = None,
         clock=None,
         nonce_record_path: str | None = None,
+        lease_policy: Any = None,
+        trusted_clock: Any = None,
     ) -> None:
         self._secret = secret
         self._deployment_domain = deployment_domain
@@ -116,6 +129,18 @@ class LeaseGate:
         self._host_id = host_id
         self._workspace_id = workspace_id
         self._clock = clock or (lambda: datetime.now(UTC))
+        # Managed lease profile posture (step7 I-Cb): duck-typed config with
+        # ``expected_policy_version`` / ``max_staleness_seconds``. None keeps
+        # the step6 posture (expiry-only validation, no version check).
+        self._lease_policy = lease_policy
+        # Trusted time for the staleness window: the anchor is stamped when a
+        # verifiable lease is installed and re-stamped by every new install,
+        # so a restart (empty gate) re-anchors at the next successful pull.
+        from hecate_governance.clock import TrustedClock
+
+        self._trusted_clock = trusted_clock or TrustedClock()
+        self._anchor: Any = None
+        self._current_claims: Claims | None = None
         self._consumed: set[str] = set()
         self._nonce_record_path = nonce_record_path
         self._consumed.update(self._load_consumed_nonces())
@@ -138,12 +163,17 @@ class LeaseGate:
             claims = verify_lease(lease, self._secret, deployment_domain=self._deployment_domain, now=self._clock())
         except CredentialError:
             # Legacy posture: install anyway; the dispatch boundary refuses
-            # with the precise verification reason.
+            # with the precise verification reason. No anchor: a lease that
+            # never verified never anchors a validity window.
             self._current = dict(lease)
+            self._current_claims = None
+            self._anchor = None
             return True
         if claims.nonce in self._consumed:
             return False
         self._current = dict(lease)
+        self._current_claims = claims
+        self._anchor = self._trusted_clock.anchor()
         return True
 
     async def check(self) -> Claims:
@@ -160,11 +190,61 @@ class LeaseGate:
                 now=self._clock(),
             )
             self._check_identity(claims)
+            self._check_lease_policy(claims)
             if claims.nonce in self._consumed:
                 raise CredentialError("lease nonce already consumed (replay rejected)")
             self._consumed.add(claims.nonce)
             self._record_consumed_nonce(claims)
             return claims
+
+    def _check_lease_policy(self, claims: Claims) -> None:
+        """Managed lease profile judgments (step7 I-Cb).
+
+        A policy-version mismatch is structural — refused immediately, no
+        renewal wait. The staleness window is judged against trusted time:
+        the deadline is ``iat + max_staleness_seconds``; untrusted time
+        refuses rather than extending the window. Refusals here happen
+        before nonce consumption — a refused lease authorizes nothing and
+        is not burned.
+        """
+
+        policy = self._lease_policy
+        if policy is None:
+            return
+        expected = getattr(policy, "expected_policy_version", None)
+        if expected is not None and claims.policy_version != expected:
+            presented = claims.policy_version or "none"
+            raise LeaseRefusedError(f"lease policy version {presented!r} does not match the adopted {expected!r}")
+        staleness = getattr(policy, "max_staleness_seconds", None)
+        if staleness is None or not claims.iat:
+            return
+        if self._anchor is None:
+            raise CredentialError("no trusted-time anchor for the installed lease")
+        now, untrusted = self._trusted_clock.trusted_now(self._anchor)
+        if untrusted is not None:
+            raise CredentialError(f"time cannot be trusted: {untrusted}")
+        issued = datetime.fromisoformat(claims.iat)
+        if issued.tzinfo is None:
+            issued = issued.replace(tzinfo=UTC)
+        if now >= issued + timedelta(seconds=float(staleness)):
+            raise CredentialError("lease validity window exhausted (staleness deadline passed)")
+
+    def facts(self) -> Any:
+        """Pure-data facts of the current verified lease (profile input).
+
+        ``None`` when no verified lease is installed (legacy-install or
+        empty gate) — the managed profile refuses protected actions on
+        missing facts.
+        """
+
+        from hecate_governance.managed import facts_from_claims
+
+        return facts_from_claims(self._current_claims) if self._current_claims is not None else None
+
+    def anchor(self) -> Any:
+        """The trusted-time anchor stamped at the current lease's install."""
+
+        return self._anchor
 
     @property
     def active(self) -> bool:
@@ -185,7 +265,9 @@ class LeaseGate:
             (claims.tenant, self._workspace_id, "workspace"),
         ):
             if expected is not None and actual != expected:
-                raise CredentialError(f"lease {label} does not match the enrolled host")
+                # Structural mismatch: no pull fixes a wrongly-bound lease,
+                # so the boundary refuses immediately (no renewal wait).
+                raise LeaseRefusedError(f"lease {label} does not match the enrolled host")
 
     def _load_consumed_nonces(self) -> set[str]:
         """Reload persisted consumed nonces, dropping expired entries.
@@ -249,6 +331,7 @@ class ManagedStats:
     lease_gate_refusals: int = 0
     command_effects_uploaded: int = 0
     command_failures: int = 0
+    config_drift_rejections: int = 0
 
 
 class ManagedChannel:
@@ -273,6 +356,7 @@ class ManagedChannel:
         clock=None,
         execution_definition: str | None = None,
         command_handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None,
+        config_fingerprint: Callable[[], str] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._workspace_id = workspace_id
@@ -292,6 +376,11 @@ class ManagedChannel:
         self._managed_domains = tuple(data_domains)
         self._execution_definition = execution_definition
         self._command_handler = command_handler
+        # Local configuration fingerprint provider (step7 I-Cb): reported at
+        # the credential exchange and the work-delivery boundaries so the
+        # platform can compare it against the operator's armed expectation.
+        # The value is always computed host-side; requests never dictate it.
+        self._config_fingerprint = config_fingerprint
         self._transport = transport
         self._clock = clock or (lambda: datetime.now(UTC))
         # The gate is shared with the execution engine when the assembly
@@ -309,6 +398,12 @@ class ManagedChannel:
         self._event_cursors: dict[tuple[str, str], int] = {}
         self._upload_exhausted = False
         self.stats = ManagedStats()
+        # The most recent expected-configuration rejection reason (step7 I-Cb
+        # disconnect posture): the host keeps polling — the operator refreshes
+        # the expectation or fixes the config; a successful channel call
+        # clears the marker. Drift stops new work via the platform gate and
+        # the lease's natural expiry, never a local mode switch.
+        self.last_config_drift: str | None = None
         self._loop_task: asyncio.Task[None] | None = None
 
     # -- public API ------------------------------------------------------------
@@ -399,6 +494,9 @@ class ManagedChannel:
         """One pull cycle; returns the number of deliveries accepted."""
 
         params = f"?cursor={self._delivery_cursor}" if self._delivery_cursor else ""
+        fingerprint_query = "&".join(f"{k}={v}" for k, v in self._reported_fingerprint().items())
+        if fingerprint_query:
+            params = f"{params}&{fingerprint_query}" if params else f"?{fingerprint_query}"
         payload = await self._request("GET", f"/managed/host/pull{params}", auth=True)
         if payload is None:
             return 0
@@ -502,6 +600,7 @@ class ManagedChannel:
                 "delivery_row_id": delivery_row_id,
                 "local_task_ref": task_ref_out.to_dict(),
                 "local_run_ref": run_ref_out.to_dict(),
+                **self._reported_fingerprint(),
             },
             auth=True,
             tolerate=(409,),  # a conflicting mapping is a platform-side bug; logged below
@@ -570,6 +669,33 @@ class ManagedChannel:
 
         return f"n-{secrets_mod.token_hex(16)}"
 
+    def _record_config_drift(self, response: Any) -> str | None:
+        """Surface a config-drift rejection as channel state (not just a log).
+
+        Returns the drift reason when the response is the platform's
+        expected-configuration gate; the counter makes the rejections visible
+        on the health surface.
+        """
+
+        try:
+            detail = response.json().get("detail") or {}
+        except Exception:  # noqa: BLE001 — malformed body is just a rejection
+            return None
+        if not (isinstance(detail, dict) and detail.get("error", {}).get("code") == "config-drift"):
+            return None
+        reason = str(detail.get("error", {}).get("message") or "configuration fingerprint rejected")
+        self.last_config_drift = reason
+        self.stats.config_drift_rejections += 1
+        logger.warning("managed channel: expected-configuration gate rejected new work: %s", reason)
+        return reason
+
+    def _reported_fingerprint(self) -> dict[str, str]:
+        """The config-fingerprint request field when a provider is wired."""
+
+        if self._config_fingerprint is None:
+            return {}
+        return {"config_fingerprint": self._config_fingerprint()}
+
     async def _exchange_credential(self) -> dict[str, Any] | None:
         nonce = self._new_nonce()
         answer = issue_challenge_answer(self._secret, nonce)
@@ -582,6 +708,7 @@ class ManagedChannel:
                 "nonce": nonce,
                 "answer": answer,
                 "host_id": self._host_id,
+                **self._reported_fingerprint(),
             },
             auth=False,
         )
@@ -625,10 +752,14 @@ class ManagedChannel:
             logger.info("managed channel %s %s tolerated %d", method, path, response.status_code)
             return None
         if response.status_code >= 400:
+            drift = self._record_config_drift(response)
+            if drift is not None:
+                return None
             logger.warning(
                 "managed channel %s %s rejected: %d %s", method, path, response.status_code, response.text[:300]
             )
             return None
+        self.last_config_drift = None
         if not response.content:
             return {}
         return response.json()

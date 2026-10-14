@@ -66,8 +66,11 @@ class Claims:
 
     ``scope`` is the lease-side data-domain allowlist (step6b): present
     only on authorization leases, it names the data domains the lease's
-    holder may address with protected actions. The HMAC covers it because
-    the signature digests whatever :meth:`to_dict` emits.
+    holder may address with protected actions. ``policy_version`` and
+    ``iat`` (managed lease profile) are optional and omitted from the
+    signed body when None, so tokens issued before they existed still
+    verify. The HMAC covers every present field because the signature
+    digests whatever :meth:`to_dict` emits.
     """
 
     iss: str
@@ -78,6 +81,8 @@ class Claims:
     tenant: str | None = None
     delegation_ref: str | None = None
     scope: list[str] | None = None
+    policy_version: str | None = None
+    iat: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -94,6 +99,10 @@ class Claims:
             out["delegation_ref"] = self.delegation_ref
         if self.scope is not None:
             out["scope"] = list(self.scope)
+        if self.policy_version is not None:
+            out["policy_version"] = self.policy_version
+        if self.iat is not None:
+            out["iat"] = self.iat
         return out
 
     @classmethod
@@ -111,6 +120,8 @@ class Claims:
                 tenant=data.get("tenant"),
                 delegation_ref=data.get("delegation_ref"),
                 scope=list(scope) if scope is not None else None,
+                policy_version=data.get("policy_version"),
+                iat=data.get("iat"),
             )
         except KeyError as exc:
             raise CredentialError(f"credential claims missing field {exc}") from exc
@@ -199,6 +210,7 @@ def lease_claims(
     ttl_seconds: float,
     scope: list[str] | None = None,
     tenant: str | None = None,
+    policy_version: str | None = None,
     now: datetime | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Sign one authorization lease (aud = the deployment domain binding).
@@ -207,6 +219,9 @@ def lease_claims(
     for one enrolled host does not verify against another's gate. ``scope``
     names the data domains protected actions may address; a lease without
     one authorizes nothing scope-checkable (the gate denies by default).
+    ``policy_version`` (managed lease profile) is signed into the lease so
+    the host can reject leases minted under an operator policy it has not
+    adopted; ``iat`` records the signing moment for staleness windows.
     """
 
     moment = now or datetime.now(UTC)
@@ -218,6 +233,8 @@ def lease_claims(
         nonce=new_nonce(),
         scope=list(scope) if scope is not None else None,
         tenant=tenant,
+        policy_version=policy_version,
+        iat=moment.isoformat(),
     )
     body = claims.to_dict()
     signature = hmac.new(secret, canonical_claims_digest(body).encode(), hashlib.sha256).hexdigest()
