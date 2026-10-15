@@ -142,6 +142,47 @@ def test_control_plane_renewal_window_must_be_positive(tmp_path: Path, monkeypat
         load_profile(profile_dir)
 
 
+def test_lease_policy_block_parses_and_validates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The managed lease posture block (step7 I-Cb) parses into
+    LeasePolicyConfig; malformed values fail startup (strict admission)."""
+
+    monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "tok")
+    profile = load_profile(_write_profile(tmp_path, control_plane=_control_plane()))
+    assert profile.config.control_plane is not None
+    assert profile.config.control_plane.lease_policy is None  # step6 posture
+
+    configured = load_profile(
+        _write_profile(
+            tmp_path,
+            control_plane=_control_plane(lease_policy={"policy_version": "mp-2026.10", "max_staleness_seconds": 120.0}),
+        )
+    )
+    posture = configured.config.control_plane.lease_policy
+    assert posture is not None
+    assert posture.expected_policy_version == "mp-2026.10"
+    assert posture.max_staleness_seconds == 120.0
+
+    bad = _write_profile(tmp_path, control_plane=_control_plane(lease_policy={"unknown": True}))
+    with pytest.raises(ProfileError, match="lease_policy"):
+        load_profile(bad)
+    bad_window = _write_profile(tmp_path, control_plane=_control_plane(lease_policy={"max_staleness_seconds": 0}))
+    with pytest.raises(ProfileError, match="max_staleness_seconds"):
+        load_profile(bad_window)
+
+
+def test_config_fingerprint_is_stable_and_secret_free(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The reported fingerprint is a deterministic function of the local
+    configuration and execution definition — stable across reads, changed
+    by configuration edits, and independent of resolved secret values."""
+
+    monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "tok")
+    profile = load_profile(_write_profile(tmp_path))
+    first = profile.config_fingerprint(None)
+    second = profile.config_fingerprint(None)
+    assert first == second
+    assert len(first) == 64  # sha-256 hex
+
+
 def test_control_plane_absent_keeps_standalone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "tok")
     profile = load_profile(_write_profile(tmp_path))

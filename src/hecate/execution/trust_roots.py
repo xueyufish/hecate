@@ -113,7 +113,15 @@ class TrustRootRegistry:
         return row
 
     async def refresh_config_fingerprint(self, workspace_id: uuid.UUID, name: str, fingerprint: str) -> TrustRootModel:
-        """Operator-refreshed expected-configuration digest (reconnect gate)."""
+        """Operator-refreshed expected-configuration digest.
+
+        The refresh is what *arms* the expected-configuration gate: the
+        provisioning-time fingerprint labels the trust material, while an
+        explicit operator refresh declares the host-configuration
+        expectation hosts are compared against at the pull/accept
+        boundaries (step7 managed lease profile). Existing roots that were
+        never refreshed keep the gate disarmed — backward compatible.
+        """
 
         if not fingerprint:
             raise TrustRootError("config fingerprint must be a non-empty string")
@@ -121,8 +129,33 @@ class TrustRootRegistry:
         if row is None:
             raise TrustRootNotFoundError(f"trust root {name!r} does not resolve in workspace")
         row.config_fingerprint = fingerprint
+        meta = dict(row.meta or {})
+        meta["config_gate"] = True
+        row.meta = meta
         await self._session.flush()
         return row
+
+    def expected_config_mismatch(self, root: TrustRootModel, reported: str | None) -> str | None:
+        """Why the reported host fingerprint fails the expectation, or ``None``.
+
+        The gate compares only when the operator has armed it via
+        :meth:`refresh_config_fingerprint`; an unarmed root accepts any
+        report (and its absence). Once armed, a missing report is drift
+        too — the operator expects a specific host configuration and the
+        host is not declaring one.
+        """
+
+        meta = dict(root.meta or {})
+        if not meta.get("config_gate"):
+            return None
+        if reported and reported == root.config_fingerprint:
+            return None
+        if reported:
+            return (
+                f"reported configuration fingerprint does not match the operator expectation "
+                f"for trust root {root.name!r}"
+            )
+        return f"host did not report a configuration fingerprint; operator expectation for {root.name!r} is armed"
 
     async def secret_for(self, row: TrustRootModel, secret_candidates: dict[str, bytes]) -> bytes:
         """Look up the raw secret for one registered root among provisioned candidates.

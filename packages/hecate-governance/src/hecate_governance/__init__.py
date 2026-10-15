@@ -32,6 +32,14 @@ from hecate_governance.invocation import (
     ensure_invocation_id,
     new_invocation_id,
 )
+from hecate_governance.managed import (
+    ManagedLeaseFacts,
+    ManagedLeasePolicyConfig,
+    ManagedLeaseProfile,
+    ManagedLeaseVerdict,
+    ManagedRevocationView,
+    facts_from_claims,
+)
 from hecate_governance.policy import (
     BudgetSignal,
     FloorViolation,
@@ -85,6 +93,11 @@ __all__ = [
     "InvocationConflictError",
     "InvocationConflictField",
     "InvocationIdentity",
+    "ManagedLeaseFacts",
+    "ManagedLeasePolicyConfig",
+    "ManagedLeaseProfile",
+    "ManagedLeaseVerdict",
+    "ManagedRevocationView",
     "MemoryApprovalLedger",
     "MemoryBudgetLedger",
     "PolicyContext",
@@ -102,6 +115,7 @@ __all__ = [
     "UsageRecord",
     "UsageStatus",
     "check_binding",
+    "facts_from_claims",
     "ensure_invocation_id",
     "new_invocation_id",
     "tool_arguments_digest",

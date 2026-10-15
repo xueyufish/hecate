@@ -77,6 +77,7 @@ async def _host_context(
 
 def _host_error(exc: ManagedChannelError) -> HTTPException:
     from hecate.execution.managed_channel import (
+        ConfigDriftError,
         CredentialAuthenticationError,
         DeliveryConflictError,
         EnrollmentNotActiveError,
@@ -88,6 +89,8 @@ def _host_error(exc: ManagedChannelError) -> HTTPException:
         return HTTPException(status_code=403, detail={"error": {"code": "enrollment-inactive", "message": str(exc)}})
     if isinstance(exc, DeliveryConflictError):
         return HTTPException(status_code=409, detail={"error": {"code": "conflict", "message": str(exc)}})
+    if isinstance(exc, ConfigDriftError):
+        return HTTPException(status_code=409, detail={"error": {"code": "config-drift", "message": str(exc)}})
     return HTTPException(status_code=422, detail={"error": {"code": "invalid-request", "message": str(exc)}})
 
 
@@ -109,6 +112,7 @@ class OptInRequest(BaseModel):
     managed_new_runs: bool
     admitted: bool
     managed_scope: list[str] | None = None
+    lease_policy: dict[str, Any] | None = None
 
 
 class TrustRootRequest(BaseModel):
@@ -123,6 +127,7 @@ class AcceptRequest(BaseModel):
     delivery_row_id: uuid.UUID
     local_task_ref: dict[str, Any]
     local_run_ref: dict[str, Any]
+    config_fingerprint: str | None = None
 
 
 class EventsUploadRequest(BaseModel):
@@ -207,13 +212,20 @@ async def set_opt_in(
             managed_new_runs=body.managed_new_runs,
             operator_id=auth.user_id,
             admitted=body.admitted,
+            managed_scope=body.managed_scope,
+            lease_policy=body.lease_policy,
         )
         await db.commit()
     except TaskRunValidationError as exc:
         raise HTTPException(
             status_code=422, detail={"error": {"code": "admission-rejected", "message": str(exc)}}
         ) from exc
-    return {"enrollment_id": str(row.id), "admission": row.admission.value, "managed_new_runs": row.managed_new_runs}
+    return {
+        "enrollment_id": str(row.id),
+        "admission": row.admission.value,
+        "managed_new_runs": row.managed_new_runs,
+        "lease_policy": row.lease_policy,
+    }
 
 
 @router.post("/trust-roots")
@@ -353,6 +365,7 @@ async def host_pull(
     host: HostDep,
     cursor: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    config_fingerprint: Annotated[str | None, Query()] = None,
 ):
     """Pull deliveries after the cursor; the response carries a fresh lease.
 
@@ -361,7 +374,17 @@ async def host_pull(
     lost response), never by executing again.
     """
 
-    from hecate.execution.managed_channel import ManagedDeliveryService, issue_lease_for
+    from hecate.execution.managed_channel import (
+        ConfigDriftError,
+        ManagedDeliveryService,
+        issue_lease_for,
+        verify_expected_config,
+    )
+
+    try:
+        await verify_expected_config(host, db, reported_fingerprint=config_fingerprint)
+    except ConfigDriftError as exc:
+        raise _host_error(exc) from exc
 
     service = ManagedDeliveryService(db)
     rows = await service.pull_batch(enrollment_id=host.enrollment_id, cursor=cursor or None, limit=limit)
@@ -398,13 +421,25 @@ async def host_accept(
     db: Annotated[AsyncSession, Depends(get_db)],
     host: HostDep,
 ):
-    """Record the host's accept receipt (idempotent; conflicting refs 409)."""
+    """Record the host's accept receipt (idempotent; conflicting refs 409).
+
+    The accept boundary carries the same expected-configuration gate as
+    pull: a drifted host cannot turn deliveries into accepted work, while
+    evidence-upload routes stay ungated.
+    """
 
     from hecate.execution.managed_channel import (
+        ConfigDriftError,
         DeliveryConflictError,
         ManagedChannelError,
         ManagedDeliveryService,
+        verify_expected_config,
     )
+
+    try:
+        await verify_expected_config(host, db, reported_fingerprint=body.config_fingerprint)
+    except ConfigDriftError as exc:
+        raise _host_error(exc) from exc
 
     service = ManagedDeliveryService(db)
     try:

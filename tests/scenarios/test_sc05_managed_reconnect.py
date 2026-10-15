@@ -326,6 +326,40 @@ async def test_sc05_projection_never_overwrites_local_facts(managed_stack) -> No
     assert after.revision == before.revision
 
 
+async def test_sc05_config_drift_stops_new_work_evidence_upload_continues(managed_stack) -> None:
+    """Expected-configuration gate (step7 I-Cb): an operator-armed
+    fingerprint expectation stops new deliveries for a drifted host while
+    evidence upload stays open; fixing the fingerprint restores work and
+    the drift marker clears on the next successful call."""
+
+    channel = await connect_channel(managed_stack)
+    assert await channel.pull_once() == 0  # gate disarmed: everything passes
+
+    # Operator arms the expectation on the trust root.
+    async with managed_stack["session_factory"]() as db:
+        from hecate.execution.trust_roots import TrustRootRegistry
+
+        await TrustRootRegistry(db).refresh_config_fingerprint(WS, ROOT_NAME, "cfg-expected")
+        await db.commit()
+
+    channel._config_fingerprint = lambda: "cfg-stale"
+    assert await channel.pull_once() == 0  # refused: no deliveries, no lease
+    assert channel.last_config_drift is not None
+    assert "fingerprint" in channel.last_config_drift
+    assert channel.stats.config_drift_rejections >= 1
+    # Evidence upload is not gated by the expectation: the drift host's
+    # accumulated local events still reach the platform.
+    assert await channel.upload_events() >= 0
+
+    # The host fixes its configuration: the next pull reports the expected
+    # fingerprint, work resumes, and the drift marker clears.
+    channel._config_fingerprint = lambda: "cfg-expected"
+    delivery_row_id = await managed_stack["queue_delivery"]({"messages": [{"role": "user", "content": "sc05-drift"}]})
+    assert await channel.pull_once() == 1
+    assert channel.last_config_drift is None
+    assert delivery_row_id  # the queued delivery reached the host
+
+
 async def test_sc05_revoked_trust_root_stops_new_work(managed_stack) -> None:
     """Reconnect after revocation: the re-verification chain refuses."""
 

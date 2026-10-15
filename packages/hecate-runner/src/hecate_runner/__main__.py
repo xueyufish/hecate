@@ -144,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             host_id=control_plane.host_id,
             workspace_id=control_plane.workspace_id,
             nonce_record_path=str(Path(evidence_dir) / "lease-consumed-nonces.jsonl"),
+            lease_policy=control_plane.lease_policy,
         )
         channel = ManagedChannel(
             base_url=control_plane.base_url,
@@ -159,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
             data_domains=control_plane.data_domains,
             lease_gate=lease_gate,
             execution_definition=profile.execution_definition_digest(business_api),
+            config_fingerprint=lambda: profile.config_fingerprint(business_api),
         )
 
     from hecate_governance.policy import GovernanceService
@@ -166,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .budget import DurableBudgetLedger
     from .governance import LocalPolicyProfile, LocalRevocationView
-    from .local_approvals import DurableLocalApprovalLedger, make_local_approval_gate
+    from .local_approvals import DurableLocalApprovalLedger, make_local_approval_finder, make_local_approval_gate
     from .profile import _load_governance, _raw_config_for_governance
 
     def current_governance():
@@ -177,8 +179,28 @@ def main(argv: list[str] | None = None) -> int:
         if durable
         else None
     )
+    inner_profile = LocalPolicyProfile(current_governance)
+    if lease_gate is not None:
+        # Managed assembly (step7 I-Cb): the governance profile composes the
+        # managed lease gate — protected actions additionally require the
+        # installed lease facts (adopted policy version, trusted-time
+        # validity window); readonly dispatch flows through unchanged.
+        from hecate_governance.managed import ManagedLeasePolicyConfig, ManagedLeaseProfile
+
+        posture = control_plane.lease_policy if control_plane is not None else None
+        managed_profile = ManagedLeaseProfile(
+            inner_profile,
+            ManagedLeasePolicyConfig(
+                expected_policy_version=getattr(posture, "expected_policy_version", None),
+                max_staleness_seconds=getattr(posture, "max_staleness_seconds", None),
+            ),
+            facts_provider=lease_gate.facts,
+            anchor_provider=lease_gate.anchor,
+        )
+    else:
+        managed_profile = inner_profile
     governance_service = GovernanceService(
-        LocalPolicyProfile(current_governance),
+        managed_profile,
         approval_ledger=approval_ledger,
         revocation=LocalRevocationView(current_governance),
     )
@@ -203,6 +225,11 @@ def main(argv: list[str] | None = None) -> int:
         dispatch_binding=business_api,
         governance_service=governance_service,
         approval_gate=approval_gate,
+        approval_finder=(
+            make_local_approval_finder(durable.store.session_factory, approvers=lambda: current_governance().approvers)
+            if durable is not None
+            else None
+        ),
         budget_gate=budget_gate,
         **(
             {"lease_refresh_wait_seconds": control_plane.lease_refresh_wait_seconds}

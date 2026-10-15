@@ -9,8 +9,10 @@ fingerprint refresh), and the enrollment resolver wiring into
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -87,6 +89,59 @@ def test_lease_binds_deployment_domain_and_expiry():
         mc.verify_lease(lease, SECRET, deployment_domain="host-beta", now=datetime(2026, 1, 1, 0, 0, 20, tzinfo=UTC))
     with pytest.raises(mc.CredentialError, match="expired"):
         mc.verify_lease(lease, SECRET, deployment_domain="host-alpha", now=datetime(2026, 1, 1, 0, 1, tzinfo=UTC))
+
+
+def test_lease_carries_policy_version_and_iat_when_issued():
+    """Managed lease profile: the operator policy version and signing
+    moment are signed into the lease so the host can reject leases minted
+    under an unadopted policy and derive staleness windows from ``iat``."""
+
+    moment = datetime(2026, 1, 1, tzinfo=UTC)
+    lease, _ = mc.lease_claims(
+        SECRET,
+        iss=ISSUER,
+        deployment_domain="host-alpha",
+        sub="host-alpha",
+        ttl_seconds=30,
+        policy_version="mp-2026.10",
+        now=moment,
+    )
+    assert lease["policy_version"] == "mp-2026.10"
+    assert lease["iat"] == moment.isoformat()
+    claims = mc.verify_lease(lease, SECRET, deployment_domain="host-alpha", now=moment)
+    assert claims.policy_version == "mp-2026.10"
+    assert claims.iat == moment.isoformat()
+    # Tampering with the policy version breaks the signature: the version
+    # is part of the signed body, not advisory metadata.
+    with pytest.raises(mc.CredentialError, match="signature"):
+        mc.verify_lease({**lease, "policy_version": "mp-2026.11"}, SECRET, deployment_domain="host-alpha", now=moment)
+
+
+def test_claims_without_policy_fields_stay_verifiable():
+    """Leases and credentials minted before the managed lease profile
+    carried no ``policy_version``/``iat``; they must still verify, and the
+    new fields round-trip as None so gates can apply their own posture."""
+
+    # Hand-built pre-profile lease body (what the old lease_claims emitted):
+    # no policy_version, no iat, signature over exactly that body.
+    moment = datetime(2026, 1, 1, tzinfo=UTC)
+    body = {
+        "contract_version": mc.CLAIMS_VERSION,
+        "iss": ISSUER,
+        "aud": "host-alpha",
+        "sub": "host-alpha",
+        "exp": (moment + timedelta(seconds=30)).isoformat(),
+        "nonce": mc.new_nonce(),
+    }
+    signature = hmac.new(SECRET, mc.canonical_claims_digest(body).encode(), hashlib.sha256).hexdigest()
+    legacy_lease = {**body, "hmac": signature}
+    claims = mc.verify_lease(legacy_lease, SECRET, deployment_domain="host-alpha", now=moment)
+    assert claims.policy_version is None and claims.iat is None
+    assert claims.nonce == body["nonce"]
+    # Omission (not a null marker) is the wire format: dropping the fields
+    # and re-serializing reproduces the signed body exactly.
+    rebuilt = mc.Claims.from_dict(body)
+    assert rebuilt.to_dict() == body
 
 
 # --- fixtures -------------------------------------------------------------------
@@ -295,3 +350,115 @@ async def test_opt_in_requires_workspace_admin(ws_env, registry: TrustRootRegist
         await registry_svc.set_managed_opt_in(
             enrollment.id, WS, managed_new_runs=True, operator_id=NON_ADMIN, admitted=True
         )
+
+
+async def test_opt_in_stores_operator_lease_policy(ws_env, registry: TrustRootRegistry):
+    """The managed lease posture is an operator-controlled enrollment field:
+    it persists through the opt-in door and defaults to {} (deny-by-default
+    — a posture-less enrollment issues version-less leases)."""
+
+    host_ref, root_ref, versions = _enrollment_refs()
+    await registry.register(
+        workspace_id=WS,
+        name=ROOT_NAME,
+        material_digest=mc.material_digest(SECRET),
+        issuer_domain=ISSUER,
+        config_fingerprint="cfg-1",
+    )
+    registry_svc = TaskRunRegistry(
+        ws_env, enrollment_resolver=HmacEnrollmentResolver(ws_env, {ROOT_NAME: SECRET}).verify
+    )
+    enrollment = await registry_svc.register_standalone_enrollment(
+        workspace_id=WS, host_identity_ref=host_ref, trust_root_ref=root_ref, installed_versions=versions
+    )
+    assert enrollment.lease_policy == {}
+
+    admitted = await registry_svc.set_managed_opt_in(
+        enrollment.id,
+        WS,
+        managed_new_runs=True,
+        operator_id=ADMIN,
+        admitted=True,
+        managed_scope=["inventory"],
+        lease_policy={"policy_version": "mp-2026.10", "max_staleness_seconds": 120.0},
+    )
+    assert admitted.lease_policy == {"policy_version": "mp-2026.10", "max_staleness_seconds": 120.0}
+    refreshed = await ws_env.get(type(enrollment), enrollment.id)
+    assert refreshed.lease_policy["policy_version"] == "mp-2026.10"
+
+
+async def test_opt_in_rejects_invalid_lease_policy(ws_env, registry: TrustRootRegistry):
+    """Unknown fields and malformed values are rejected at the same door —
+    strict admission, no silent normalization of operator posture."""
+
+    from hecate.execution.task_run_registry import TaskRunValidationError
+
+    host_ref, root_ref, versions = _enrollment_refs()
+    await registry.register(
+        workspace_id=WS,
+        name=ROOT_NAME,
+        material_digest=mc.material_digest(SECRET),
+        issuer_domain=ISSUER,
+        config_fingerprint="cfg-1",
+    )
+    registry_svc = TaskRunRegistry(
+        ws_env, enrollment_resolver=HmacEnrollmentResolver(ws_env, {ROOT_NAME: SECRET}).verify
+    )
+    enrollment = await registry_svc.register_standalone_enrollment(
+        workspace_id=WS, host_identity_ref=host_ref, trust_root_ref=root_ref, installed_versions=versions
+    )
+    for bad in (
+        {"unknown_field": "x"},
+        {"policy_version": "  "},
+        {"max_staleness_seconds": 0},
+        {"max_staleness_seconds": "120"},
+        ["not", "an", "object"],
+    ):
+        with pytest.raises(TaskRunValidationError, match="lease policy"):
+            await registry_svc.set_managed_opt_in(
+                enrollment.id, WS, managed_new_runs=True, operator_id=ADMIN, admitted=True, lease_policy=bad
+            )
+
+
+def test_issued_lease_carries_enrollment_policy_version():
+    """issue_lease_for signs the enrollment posture's policy version into
+    the lease; a posture-less enrollment issues a version-less lease (the
+    host's managed profile refuses protected actions for it)."""
+
+    from hecate.execution.managed_channel import HostContext, issue_lease_for
+
+    moment = datetime(2026, 10, 13, tzinfo=UTC)
+    claims = mc.Claims(
+        iss=ISSUER,
+        aud=mc.MANAGED_CHANNEL_AUDIENCE,
+        sub="host-alpha",
+        exp=(moment.replace(year=2027)).isoformat(),
+        nonce=mc.new_nonce(),
+        tenant=str(WS),
+    )
+    host = HostContext(
+        workspace_id=WS,
+        enrollment_id=uuid.uuid4(),
+        deployment_domain="host-alpha",
+        host_name="host-alpha",
+        claims=claims,
+        managed_scope=["inventory"],
+        lease_policy={"policy_version": "mp-2026.10"},
+    )
+    lease = issue_lease_for(host, SECRET, ttl_seconds=120)
+    verified = mc.verify_lease(lease, SECRET, deployment_domain="host-alpha", now=moment)
+    assert verified.policy_version == "mp-2026.10"
+    assert verified.scope == ["inventory"]
+
+    postureless = HostContext(
+        workspace_id=host.workspace_id,
+        enrollment_id=host.enrollment_id,
+        deployment_domain=host.deployment_domain,
+        host_name=host.host_name,
+        claims=claims,
+        managed_scope=host.managed_scope,
+        lease_policy={},
+    )
+    leaseless = issue_lease_for(postureless, SECRET, ttl_seconds=120)
+    verifiedless = mc.verify_lease(leaseless, SECRET, deployment_domain="host-alpha", now=moment)
+    assert verifiedless.policy_version is None

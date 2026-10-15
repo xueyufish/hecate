@@ -63,6 +63,12 @@ class EnrollmentNotActiveError(ManagedChannelError):
     """The enrollment is not admitted for managed new runs (403 semantics)."""
 
 
+class ConfigDriftError(ManagedChannelError):
+    """The host's reported configuration fingerprint fails the operator
+    expectation armed on its trust root (new work stops; evidence upload
+    is not gated by this check)."""
+
+
 class DeliveryConflictError(ManagedChannelError):
     """An accept maps a delivery to different local references (409 semantics)."""
 
@@ -73,7 +79,10 @@ class HostContext:
 
     ``managed_scope`` is the enrollment's operator-controlled data-domain
     allowlist; it travels with the host so pull responses can carry it
-    inside the issued lease (step6b).
+    inside the issued lease (step6b). ``lease_policy`` is the enrollment's
+    operator-controlled lease posture; its ``policy_version`` is signed
+    into every issued lease so the host can reject leases minted under an
+    operator policy it has not adopted (step7 managed lease profile).
     """
 
     workspace_id: uuid.UUID
@@ -82,6 +91,8 @@ class HostContext:
     host_name: str
     claims: Claims
     managed_scope: list[str]
+    lease_policy: dict[str, Any]
+    trust_root_name: str = ""
 
 
 async def authenticate_host(
@@ -156,6 +167,8 @@ async def authenticate_host(
                 host_name=str(host_ref.get("id") or claims.sub),
                 claims=claims,
                 managed_scope=list(enrollment.managed_scope or []),
+                lease_policy=dict(enrollment.lease_policy or {}),
+                trust_root_name=root_name,
             )
     raise CredentialAuthenticationError("credential does not match an enrolled host identity")
 
@@ -164,7 +177,9 @@ def issue_lease_for(host: HostContext, secret: bytes, *, ttl_seconds: float) -> 
     """One authorization lease for the verified host (pull responses carry it).
 
     The lease carries the enrollment's managed scope: the operator-declared
-    data domains protected actions may address until the next pull.
+    data domains protected actions may address until the next pull, and the
+    posture's policy version — an enrollment without an adopted version
+    issues version-less leases the host's managed profile refuses.
     """
 
     lease, _nonce = lease_claims(
@@ -175,8 +190,33 @@ def issue_lease_for(host: HostContext, secret: bytes, *, ttl_seconds: float) -> 
         ttl_seconds=ttl_seconds,
         scope=host.managed_scope,
         tenant=str(host.workspace_id),
+        policy_version=host.lease_policy.get("policy_version"),
     )
     return lease
+
+
+async def verify_expected_config(
+    host: HostContext,
+    db: AsyncSession,
+    *,
+    reported_fingerprint: str | None,
+) -> None:
+    """Work-delivery boundary gate (pull/accept): the host's reported
+    configuration fingerprint must match the operator expectation armed on
+    its trust root. A mismatch refuses new deliveries/commands/leases —
+    evidence upload routes do not call this gate and stay open.
+    """
+
+    from hecate.execution.trust_roots import TrustRootRegistry
+
+    if not host.trust_root_name:
+        return
+    root = await TrustRootRegistry(db).peek(host.workspace_id, host.trust_root_name)
+    if root is None:
+        return
+    reason = TrustRootRegistry(db).expected_config_mismatch(root, reported_fingerprint)
+    if reason is not None:
+        raise ConfigDriftError(reason)
 
 
 def issue_channel_credential_for(

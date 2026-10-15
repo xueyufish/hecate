@@ -312,7 +312,12 @@ async def _wait_projected_succeeded(stack, delivery_id: str, runner, calls) -> d
     from hecate.models.managed_delivery import ManagedDeliveryModel
     from hecate.models.run import RunModel
 
-    deadline = asyncio.get_running_loop().time() + 30
+    # The chain is eventual by contract: command pull, successor requeue,
+    # serial-slot pickup and terminal upload each ride their own poll cycle.
+    # Under a fully loaded xdist run the subprocess pipeline can exceed a
+    # 30 s window while remaining healthy, so the projection wait gets a
+    # generous budget (the per-test timeout still bounds the whole test).
+    deadline = asyncio.get_running_loop().time() + 90
     observed: dict | None = None
     while asyncio.get_running_loop().time() < deadline:
         async with stack["session_factory"]() as db:

@@ -237,6 +237,154 @@ async def test_lease_renewal_bounded_wait_times_out_and_renews(tmp_path, monkeyp
     await installer
 
 
+async def test_local_approval_bridges_disconnect_without_lease(tmp_path, monkeypatch):
+    """step7 I-Cb authorization order: a valid pre-approved local binding
+    authorizes a protected dispatch even with no lease installed — the
+    disconnect bridge. The binding's CAS is consumed, the (absent) lease
+    nonce is not, and the evidence records the local_approval source."""
+
+    from datetime import UTC, datetime
+
+    from hecate_durable.contracts.credentials import CredentialError, lease_claims
+    from hecate_runner.engine import RunState
+    from hecate_runner.managed import LeaseGate
+
+    monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "shutdown")
+    profile = load_profile(write_profile(tmp_path))
+    evidence = EvidenceStore(profile.config.evidence_dir)
+    now = {"t": datetime.now(UTC)}
+    gate = LeaseGate(
+        b"engine-lease-secret",
+        deployment_domain="host-root",
+        clock=lambda: now["t"],
+    )
+    consumed_refs: list[str] = []
+
+    async def finder(request):
+        return "appr-bridge-1"
+
+    async def approval_gate(ref, request):
+        consumed_refs.append(ref)
+        return True
+
+    calls: list = []
+
+    async def dispatch(*args):
+        calls.append(args)
+        return {"status": "ok", "result": {}}
+
+    runtime = ExecutionEngine(
+        profile,
+        evidence,
+        dispatch,
+        lease_gate=gate,
+        approval_gate=approval_gate,
+        approval_finder=finder,
+        lease_refresh_wait_seconds=0.15,
+    )
+    state = RunState(run_id="r1", status="running", principal="reader", domains=("domain_a",), managed=True)
+    assert await runtime._lease_refusal(state, "stock_write", {"domain": "domain_a"}) is None
+    assert consumed_refs == ["appr-bridge-1"]
+    # The lease gate stayed untouched: still empty, still refusing.
+    with pytest.raises(CredentialError, match="no authorization lease"):
+        await gate.check()
+    basis = [record for record in evidence.query(kind="approval_basis")]
+    assert basis and basis[0].detail["source"] == "local_approval"
+
+    # Without an approval (finder returns None) the same request hits the
+    # lease gate and is refused after the bounded wait.
+    async def empty_finder(request):
+        return None
+
+    runtime2 = ExecutionEngine(
+        profile,
+        evidence,
+        dispatch,
+        lease_gate=gate,
+        approval_gate=approval_gate,
+        approval_finder=empty_finder,
+        lease_refresh_wait_seconds=0.05,
+    )
+    state2 = RunState(run_id="r2", status="running", principal="reader", domains=("domain_a",), managed=True)
+    denial = await runtime2._lease_refusal(state2, "stock_write", {"domain": "domain_a"})
+    assert denial is not None and "no authorization lease" in denial["detail"]
+
+    # A gate that refuses the located binding falls through to the lease
+    # gate too — the locator only prefilters, the gate is the authority.
+    async def refusing_gate(ref, request):
+        return False
+
+    runtime3 = ExecutionEngine(
+        profile,
+        evidence,
+        dispatch,
+        lease_gate=gate,
+        approval_gate=refusing_gate,
+        approval_finder=finder,
+        lease_refresh_wait_seconds=0.05,
+    )
+    state3 = RunState(run_id="r3", status="running", principal="reader", domains=("domain_a",), managed=True)
+    denial3 = await runtime3._lease_refusal(state3, "stock_write", {"domain": "domain_a"})
+    assert denial3 is not None
+    _ = lease_claims  # import parity with the neighboring tests
+
+
+async def test_structural_lease_refusal_does_not_burn_the_renewal_wait(tmp_path, monkeypatch):
+    """An identity-mismatched lease is structural: the denial is immediate
+    (no bounded-wait polling), with the precise reason in the refusal."""
+
+    import time as time_module
+    from datetime import UTC, datetime
+
+    from hecate_durable.contracts.credentials import lease_claims
+    from hecate_runner.engine import RunState
+    from hecate_runner.managed import LeaseGate
+
+    monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "shutdown")
+    profile = load_profile(write_profile(tmp_path))
+    evidence = EvidenceStore(profile.config.evidence_dir)
+    now = {"t": datetime.now(UTC)}
+    gate = LeaseGate(
+        b"engine-lease-secret",
+        deployment_domain="host-root",
+        issuer_domain="lease-issuer",
+        host_id="host-1",
+        workspace_id="ws-1",
+        clock=lambda: now["t"],
+    )
+    foreign = lease_claims(
+        b"engine-lease-secret",
+        iss="lease-issuer",
+        deployment_domain="host-root",
+        sub="host-OTHER",
+        ttl_seconds=3600,
+        scope=["domain_a"],
+        tenant="ws-1",
+    )[0]
+    assert gate.update(foreign) is True  # installs; refused at the boundary
+
+    calls: list = []
+
+    async def dispatch(*args):
+        calls.append(args)
+        return {"status": "ok", "result": {}}
+
+    runtime = ExecutionEngine(
+        profile,
+        evidence,
+        dispatch,
+        lease_gate=gate,
+        lease_refresh_wait_seconds=5.0,
+    )
+    state = RunState(run_id="r1", status="running", principal="reader", domains=("domain_a",), managed=True)
+    started = time_module.monotonic()
+    denial = await runtime._lease_refusal(state, "stock_write", {"domain": "domain_a"})
+    elapsed = time_module.monotonic() - started
+    assert denial is not None and "does not match the enrolled host" in denial["detail"]
+    assert elapsed < 1.0  # structural: no 5s renewal wait
+    assert calls == []
+
+
 async def test_lease_scope_violation_refuses_immediately_without_waiting(tmp_path, monkeypatch):
     """A domain outside the lease scope is refused at once — the bounded wait
     is only for a not-yet-arrived lease, never for an out-of-scope request."""

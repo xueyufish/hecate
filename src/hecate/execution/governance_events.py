@@ -15,7 +15,11 @@ sequence space:
 Reads are cursor-paginated per run reference: the cursor is the last
 ``source_sequence`` consumed, so a disconnected client resumes exactly
 where it stopped. Workspace scoping makes a foreign run indistinguishable
-from a missing one.
+from a missing one. Sequence labels are arrival-order: position uniqueness
+(``uq_platform_events_run_position``) makes concurrent allocations collide
+explicitly and the writers converge (dedup by event id or a fresh
+allocation), so a hole in the stored sequence means a lost allocation
+race — never a lost event.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.contracts.execution.events import (
@@ -40,6 +45,10 @@ from hecate.execution.backend import EventPage
 from hecate.models.platform_event import PlatformEventModel
 
 CONTRACT_VERSION = "0.1"
+
+# Bounded retries for position-allocation races (step7 fencing): a colliding
+# allocation either dedups against the stored winner or takes a fresh slot.
+_MAX_ALLOCATE_RETRIES = 3
 
 # Payload schema refs for the governance events this change emits. Each ref
 # names the payload shape so consumers can distinguish event families
@@ -103,7 +112,7 @@ class PlatformEventService:
             event_id=str(uuid.uuid4()),
             task_ref=task_ref,
             run_ref=run_ref,
-            source_sequence=await self.next_sequence(run_ref, workspace_id),
+            source_sequence=0,
             occurred_at=_utc_now(),
             received_at=_utc_now(),
             payload_schema_ref=payload_schema_ref,
@@ -114,11 +123,14 @@ class PlatformEventService:
             source=source,
         )
         validate_governance_event(envelope)
-        await self.append(envelope, workspace_id=workspace_id)
-        return envelope
+        return await self._append_converged(envelope, workspace_id=workspace_id)
 
     async def append(self, envelope: EventEnvelope, *, workspace_id: uuid.UUID | None = None) -> EventEnvelope:
-        """Persist one envelope verbatim (run stream events; pre-sequenced)."""
+        """Persist one envelope verbatim (pre-sequenced; no race convergence).
+
+        Reserved for writers that already own sequencing; the allocating
+        paths (``emit``/``append_resequenced``) converge races themselves.
+        """
 
         row = self._to_row(envelope, workspace_id)
         self._db.add(row)
@@ -137,10 +149,35 @@ class PlatformEventService:
         caller put it there).
         """
 
-        sequence = await self.next_sequence(envelope.run_ref, workspace_id)
-        stored = replace(envelope, source_sequence=sequence, received_at=_utc_now())
-        await self.append(stored, workspace_id=workspace_id)
-        return stored
+        stored = replace(envelope, received_at=_utc_now())
+        return await self._append_converged(stored, workspace_id=workspace_id)
+
+    async def _append_converged(self, envelope: EventEnvelope, *, workspace_id: uuid.UUID | None) -> EventEnvelope:
+        """Allocate the run's next position and persist, converging races.
+
+        Position uniqueness makes concurrent ``max+1`` allocations collide
+        explicitly: a colliding insert rolls back to a savepoint (the
+        caller's transaction stays intact), then either the event was
+        already stored by the winner (same event id — idempotent success,
+        the stored envelope is returned) or the slot was taken by another
+        event and allocation retries with a fresh position. Retries are
+        bounded; exhaustion raises instead of silently dropping the event.
+        """
+
+        last_error: IntegrityError | None = None
+        for _ in range(_MAX_ALLOCATE_RETRIES):
+            candidate = replace(envelope, source_sequence=await self.next_sequence(envelope.run_ref, workspace_id))
+            try:
+                async with self._db.begin_nested():
+                    self._db.add(self._to_row(candidate, workspace_id))
+                    await self._db.flush()
+                return candidate
+            except IntegrityError as exc:
+                existing = await self.find_by_event_id(candidate.event_id)
+                if existing is not None:
+                    return existing
+                last_error = exc
+        raise last_error if last_error is not None else RuntimeError("position allocation exhausted")
 
     async def find_by_event_id(self, event_id: str) -> EventEnvelope | None:
         """One stored envelope by its globally-unique event id (relay dedup)."""
@@ -166,7 +203,10 @@ class PlatformEventService:
         """Page one run's stored events after ``cursor`` (workspace-scoped).
 
         Missing and foreign-workspace runs are indistinguishable: both
-        yield an empty page.
+        yield an empty page. Sequences are arrival-order labels — a hole
+        in the stored sequence is a lost allocation race (an event stored
+        at a later position after a concurrent collision), not a lost
+        event; cursor resumption never depends on gap-free positions.
         """
 
         require_kind(run_ref, RefKind.RUN)

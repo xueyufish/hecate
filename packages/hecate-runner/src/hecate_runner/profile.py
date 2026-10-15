@@ -80,6 +80,21 @@ BUILTIN_TOOL_SCHEMAS = {
 
 
 @dataclass(frozen=True)
+class LeasePolicyConfig:
+    """Host-side managed lease posture (operator-controlled, config-file only).
+
+    ``expected_policy_version`` — the operator lease policy version this
+    host has adopted; a lease minted under any other version (or without
+    one) is refused immediately at the gate. ``max_staleness_seconds`` —
+    the local staleness window bound: offline validity is
+    ``min(exp, iat + window)``, judged against trusted time.
+    """
+
+    expected_policy_version: str | None = None
+    max_staleness_seconds: float | None = None
+
+
+@dataclass(frozen=True)
 class ControlPlaneConfig:
     """Managed-channel settings (optional overlay; step6/7 managed slice).
 
@@ -109,6 +124,36 @@ class ControlPlaneConfig:
     # default) = deny-by-default: the run's existing domain check refuses
     # every domain-carrying dispatch until the operator maps a scope.
     data_domains: tuple[str, ...] = ()
+    # Managed lease posture (step7 I-Cb): the operator policy version this
+    # host has adopted and the local staleness window bound. Absent block =
+    # step6 posture (expiry-only validation, no version check at the gate);
+    # the managed governance profile still refuses protected actions without
+    # an adopted policy version (deny-by-default at the profile layer).
+    lease_policy: LeasePolicyConfig | None = None
+
+
+def _load_lease_policy(raw: object) -> LeasePolicyConfig | None:
+    """Parse the optional ``lease_policy`` posture block (step7 I-Cb)."""
+
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ProfileError("control_plane.lease_policy must be an object")
+    unknown = set(raw) - {"policy_version", "max_staleness_seconds"}
+    if unknown:
+        raise ProfileError(f"control_plane.lease_policy has unknown fields: {sorted(unknown)}")
+    version = raw.get("policy_version")
+    if version is not None and (not isinstance(version, str) or not version.strip()):
+        raise ProfileError("control_plane.lease_policy.policy_version must be a non-empty string")
+    staleness = raw.get("max_staleness_seconds")
+    if staleness is not None and (
+        isinstance(staleness, bool) or not isinstance(staleness, (int, float)) or staleness <= 0
+    ):
+        raise ProfileError("control_plane.lease_policy.max_staleness_seconds must be a positive number")
+    return LeasePolicyConfig(
+        expected_policy_version=version.strip() if isinstance(version, str) else None,
+        max_staleness_seconds=float(staleness) if staleness is not None else None,
+    )
 
 
 def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | None:
@@ -158,6 +203,7 @@ def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | N
     if len(data_domains_raw) != len(set(data_domains_raw)):
         raise ProfileError("control_plane.data_domains must not contain duplicate domains")
     data_domains = tuple(data_domains_raw)
+    lease_policy = _load_lease_policy(raw.get("lease_policy"))
     return ControlPlaneConfig(
         base_url=base_url.rstrip("/"),
         workspace_id=workspace_id,
@@ -170,6 +216,7 @@ def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | N
         upload_batch=upload_batch,
         lease_refresh_wait_seconds=float(refresh_wait),
         data_domains=data_domains,
+        lease_policy=lease_policy,
     )
 
 
@@ -612,6 +659,31 @@ class Profile:
                 "model_endpoint": self.config.model_endpoint,
                 "model_auth_env": self.config.model_auth_env,
                 "dispatch_binding": dispatch_binding,
+            }
+        )
+
+    def config_fingerprint(self, dispatch_binding: str | None = None) -> str:
+        """The host's local configuration fingerprint (step7 I-Cb).
+
+        SHA-256 over canonical JSON of the runner profile (secret references
+        by name only — never resolved values) plus the execution definition
+        digest. Reported at the credential exchange and every pull so the
+        platform can compare it against the operator's armed expectation;
+        the value is computed locally and never accepted from request data.
+        """
+
+        from hecate_durable.contracts.durable import canonical_request_digest
+
+        return canonical_request_digest(
+            {
+                "config": {
+                    "model_backend": self.config.model_backend,
+                    "model_endpoint": self.config.model_endpoint,
+                    "model_auth_env": self.config.model_auth_env,
+                    "tool_allowlist": list(self.config.tool_allowlist),
+                    "durable_configured": self.config.durable is not None,
+                },
+                "execution_definition": self.execution_definition_digest(dispatch_binding),
             }
         )
 

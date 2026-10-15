@@ -49,6 +49,9 @@ class StandaloneEnrollmentModel(BaseModel):
       network events.
     - **managed_scope** — operator-controlled data-domain allowlist placed
       inside every pull lease; empty list authorizes nothing.
+    - **lease_policy** — operator-controlled managed lease posture
+      (policy version the host must adopt, staleness window bound); empty
+      dict authorizes no protected action under the managed profile.
     - **operator_id / admitted_at / admission** — who reviewed the
       enrollment, when, and with what outcome; pattern transitions carry
       these, reconnects do not.
@@ -67,6 +70,10 @@ class StandaloneEnrollmentModel(BaseModel):
     # Operator-controlled data-domain allowlist issued inside every pull
     # lease (step6b); empty = the lease authorizes no scope-checkable domain.
     managed_scope: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Operator-controlled managed lease posture (step7 I-Cb):
+    # {"policy_version": str, "max_staleness_seconds": number}; empty = the
+    # host refuses protected actions under the managed profile (deny-by-default).
+    lease_policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     operator_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     admitted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

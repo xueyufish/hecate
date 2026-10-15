@@ -73,6 +73,35 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _validate_lease_policy(lease_policy: dict | None) -> dict:
+    """Normalize the operator-declared managed lease posture.
+
+    Only ``policy_version`` (non-empty string) and ``max_staleness_seconds``
+    (positive number) are known; unknown keys are rejected (strict
+    admission). Empty/absent normalizes to ``{}`` — deny-by-default.
+    """
+
+    if lease_policy is None:
+        return {}
+    if not isinstance(lease_policy, dict):
+        raise TaskRunValidationError("lease policy must be an object")
+    unknown = set(lease_policy) - {"policy_version", "max_staleness_seconds"}
+    if unknown:
+        raise TaskRunValidationError(f"lease policy has unknown fields: {sorted(unknown)}")
+    normalized: dict = {}
+    version = lease_policy.get("policy_version")
+    if version is not None:
+        if not isinstance(version, str) or not version.strip():
+            raise TaskRunValidationError("lease policy version must be a non-empty string")
+        normalized["policy_version"] = version.strip()
+    staleness = lease_policy.get("max_staleness_seconds")
+    if staleness is not None:
+        if isinstance(staleness, bool) or not isinstance(staleness, (int, float)) or staleness <= 0:
+            raise TaskRunValidationError("lease policy staleness window must be a positive number")
+        normalized["max_staleness_seconds"] = float(staleness)
+    return normalized
+
+
 class TaskRunRegistry:
     """The only writer of the task/run/enrollment/link tables."""
 
@@ -485,6 +514,7 @@ class TaskRunRegistry:
         operator_id: uuid.UUID,
         admitted: bool,
         managed_scope: list[str] | None = None,
+        lease_policy: dict | None = None,
     ) -> StandaloneEnrollmentModel:
         """Operator-reviewed transition of the managed new-runs opt-in.
 
@@ -492,7 +522,10 @@ class TaskRunRegistry:
         the audit row records who decided, and scheduling rights change
         only through this door. ``managed_scope`` is the operator-declared
         data-domain allowlist placed into every pull lease; empty/absent
-        authorizes nothing (deny-by-default).
+        authorizes nothing (deny-by-default). ``lease_policy`` is the
+        operator-declared managed lease posture (the policy version hosts
+        must adopt and the staleness window bound); empty/absent authorizes
+        no protected action under the managed profile (deny-by-default).
         """
         if managed_scope is not None:
             if (
@@ -502,6 +535,7 @@ class TaskRunRegistry:
             ):
                 raise TaskRunValidationError("managed scope must be a list of unique non-empty strings")
             managed_scope = [domain.strip() for domain in managed_scope]
+        normalized_policy = _validate_lease_policy(lease_policy)
         enrollment = await self._session.get(StandaloneEnrollmentModel, enrollment_id)
         if enrollment is None or enrollment.deleted or enrollment.workspace_id != workspace_id:
             raise TaskNotFoundError(f"enrollment {enrollment_id} not found in workspace")
@@ -551,6 +585,7 @@ class TaskRunRegistry:
             raise TaskRunValidationError(reason)
         enrollment.managed_new_runs = managed_new_runs
         enrollment.managed_scope = list(managed_scope) if managed_scope is not None else []
+        enrollment.lease_policy = normalized_policy
         enrollment.admission = AdmissionResult.ADMITTED if admitted else AdmissionResult.REJECTED
         enrollment.operator_id = operator_id
         enrollment.admitted_at = _now()
