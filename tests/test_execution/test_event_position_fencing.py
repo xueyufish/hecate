@@ -175,7 +175,7 @@ async def test_late_arrival_reorders_and_cursor_read_skips_nothing(db_env):
         assert [envelope.event_id for envelope in page.events if envelope.event_id == "evt-late"] == ["evt-late"]
 
 
-async def test_emit_survives_a_position_race(db_env):
+async def test_emit_survives_a_position_race(db_env, monkeypatch):
     """The governance emit path (actor/source required) converges the same
     way: a pre-allocated position lost to a concurrent writer retries into
     a fresh slot inside the caller's transaction."""
@@ -216,6 +216,14 @@ async def test_emit_survives_a_position_race(db_env):
 
     async with db_env() as session:
         svc = PlatformEventService(session)
+        original = svc.next_sequence
+        calls = []
+
+        async def stale_first(*args):
+            calls.append(None)
+            return 1 if len(calls) == 1 else await original(*args)
+
+        monkeypatch.setattr(svc, "next_sequence", stale_first)
         stored = await svc.emit(
             task_ref=TASK,
             run_ref=RUN,
@@ -226,3 +234,37 @@ async def test_emit_survives_a_position_race(db_env):
         )
         await session.commit()
         assert stored.source_sequence == 2  # retried into the fresh slot
+        assert len(calls) == 2
+
+
+@pytest.mark.parametrize("foreign_workspace", [False, True])
+async def test_conflicting_event_id_is_not_idempotent(db_env, foreign_workspace):
+    from hecate.execution.governance_events import PlatformEventConflictError
+
+    original = _envelope("same-id")
+    async with db_env() as session:
+        await PlatformEventService(session).append_resequenced(original, workspace_id=WS)
+        await session.commit()
+    async with db_env() as session:
+        changed = original if foreign_workspace else replace(original, payload={"event_type": "tampered"})
+        with pytest.raises(PlatformEventConflictError, match="conflicts"):
+            await PlatformEventService(session).append_resequenced(
+                changed, workspace_id=uuid.uuid4() if foreign_workspace else WS
+            )
+        # The savepoint did not invalidate the caller's transaction.
+        await PlatformEventService(session).append_resequenced(_envelope("unrelated"), workspace_id=WS)
+        await session.commit()
+    async with db_env() as session:
+        event = await PlatformEventService(session).find_by_event_id("same-id")
+        assert event.payload == original.payload
+
+
+async def test_null_workspace_positions_are_unique(db_env):
+    async with db_env() as session:
+        service = PlatformEventService(session)
+        await service.append(_envelope("first", 0))
+        await session.commit()
+    async with db_env() as session:
+        with pytest.raises(IntegrityError):
+            await PlatformEventService(session).append(_envelope("second", 0))
+        await session.rollback()

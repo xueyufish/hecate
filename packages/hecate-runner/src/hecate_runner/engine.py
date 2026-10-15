@@ -206,6 +206,7 @@ class RunState:
     wait_token: str | None = None
     dispatch_denied: bool = False
     model_invocation_id: str | None = None
+    local_approval_refs: dict[str, str] = field(default_factory=dict)
 
 
 class EvidenceUnavailableError(Exception):
@@ -398,8 +399,10 @@ class ExecutionEngine:
             state.dispatch_denied = governance_refusal.get("status") != "awaiting_approval"
             self.record_tool_result(state, tool_name, governance_refusal)
             return governance_refusal
-        if tool_name in self._approval_tools and not await self._consume_wake_grant(
-            state, tool_name, digest, arguments
+        if (
+            tool_name in self._approval_tools
+            and action_key_for(action_run_id, tool_name) not in state.local_approval_refs
+            and not await self._consume_wake_grant(state, tool_name, digest, arguments)
         ):
             # A wait is not an action claim: no business dispatch has begun.
             state.wait_request = {
@@ -581,7 +584,9 @@ class ExecutionEngine:
         this path bridges disconnects without spending lease validity.
         """
 
-        if self._approval_finder is None:
+        if self._approval_finder is None or self._lease_gate is None:
+            return False
+        if not self._lease_gate.approval_scope_allows(arguments.get("domain")):
             return False
         from hecate_governance.action import target_resources_for
         from hecate_governance.approval import ActionRequest
@@ -607,6 +612,7 @@ class ExecutionEngine:
             return False
         if self._approval_gate is None or not await self._approval_gate(approval_ref, request):
             return False
+        state.local_approval_refs[request.invocation_id] = approval_ref
         try:
             self._evidence.append(
                 "approval_basis",
@@ -697,22 +703,26 @@ class ExecutionEngine:
 
         principal = ActionPrincipal.from_verified_claims(
             {"sub": state.principal},
-            source=PrincipalSource.RUNNER_LOCAL,
+            source=PrincipalSource.MANAGED_DELIVERY if state.managed else PrincipalSource.RUNNER_LOCAL,
             domains=tuple(state.domains),
         )
         persisted = self._durable.store.get_task_input(state.task_ref) or {} if self._durable and state.task_ref else {}
         grant = persisted.get("_wake_grant") or {}
         approval_ref = grant.get("approval_ref") if grant.get("tool") == tool_name else None
         origins = persisted.get("_action_origins") or {}
+        invocation_id = action_key_for(origins.get(tool_name, state.run_id), tool_name)
+        approval_ref = state.local_approval_refs.get(invocation_id, approval_ref)
         gov_context = GovContext(
             principal=principal,
             tool_name=tool_name,
             arguments=arguments,
             arguments_digest=tool_arguments_digest(arguments),
-            invocation_id=action_key_for(origins.get(tool_name, state.run_id), tool_name),
+            invocation_id=invocation_id,
             target_resources=target_resources_for(arguments),
             task_ref=state.task_ref.id if state.task_ref else None,
             tool_side_effect=effect.value,
+            managed_execution=state.managed,
+            approval_ref=approval_ref,
         )
         decision = await self._governance_service.authorize(
             gov_context, approval_ref=approval_ref, now=datetime.now(UTC), evidence_writable=True

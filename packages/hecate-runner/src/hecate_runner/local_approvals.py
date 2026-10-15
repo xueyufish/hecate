@@ -221,25 +221,38 @@ def make_local_approval_finder(
 
     async def _find(request: ActionRequest) -> str | None:
         with session_factory() as session:
-            row = session.execute(
-                select(LocalApprovalRow)
-                .where(
-                    LocalApprovalRow.principal_fingerprint == request.principal_fingerprint,
-                    LocalApprovalRow.tool_name == request.tool_name,
-                    LocalApprovalRow.arguments_digest == request.arguments_digest,
-                    LocalApprovalRow.revoked.is_(False),
-                    LocalApprovalRow.judgment == "approved",
-                    LocalApprovalRow.consumed_by_invocation_id.is_(None),
+            rows = (
+                session.execute(
+                    select(LocalApprovalRow)
+                    .where(
+                        LocalApprovalRow.principal_fingerprint == request.principal_fingerprint,
+                        LocalApprovalRow.tool_name == request.tool_name,
+                        LocalApprovalRow.arguments_digest == request.arguments_digest,
+                        LocalApprovalRow.revoked.is_(False),
+                        LocalApprovalRow.judgment == "approved",
+                        or_(
+                            LocalApprovalRow.consumed_by_invocation_id.is_(None),
+                            LocalApprovalRow.consumed_by_invocation_id == request.invocation_id,
+                        ),
+                    )
+                    .order_by(LocalApprovalRow.issued_at.desc())
                 )
-                .order_by(LocalApprovalRow.issued_at.desc())
-                .limit(1)
-            ).scalar_one_or_none()
-            if row is None:
-                return None
+                .scalars()
+                .all()
+            )
             registered = approvers() if callable(approvers) else approvers
-            if registered is not None and row.decided_by not in registered:
-                return None
-            return row.approval_ref
+            for row in rows:
+                if registered is not None and row.decided_by not in registered:
+                    continue
+                binding = _binding_from_row(row)
+                if binding.expires_at is not None:
+                    anchor = TimeAnchor(binding.anchor_wall, binding.anchor_monotonic, binding.clock_epoch)
+                    _, untrusted = TrustedClock().trusted_now(anchor)
+                    if untrusted is not None:
+                        continue
+                if check_binding(binding, request, now=datetime.now(UTC)).check is BindingCheck.OK:
+                    return row.approval_ref
+            return None
 
     return _find
 

@@ -12,15 +12,11 @@ down_revision = "c9dae0f1b2a3"
 branch_labels = None
 depends_on = None
 
-_POSITION_PREDICATE = (
-    "workspace_id IS :ws AND run_issuer_domain = :iss AND run_ref_id = :rid AND source_sequence = :seq"
-)
-
 
 def upgrade() -> None:
     """Repair same-position duplicates, then enforce one row per position.
 
-    The repair keeps the earliest-inserted row (lowest primary key) of each
+    The repair keeps the earliest-created row (UUID breaks timestamp ties) of each
     duplicate group and removes the rest; removed event ids are printed into
     the migration log so the repair is auditable. With a deterministic
     keep-rule every duplicate group is resolvable — a failure here means the
@@ -29,6 +25,7 @@ def upgrade() -> None:
     """
 
     conn = op.get_bind()
+    table = sa.Table("platform_events", sa.MetaData(), autoload_with=conn)
     duplicates = conn.execute(
         sa.text(
             """
@@ -40,36 +37,17 @@ def upgrade() -> None:
         )
     ).fetchall()
     for ws, issuer, run_id, sequence in duplicates:
-        params = {"ws": ws, "iss": issuer, "rid": run_id, "seq": sequence}
-        keep = conn.execute(
-            sa.text(
-                f"""
-                SELECT id FROM platform_events
-                WHERE {_POSITION_PREDICATE}
-                ORDER BY id
-                LIMIT 1
-                """
-            ),
-            params,
-        ).scalar_one()
-        removed = conn.execute(
-            sa.text(
-                f"""
-                SELECT event_id FROM platform_events
-                WHERE {_POSITION_PREDICATE} AND id != :keep_id
-                """
-            ),
-            {**params, "keep_id": keep},
-        ).fetchall()
-        conn.execute(
-            sa.text(
-                f"""
-                DELETE FROM platform_events
-                WHERE {_POSITION_PREDICATE} AND id != :keep_id
-                """
-            ),
-            {**params, "keep_id": keep},
+        position = sa.and_(
+            table.c.workspace_id.is_not_distinct_from(ws),
+            table.c.run_issuer_domain == issuer,
+            table.c.run_ref_id == run_id,
+            table.c.source_sequence == sequence,
         )
+        keep = conn.execute(
+            sa.select(table.c.id).where(position).order_by(table.c.created_at.asc().nulls_last(), table.c.id).limit(1)
+        ).scalar_one()
+        removed = conn.execute(sa.select(table.c.event_id).where(position, table.c.id != keep)).fetchall()
+        conn.execute(table.delete().where(position, table.c.id != keep))
         print(
             f"[platform-events-fencing] duplicate position repaired: "
             f"workspace={ws} run={issuer}/{run_id} seq={sequence} "

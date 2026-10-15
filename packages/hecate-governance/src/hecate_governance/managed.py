@@ -18,9 +18,9 @@ Disconnection posture: a stale or missing lease never degrades into local
 self-authorization. Protected actions stop when the facts are absent, outside
 the configured window, minted under an unadopted policy version, or when time
 cannot be trusted — each denial names its branch. The window is
-``min(expires_at, issued_at + max_staleness_seconds)``; an operator-declared
-expected policy version is mandatory for protected actions (a host without one
-does not run protected actions under the managed profile — fail closed).
+``min(expires_at, issued_at + max_staleness_seconds)``. An operator-declared
+expected policy version is enforced strictly; undeclared legacy posture
+keeps expiry and trusted-time enforcement.
 """
 
 from __future__ import annotations
@@ -31,9 +31,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from hecate_governance.action import ActionDecision
+from hecate_governance.approval import ActionRequest, ApprovalGate, ApprovalLedger, ConsumeStatus
 from hecate_governance.clock import TimeAnchor, TrustedClock
 from hecate_governance.policy import PolicyContext, PolicyOutcome, PolicyProfile, RevocationView
-from hecate_governance.principal import ActionPrincipal
+from hecate_governance.principal import ActionPrincipal, PrincipalSource
 
 WRITE_SIDE_EFFECT_CLASSES = frozenset({"idempotent_write", "non_idempotent_write", "external_side_effect"})
 
@@ -108,12 +109,14 @@ class ManagedLeaseProfile(PolicyProfile):
         facts_provider: Callable[[], ManagedLeaseFacts | None],
         anchor_provider: Callable[[], TimeAnchor | None],
         clock: TrustedClock | None = None,
+        approval_ledger: ApprovalLedger | None = None,
     ) -> None:
         self._inner = inner
         self._config = config
         self._facts_provider = facts_provider
         self._anchor_provider = anchor_provider
         self._clock = clock or TrustedClock()
+        self._approvals = ApprovalGate(approval_ledger) if approval_ledger is not None else None
 
     @property
     def version(self) -> str:
@@ -122,15 +125,40 @@ class ManagedLeaseProfile(PolicyProfile):
         return f"managed-lease-1/{inner_version}@{expected or 'none'}"
 
     async def evaluate(self, context: PolicyContext) -> PolicyOutcome:
-        if context.tool_side_effect not in WRITE_SIDE_EFFECT_CLASSES:
+        if not context.managed_execution or context.tool_side_effect not in WRITE_SIDE_EFFECT_CLASSES:
             return await self._inner.evaluate(context)
         verdict = self._judge_lease()
-        if not verdict.ok:
+        if not verdict.ok and not await self._approval_allows(context):
             return PolicyOutcome(ActionDecision.DENY, self.version, verdict.reason)
         outcome = await self._inner.evaluate(context)
         # Record the composite version on gate-adjudicated outcomes: both the
         # lease gate and the inner rules participated in this judgment.
         return PolicyOutcome(outcome.decision, self.version, outcome.reason, outcome.tool_scope)
+
+    async def _approval_allows(self, context: PolicyContext) -> bool:
+        facts = self._facts_provider()
+        if facts is None or self._approvals is None or context.approval_ref is None or context.principal is None:
+            return False
+        domain = context.arguments.get("domain")
+        if domain not in facts.scope:
+            return False
+        if self._config.allowed_issuers and facts.issuer not in self._config.allowed_issuers:
+            return False
+        expected = self._config.expected_policy_version
+        if expected is not None and facts.policy_version != expected:
+            return False
+        request = ActionRequest(
+            invocation_id=context.invocation_id,
+            principal_fingerprint=context.principal.fingerprint(),
+            tool_name=context.tool_name,
+            arguments_digest=context.arguments_digest,
+            target_resources=context.target_resources,
+            domains=context.principal.domains,
+            task_scope=context.task_ref,
+            deployment_id=context.deployment_id,
+        )
+        outcome = await self._approvals.consume(context.approval_ref, request, now=datetime.now(UTC), clock=self._clock)
+        return outcome.status in (ConsumeStatus.CONSUMED, ConsumeStatus.SAME_ACTION_REBOUND)
 
     def _judge_lease(self) -> ManagedLeaseVerdict:
         facts = self._facts_provider()
@@ -164,7 +192,11 @@ class ManagedLeaseProfile(PolicyProfile):
         if facts.expires_at is not None:
             deadlines.append(_as_utc(facts.expires_at))
         staleness = self._config.max_staleness_seconds
-        if staleness is not None and facts.issued_at is not None:
+        if facts.expires_at is None:
+            return ManagedLeaseVerdict(False, "lease lacks a valid expiry")
+        if staleness is not None:
+            if facts.issued_at is None:
+                return ManagedLeaseVerdict(False, "lease lacks valid issued-at time required by staleness window")
             deadlines.append(_as_utc(facts.issued_at) + timedelta(seconds=staleness))
         if deadlines and now >= min(deadlines):
             return ManagedLeaseVerdict(
@@ -194,7 +226,11 @@ class ManagedRevocationView(RevocationView):
     async def is_revoked(self, principal: ActionPrincipal) -> bool:
         if await self._inner.is_revoked(principal):
             return True
-        return bool(self._trust_revoked_provider is not None and self._trust_revoked_provider())
+        return bool(
+            principal.source is PrincipalSource.MANAGED_DELIVERY
+            and self._trust_revoked_provider is not None
+            and self._trust_revoked_provider()
+        )
 
 
 def facts_from_claims(claims: Any) -> ManagedLeaseFacts:

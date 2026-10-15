@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import math
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -127,8 +128,7 @@ class ControlPlaneConfig:
     # Managed lease posture (step7 I-Cb): the operator policy version this
     # host has adopted and the local staleness window bound. Absent block =
     # step6 posture (expiry-only validation, no version check at the gate);
-    # the managed governance profile still refuses protected actions without
-    # an adopted policy version (deny-by-default at the profile layer).
+    # the managed profile still requires verified lease facts and trusted time.
     lease_policy: LeasePolicyConfig | None = None
 
 
@@ -147,7 +147,10 @@ def _load_lease_policy(raw: object) -> LeasePolicyConfig | None:
         raise ProfileError("control_plane.lease_policy.policy_version must be a non-empty string")
     staleness = raw.get("max_staleness_seconds")
     if staleness is not None and (
-        isinstance(staleness, bool) or not isinstance(staleness, (int, float)) or staleness <= 0
+        isinstance(staleness, bool)
+        or not isinstance(staleness, (int, float))
+        or not math.isfinite(staleness)
+        or staleness <= 0
     ):
         raise ProfileError("control_plane.lease_policy.max_staleness_seconds must be a positive number")
     return LeasePolicyConfig(
@@ -676,13 +679,8 @@ class Profile:
 
         return canonical_request_digest(
             {
-                "config": {
-                    "model_backend": self.config.model_backend,
-                    "model_endpoint": self.config.model_endpoint,
-                    "model_auth_env": self.config.model_auth_env,
-                    "tool_allowlist": list(self.config.tool_allowlist),
-                    "durable_configured": self.config.durable is not None,
-                },
+                "config": _load_json(self.directory / "runner.json", "runner config"),
+                "identity": _load_json(self.directory / "identity.json", "identity trust material"),
                 "execution_definition": self.execution_definition_digest(dispatch_binding),
             }
         )

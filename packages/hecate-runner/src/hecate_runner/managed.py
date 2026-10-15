@@ -138,7 +138,7 @@ class LeaseGate:
         # so a restart (empty gate) re-anchors at the next successful pull.
         from hecate_governance.clock import TrustedClock
 
-        self._trusted_clock = trusted_clock or TrustedClock()
+        self._trusted_clock = trusted_clock or TrustedClock(now_fn=self._clock)
         self._anchor: Any = None
         self._current_claims: Claims | None = None
         self._consumed: set[str] = set()
@@ -183,11 +183,12 @@ class LeaseGate:
             lease = self._current
             if lease is None:
                 raise CredentialError("no authorization lease; managed actions are stopped")
+            moment = self._trusted_now()
             claims = verify_lease(
                 lease,
                 self._secret,
                 deployment_domain=self._deployment_domain,
-                now=self._clock(),
+                now=moment,
             )
             self._check_identity(claims)
             self._check_lease_policy(claims)
@@ -216,18 +217,45 @@ class LeaseGate:
             presented = claims.policy_version or "none"
             raise LeaseRefusedError(f"lease policy version {presented!r} does not match the adopted {expected!r}")
         staleness = getattr(policy, "max_staleness_seconds", None)
-        if staleness is None or not claims.iat:
+        if staleness is None:
             return
-        if self._anchor is None:
-            raise CredentialError("no trusted-time anchor for the installed lease")
-        now, untrusted = self._trusted_clock.trusted_now(self._anchor)
-        if untrusted is not None:
-            raise CredentialError(f"time cannot be trusted: {untrusted}")
-        issued = datetime.fromisoformat(claims.iat)
+        if not claims.iat:
+            raise LeaseRefusedError("lease lacks issued-at time required by the staleness window")
+        now = self._trusted_now()
+        try:
+            issued = datetime.fromisoformat(claims.iat)
+        except (TypeError, ValueError) as exc:
+            raise LeaseRefusedError("lease has invalid issued-at time") from exc
         if issued.tzinfo is None:
             issued = issued.replace(tzinfo=UTC)
         if now >= issued + timedelta(seconds=float(staleness)):
             raise CredentialError("lease validity window exhausted (staleness deadline passed)")
+
+    def _trusted_now(self) -> datetime:
+        # Invalid installations have no anchor; preserve their signature or
+        # expiry diagnostics at the verification boundary.
+        if self._anchor is None:
+            return self._clock()
+        now, untrusted = self._trusted_clock.trusted_now(self._anchor)
+        if untrusted is not None:
+            raise LeaseRefusedError(f"time cannot be trusted: {untrusted}")
+        return now
+
+    def approval_scope_allows(self, domain: object) -> bool:
+        """Check the last verified lease scope without spending its nonce.
+
+        An approval can bridge expiry, but cannot mint a wider managed scope
+        or override a mismatched host identity or adopted policy version.
+        """
+        claims = self._current_claims
+        if claims is None or not isinstance(domain, str) or domain not in (claims.scope or []):
+            return False
+        try:
+            self._check_identity(claims)
+        except CredentialError:
+            return False
+        expected = getattr(self._lease_policy, "expected_policy_version", None)
+        return expected is None or claims.policy_version == expected
 
     def facts(self) -> Any:
         """Pure-data facts of the current verified lease (profile input).
@@ -404,6 +432,7 @@ class ManagedChannel:
         # clears the marker. Drift stops new work via the platform gate and
         # the lease's natural expiry, never a local mode switch.
         self.last_config_drift: str | None = None
+        self.authorization_revoked = False
         self._loop_task: asyncio.Task[None] | None = None
 
     # -- public API ------------------------------------------------------------
@@ -748,18 +777,28 @@ class ManagedChannel:
         except httpx.HTTPError as exc:
             logger.warning("managed channel %s %s failed: %s", method, path, exc)
             return None
+        if response.status_code == 403:
+            try:
+                error = response.json().get("detail", {}).get("error", {})
+            except (ValueError, AttributeError):
+                error = {}
+            if error.get("code") == "enrollment-inactive":
+                self.authorization_revoked = True
+        if response.status_code >= 400 and self._record_config_drift(response) is not None:
+            return None
+        if response.status_code == 401 and auth:
+            self._credential = None
         if response.status_code in tolerate:
             logger.info("managed channel %s %s tolerated %d", method, path, response.status_code)
             return None
         if response.status_code >= 400:
-            drift = self._record_config_drift(response)
-            if drift is not None:
-                return None
             logger.warning(
                 "managed channel %s %s rejected: %d %s", method, path, response.status_code, response.text[:300]
             )
             return None
-        self.last_config_drift = None
+        if path.split("?", 1)[0] in ("/managed/host/pull", "/managed/host/accept"):
+            self.last_config_drift = None
+            self.authorization_revoked = False
         if not response.content:
             return {}
         return response.json()

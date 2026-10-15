@@ -50,7 +50,10 @@ class PolicyContext:
     ``arguments`` carries the validated parameter content; ``invocation_id``
     identifies the logical call, ``task_ref`` and ``deployment_id`` bind the
     evaluation to the calling task/deployment so two tasks with different
-    grants never share a judgment.
+    grants never share a judgment. ``managed_execution`` is trusted adapter
+    provenance (defaults to the stricter managed interpretation); an engine
+    explicitly marks local runs. ``approval_ref`` identifies the verified
+    action binding for profiles that bridge an expired managed lease.
     """
 
     principal: ActionPrincipal | None
@@ -67,6 +70,8 @@ class PolicyContext:
     tool_metadata: Mapping[str, Any] | None = None
     workspace_id: str | None = None
     runtime_rules: tuple[Any, ...] = ()
+    managed_execution: bool = True
+    approval_ref: str | None = None
 
 
 @dataclass(frozen=True)

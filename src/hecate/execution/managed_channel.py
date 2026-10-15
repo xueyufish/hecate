@@ -178,10 +178,13 @@ def issue_lease_for(host: HostContext, secret: bytes, *, ttl_seconds: float) -> 
 
     The lease carries the enrollment's managed scope: the operator-declared
     data domains protected actions may address until the next pull, and the
-    posture's policy version — an enrollment without an adopted version
-    issues version-less leases the host's managed profile refuses.
+    posture's policy version. An explicitly declared host version refuses
+    version-less leases; legacy hosts still enforce scope and expiry.
     """
 
+    window = host.lease_policy.get("max_staleness_seconds")
+    if window is not None:
+        ttl_seconds = min(ttl_seconds, float(window))
     lease, _nonce = lease_claims(
         secret,
         iss=host.claims.iss,
@@ -578,7 +581,12 @@ class ManagedProjectionService:
                     raise ManagedChannelError("event_id replay conflicts with recorded host facts")
                 skipped += 1
                 continue
-            await events.append_resequenced(stored, workspace_id=host.workspace_id)
+            from hecate.execution.governance_events import PlatformEventConflictError
+
+            try:
+                await events.append_resequenced(stored, workspace_id=host.workspace_id)
+            except PlatformEventConflictError as exc:
+                raise DeliveryConflictError(str(exc)) from exc
             fresh.append(envelope)
             projected += 1
         await self._update_run_projection(host, local_task_ref, fresh, platform_run_id=platform_run_id)

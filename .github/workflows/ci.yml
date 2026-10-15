@@ -216,9 +216,11 @@ jobs:
       - name: Platform-native continuation acceptance against real PostgreSQL
         env:
           HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+          HECATE_REVIEW_POSTGRES_URL: postgresql+asyncpg://hecate:hecate@localhost:5432/postgres
         run: |
           uv pip install pytest-timeout "psycopg[binary]>=3.2" "asyncpg>=0.29"
           uv run pytest tests/test_execution/test_builtin_continuation.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          uv run pytest tests/test_execution/test_managed_lease_postgres_review.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with

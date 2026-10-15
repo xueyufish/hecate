@@ -26,6 +26,7 @@ pattern: a missing row and a foreign-workspace row are indistinguishable.
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
@@ -78,7 +79,7 @@ def _validate_lease_policy(lease_policy: dict | None) -> dict:
 
     Only ``policy_version`` (non-empty string) and ``max_staleness_seconds``
     (positive number) are known; unknown keys are rejected (strict
-    admission). Empty/absent normalizes to ``{}`` — deny-by-default.
+    admission). Empty/absent normalizes to the legacy expiry-only posture.
     """
 
     if lease_policy is None:
@@ -96,7 +97,12 @@ def _validate_lease_policy(lease_policy: dict | None) -> dict:
         normalized["policy_version"] = version.strip()
     staleness = lease_policy.get("max_staleness_seconds")
     if staleness is not None:
-        if isinstance(staleness, bool) or not isinstance(staleness, (int, float)) or staleness <= 0:
+        if (
+            isinstance(staleness, bool)
+            or not isinstance(staleness, (int, float))
+            or not math.isfinite(staleness)
+            or staleness <= 0
+        ):
             raise TaskRunValidationError("lease policy staleness window must be a positive number")
         normalized["max_staleness_seconds"] = float(staleness)
     return normalized
@@ -524,8 +530,8 @@ class TaskRunRegistry:
         data-domain allowlist placed into every pull lease; empty/absent
         authorizes nothing (deny-by-default). ``lease_policy`` is the
         operator-declared managed lease posture (the policy version hosts
-        must adopt and the staleness window bound); empty/absent authorizes
-        no protected action under the managed profile (deny-by-default).
+        must adopt and the staleness window bound); empty/absent keeps the
+        legacy expiry-only posture, while scope remains deny-by-default.
         """
         if managed_scope is not None:
             if (

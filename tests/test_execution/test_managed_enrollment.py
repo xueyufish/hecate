@@ -412,6 +412,8 @@ async def test_opt_in_rejects_invalid_lease_policy(ws_env, registry: TrustRootRe
         {"policy_version": "  "},
         {"max_staleness_seconds": 0},
         {"max_staleness_seconds": "120"},
+        {"max_staleness_seconds": float("nan")},
+        {"max_staleness_seconds": float("inf")},
         ["not", "an", "object"],
     ):
         with pytest.raises(TaskRunValidationError, match="lease policy"):
@@ -443,12 +445,13 @@ def test_issued_lease_carries_enrollment_policy_version():
         host_name="host-alpha",
         claims=claims,
         managed_scope=["inventory"],
-        lease_policy={"policy_version": "mp-2026.10"},
+        lease_policy={"policy_version": "mp-2026.10", "max_staleness_seconds": 10},
     )
     lease = issue_lease_for(host, SECRET, ttl_seconds=120)
     verified = mc.verify_lease(lease, SECRET, deployment_domain="host-alpha", now=moment)
     assert verified.policy_version == "mp-2026.10"
     assert verified.scope == ["inventory"]
+    assert (datetime.fromisoformat(verified.exp) - datetime.fromisoformat(verified.iat)).total_seconds() == 10
 
     postureless = HostContext(
         workspace_id=host.workspace_id,

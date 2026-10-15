@@ -28,6 +28,45 @@ ISSUER = "lease-issuer"
 DEPLOYMENT = "host-root"
 
 
+@pytest.mark.parametrize("posture", [None, _Posture(expected_policy_version="v1")])
+async def test_expiry_only_posture_still_rejects_clock_rollback(posture):
+    wall = [datetime.now(UTC)]
+    mono = [1000.0]
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        clock=lambda: wall[0],
+        lease_policy=posture,
+        trusted_clock=TrustedClock(now_fn=lambda: wall[0], monotonic_fn=lambda: mono[0]),
+    )
+    gate.update(_lease(policy_version="v1", now=wall[0]))
+    wall[0] -= timedelta(hours=1)
+    mono[0] += 3700
+    with pytest.raises(CredentialError, match="time cannot be trusted"):
+        await gate.check()
+    assert not gate._consumed
+
+
+@pytest.mark.parametrize("iat", [None, "invalid"])
+async def test_window_requires_valid_signed_issue_time(iat):
+    import hashlib
+    import hmac
+
+    from hecate_durable.contracts.credentials import canonical_claims_digest
+
+    token = _lease()
+    token.pop("hmac")
+    token.pop("iat")
+    if iat is not None:
+        token["iat"] = iat
+    token["hmac"] = hmac.new(SECRET, canonical_claims_digest(token).encode(), hashlib.sha256).hexdigest()
+    gate = LeaseGate(SECRET, deployment_domain=DEPLOYMENT, lease_policy=_Posture(max_staleness_seconds=60))
+    gate.update(token)
+    with pytest.raises(CredentialError, match="issued-at"):
+        await gate.check()
+    assert not gate._consumed
+
+
 def _lease(**overrides):
     return lease_claims(
         SECRET,
