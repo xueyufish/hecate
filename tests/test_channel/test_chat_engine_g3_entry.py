@@ -312,9 +312,9 @@ async def test_output_validation_controls_run_projection(
     assert correlation["status"] == "registered"
     run = await TaskRunRegistry(db_session).get_run(uuid.UUID(correlation["run_ref"]["id"]), uuid.UUID(int=0))
     if repair_succeeds:
-        assert run.projection == {"state": "succeeded", "summary": repaired_content}
+        assert run.projection == {"state": "succeeded", "summary": repaired_content, "entry_name": "http-chat"}
     else:
-        assert run.projection == {"state": "failed", "error_category": "invalid_output"}
+        assert run.projection == {"state": "failed", "error_category": "invalid_output", "entry_name": "http-chat"}
     assert tool_executor.calls == [(TOOL_NAME, {"a": 2, "b": 3})]
 
 
@@ -336,7 +336,7 @@ async def test_streamed_run_has_summary_and_persisted_envelopes(client, db_sessi
     assert isinstance(first_chunk["created"], int)
     correlation = first_chunk["hecate_correlation"]
     run = await TaskRunRegistry(db_session).get_run(uuid.UUID(correlation["run_ref"]["id"]), uuid.UUID(int=0))
-    assert run.projection == {"state": "succeeded", "summary": "The answer is 5"}
+    assert run.projection == {"state": "succeeded", "summary": "The answer is 5", "entry_name": "http-chat"}
     reader = RunEventMapper(
         BackendRef.from_dict(correlation["task_ref"]),
         BackendRef.from_dict(correlation["run_ref"]),

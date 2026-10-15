@@ -144,3 +144,66 @@ def test_tool_pairing_ignores_non_tool_events() -> None:
     report = validate_tool_pairing(events)
     assert report.ok
     assert not report.paired
+
+
+async def test_terminal_envelope_carries_state_category_and_safe_error() -> None:
+    mapper = RunEventMapper(_TASK, _RUN)
+    await mapper.map_stream_event({"type": "message", "content": "partial"})
+    terminal = await mapper.write_terminal_envelope(
+        state="failed", stop_category="iteration_limit", error_type="MaxSuperstepsError"
+    )
+    assert terminal.kind is EventKind.TERMINAL
+    assert terminal.payload_schema_ref == "hecate.entry.terminal/0"
+    assert terminal.payload["state"] == "failed"
+    assert terminal.payload["stop_category"] == "iteration_limit"
+    assert terminal.payload["error"] == {"type": "MaxSuperstepsError"}
+    assert terminal.source_sequence == 1
+    # The terminal envelope pages together with the stream events.
+    page = await mapper.read_events()
+    assert [e.kind for e in page.events] == [EventKind.EVENT, EventKind.TERMINAL]
+
+
+async def test_terminal_envelope_success_carries_artifacts_only_when_present() -> None:
+    mapper = RunEventMapper(_TASK, _RUN)
+    ok = await mapper.write_terminal_envelope(
+        state="succeeded", artifacts=[{"kind": "artifact", "issuer_domain": "hecate", "id": "a1"}]
+    )
+    assert ok.payload == {
+        "state": "succeeded",
+        "artifacts": [{"kind": "artifact", "issuer_domain": "hecate", "id": "a1"}],
+    }
+    assert await mapper.write_terminal_envelope(state="succeeded") is ok
+    assert len((await mapper.read_events()).events) == 1
+    bare = await RunEventMapper(_TASK, _RUN).write_terminal_envelope(state="cancelled", stop_category="cancelled")
+    assert bare.payload == {"state": "cancelled", "stop_category": "cancelled"}
+
+
+def test_extract_declared_artifacts_accepts_only_platform_artifact_refs() -> None:
+    from hecate.execution.entry_events import extract_declared_artifacts
+
+    accepted, rejected = extract_declared_artifacts(
+        [
+            {"kind": "artifact", "issuer_domain": "hecate", "id": "a1"},
+            {"kind": "artifact", "issuer_domain": "foreign", "id": "a2"},
+            {"kind": "run", "issuer_domain": "hecate", "id": "r1"},
+            {"kind": "artifact", "issuer_domain": "hecate"},
+            "junk",
+        ],
+        issuer_domain="hecate",
+        verified_artifact_ids={"a1"},
+    )
+    assert accepted == [{"kind": "artifact", "issuer_domain": "hecate", "id": "a1"}]
+    reasons = {r["reason"] for r in rejected}
+    assert any("foreign issuer" in r for r in reasons)
+    assert any("unsupported reference kind" in r for r in reasons)
+    assert any("issuer_domain and id" in r for r in reasons)
+    assert any("must be an object" in r for r in reasons)
+
+
+def test_extract_declared_artifacts_tolerates_absent_or_malformed_container() -> None:
+    from hecate.execution.entry_events import extract_declared_artifacts
+
+    assert extract_declared_artifacts(None, issuer_domain="hecate") == ([], [])
+    accepted, rejected = extract_declared_artifacts({"kind": "artifact"}, issuer_domain="hecate")
+    assert accepted == []
+    assert rejected and "must be a list" in rejected[0]["reason"]

@@ -1,0 +1,12 @@
+{
+  "contract_version": "0.1",
+  "kind": "terminal",
+  "event_id": "entry-terminal-example",
+  "task_ref": {"kind": "task", "issuer_domain": "hecate", "id": "task-example"},
+  "run_ref": {"kind": "run", "issuer_domain": "hecate", "id": "run-example"},
+  "source_sequence": 1,
+  "occurred_at": "2026-10-15T00:00:00+00:00",
+  "received_at": "2026-10-15T00:00:00+00:00",
+  "payload_schema_ref": "hecate.entry.terminal/0",
+  "payload": {"state": "failed", "stop_category": "execution_failed", "error": {"type": "RuntimeError"}}
+}

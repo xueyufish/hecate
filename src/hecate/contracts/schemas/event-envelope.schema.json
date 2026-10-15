@@ -8,7 +8,7 @@
   "additionalProperties": true,
   "properties": {
     "contract_version": { "type": "string", "minLength": 1 },
-    "kind": { "enum": ["event", "gap"] },
+    "kind": { "enum": ["event", "gap", "terminal"] },
     "event_id": { "type": "string", "minLength": 1 },
     "task_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/taskRef" },
     "run_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
@@ -33,6 +33,32 @@
     }
   },
   "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "terminal" } } },
+      "then": {
+        "required": ["payload_schema_ref", "payload"],
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": ["state"],
+            "properties": {
+              "state": { "enum": ["succeeded", "failed", "cancelled"] },
+              "stop_category": { "type": "string", "minLength": 1 },
+              "error": {
+                "type": "object",
+                "required": ["type"],
+                "additionalProperties": false,
+                "properties": { "type": { "type": "string", "minLength": 1 } }
+              },
+              "artifacts": {
+                "type": "array",
+                "items": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/artifactRef" }
+              }
+            }
+          }
+        }
+      }
+    },
     {
       "if": { "properties": { "kind": { "const": "event" } } },
       "then": { "required": ["payload_schema_ref"] }

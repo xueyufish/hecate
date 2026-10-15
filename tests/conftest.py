@@ -418,3 +418,22 @@ async def governance_session_factory(tmp_path, db_session):
         yield factory
     finally:
         await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def reset_shared_registry_session_factory():
+    """Keep entry registry-write routing deterministic per test.
+
+    An app-lifespan test registers the global registry session factory for
+    its own entry services; without a reset that registration would bleed
+    into later unit tests whose ``db`` fixture points at a different
+    database, silently rerouting Task/Run registration writes. Unit tests
+    opt into independent-commit semantics by passing the factory (or
+    registering one) explicitly.
+    """
+    from hecate.core.composition import entry_assembly
+
+    previous = entry_assembly._shared_registry_session_factory
+    entry_assembly._shared_registry_session_factory = None
+    yield
+    entry_assembly._shared_registry_session_factory = previous
