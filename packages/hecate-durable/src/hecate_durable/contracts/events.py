@@ -1,9 +1,11 @@
 """EventEnvelope - normalized cross-process event mapping.
 
 kind=event carries a payload declared by ``payload_schema_ref``; kind=gap is an
-explicit marker for a missing sequence range. ``source_sequence`` is per-run
-and monotonically increasing as emitted by the backend; receivers never rebuild
-a global order from it. Unknown fields are tolerated and preserved.
+explicit marker for a missing sequence range; kind=terminal is the entry
+chain's one-per-run final state envelope (state, stop category, safe error
+summary). ``source_sequence`` is per-run and monotonically increasing as
+emitted by the backend; receivers never rebuild a global order from it.
+Unknown fields are tolerated and preserved.
 """
 
 from __future__ import annotations
@@ -16,10 +18,11 @@ from .references import BackendRef, RefKind, require_kind
 
 
 class EventKind(StrEnum):
-    """Envelope discriminant: real event or explicit gap marker."""
+    """Envelope discriminant: real event, gap marker, or run terminal state."""
 
     EVENT = "event"
     GAP = "gap"
+    TERMINAL = "terminal"
 
 
 class ActorKind(StrEnum):
@@ -117,6 +120,11 @@ class EventEnvelope:
                 raise ValueError("payload_schema_ref is required for kind=event")
             if self.gap is not None:
                 raise ValueError("gap range is not allowed on kind=event")
+        elif self.kind is EventKind.TERMINAL:
+            if not self.payload_schema_ref:
+                raise ValueError("payload_schema_ref is required for kind=terminal")
+            if self.gap is not None:
+                raise ValueError("gap range is not allowed on kind=terminal")
         elif self.kind is EventKind.GAP:
             if self.gap is None:
                 raise ValueError("gap range is required for kind=gap")

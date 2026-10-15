@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -518,6 +518,19 @@ class TaskControlService:
             run = await self._registry.get_run(run_id, workspace_id)
         except TaskNotFoundError as exc:
             raise TaskControlNotFoundError(str(exc)) from exc
+        if run.projection.get("entry_name"):
+            from hecate.core.composition.entry_assembly import get_shared_event_store
+            from hecate.execution.entry_events import RunEventMapper
+
+            mapper = RunEventMapper(
+                BackendRef(RefKind.TASK, run.issuer_domain, str(run.task_id)),
+                run_row_ref(run),
+                event_store=get_shared_event_store(),
+            )
+            page = await mapper.read_events(cursor=cursor, limit=limit)
+            # Backend snapshots and rejected raw candidates are evidence for
+            # trusted diagnostics, not part of the public event projection.
+            return replace(page, events=tuple(replace(event, extra={}) for event in page.events))
         return await PlatformEventService(self._db).read_run_events(
             run_row_ref(run), workspace_id=workspace_id, cursor=cursor, limit=limit
         )
@@ -535,6 +548,22 @@ class TaskControlService:
             run = await self._registry.get_run(run_id, workspace_id)
         except TaskNotFoundError as exc:
             raise TaskControlNotFoundError(str(exc)) from exc
+        if run.projection.get("entry_name"):
+            from hecate.contracts.execution.events import EventKind
+
+            current = cursor
+            while True:
+                page = await self.read_run_events(workspace_id, run_id, cursor=current)
+                for envelope in page.events:
+                    yield envelope
+                    current = str(envelope.source_sequence)
+                    if envelope.kind is EventKind.TERMINAL:
+                        return
+                if not page.has_more:
+                    await self._db.refresh(run)
+                    if run.projection.get("state") in _TERMINAL_LIFECYCLE_STATES:
+                        return
+                await asyncio.sleep(poll_interval)
         run_ref = run_row_ref(run)
         events = PlatformEventService(self._db)
         current = cursor

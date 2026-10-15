@@ -438,12 +438,17 @@ def start_runner_from(workdir: Path, profile_dir: Path, python_exe: Path) -> Run
             output = log_file.read_text(encoding="utf-8", errors="replace")
             raise RuntimeError(f"runner exited during startup (code {process.returncode}): {output[-2000:]}")
         if port_file.is_file():
-            port = int(port_file.read_text(encoding="utf-8").strip())
-            instance = RunnerInstance(workdir, profile_dir, python_exe, process, port)
-            status, body = instance.request("GET", "/healthz", token=None)
-            if status == 200 and body.get("ready"):
-                log_handle.close()
-                return instance
+            # Tolerate a poll racing the runner's write: a file that does
+            # not parse yet means "not published", keep polling until the
+            # startup deadline instead of crashing the scenario.
+            contents = port_file.read_text(encoding="utf-8").strip()
+            port = int(contents) if contents.isdigit() else None
+            if port is not None:
+                instance = RunnerInstance(workdir, profile_dir, python_exe, process, port)
+                status, body = instance.request("GET", "/healthz", token=None)
+                if status == 200 and body.get("ready"):
+                    log_handle.close()
+                    return instance
         time.sleep(0.3)
     log_handle.close()
     process.kill()

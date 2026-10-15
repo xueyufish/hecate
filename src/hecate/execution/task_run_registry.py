@@ -120,6 +120,13 @@ class TaskRunRegistry:
         self._session = session
         self._enrollment_resolver = enrollment_resolver
 
+    @property
+    def session(self) -> AsyncSession:
+        """The session this registry writes through (for callers that
+        scope auxiliary best-effort writes, e.g. conversation links, to
+        the same transaction as the registration)."""
+        return self._session
+
     # ------------------------------------------------------------------
     # Task
     # ------------------------------------------------------------------
@@ -295,22 +302,35 @@ class TaskRunRegistry:
         state: str,
         summary: str | None = None,
         error_category: str | None = None,
+        artifacts: list[dict[str, Any]] | None = None,
     ) -> RunModel:
         """Entry-side terminal projection (step5d contract closure).
 
         ``state`` reuses the platform terminal vocabulary the dispatcher
         already reads from the projection; ``summary`` is a contract-level
         result digest; ``error_category`` carries the entry stop category.
-        Internal exception detail never enters this surface — the caller
-        keeps it in server logs only.
+        ``artifacts`` are engine-declared output references already
+        validated against the run's issuer and workspace ownership; the entry
+        service, not the registry, owns that validation. Internal
+        exception detail never enters this surface — the caller keeps it
+        in server logs only.
         """
         if state not in _ENTRY_TERMINAL_STATES:
             raise TaskRunValidationError("terminal state must be one of: " + ", ".join(sorted(_ENTRY_TERMINAL_STATES)))
         projection: dict[str, Any] = {"state": state}
+        registered = await self._locked_run(run_id, workspace_id)
+        if registered.projection.get("entry_name"):
+            projection["entry_name"] = registered.projection["entry_name"]
         if summary is not None:
             projection["summary"] = summary
         if error_category is not None:
             projection["error_category"] = error_category
+        if artifacts is not None:
+            if not isinstance(artifacts, list) or not all(
+                isinstance(ref, dict) and ref.get("kind") == "artifact" for ref in artifacts
+            ):
+                raise TaskRunValidationError("artifacts must be a list of artifact references")
+            projection["artifacts"] = artifacts
         return await self.update_projection(run_id, workspace_id, projection=projection)
 
     async def import_observation_run(

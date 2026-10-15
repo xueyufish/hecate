@@ -15,17 +15,18 @@ adapters cannot leak engine internals into OpenAI-style chunks.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from hecate.contracts.execution.events import EventEnvelope, EventKind
-from hecate.contracts.execution.references import BackendRef
+from hecate.contracts.execution.references import BackendRef, RefKind
 from hecate.execution.backend import EventPage
 
 CONTRACT_VERSION = "0.1"
 PAYLOAD_SCHEMA_REF = "hecate.entry.engine_stream/0"
+TERMINAL_PAYLOAD_SCHEMA_REF = "hecate.entry.terminal/0"
 
 # Stream event keys the chat protocol layer may observe. Everything else
 # the engine attaches to the event stays backend-only.
@@ -55,6 +56,7 @@ class RunEventMapper:
         self._store_key = uuid.uuid5(uuid.NAMESPACE_URL, f"run:{run_ref.issuer_domain}:{run_ref.id}")
         self._sequence = 0
         self._envelopes: list[EventEnvelope] = []
+        self._terminal_envelope: EventEnvelope | None = None
 
     @property
     def last_sequence(self) -> int:
@@ -70,7 +72,6 @@ class RunEventMapper:
         in sequence order.
         """
         sequence = self._sequence
-        self._sequence += 1
         payload: dict[str, Any]
         if event.get("type") == "values":
             # The values stream nests client-observable state under
@@ -95,7 +96,6 @@ class RunEventMapper:
             payload=payload,
             extra={"backend_detail": dict(event)},
         )
-        self._envelopes.append(envelope)
         if self._event_store is not None:
             from hecate_runtime.eventstore import Event, EventType
 
@@ -107,6 +107,67 @@ class RunEventMapper:
                     payload={"envelope": envelope.to_dict()},
                 )
             )
+        self._sequence += 1
+        self._envelopes.append(envelope)
+        return envelope
+
+    async def write_terminal_envelope(
+        self,
+        *,
+        state: str,
+        stop_category: str | None = None,
+        error_type: str | None = None,
+        artifacts: list[dict[str, Any]] | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> EventEnvelope:
+        """Append the run's one terminal envelope (state + stop category).
+
+        Exactly one terminal envelope is expected per run; the entry
+        service writes it on both success and failure after mapping any
+        recoverable engine events, so the event view carries the same
+        terminal facts as the Run projection. ``error_type`` is the
+        exception class name only — messages and tracebacks stay in
+        server logs, never in the contract payload.
+        """
+        if self._terminal_envelope is not None:
+            return self._terminal_envelope
+        if state not in {"succeeded", "failed", "cancelled"}:
+            raise ValueError("terminal state must be succeeded, failed, or cancelled")
+        payload: dict[str, Any] = {"state": state}
+        if stop_category is not None:
+            payload["stop_category"] = stop_category
+        if error_type is not None:
+            payload["error"] = {"type": error_type}
+        if artifacts:
+            payload["artifacts"] = artifacts
+        sequence = self._sequence
+        envelope = EventEnvelope(
+            contract_version=CONTRACT_VERSION,
+            kind=EventKind.TERMINAL,
+            event_id=str(uuid.uuid4()),
+            task_ref=self._task_ref,
+            run_ref=self._run_ref,
+            source_sequence=sequence,
+            occurred_at=_utc_now(),
+            received_at=_utc_now(),
+            payload_schema_ref=TERMINAL_PAYLOAD_SCHEMA_REF,
+            payload=payload,
+            extra=extra or {},
+        )
+        if self._event_store is not None:
+            from hecate_runtime.eventstore import Event, EventType
+
+            await self._event_store.append(
+                Event(
+                    session_id=self._store_key,
+                    superstep=sequence,
+                    event_type=EventType.CUSTOM,
+                    payload={"envelope": envelope.to_dict()},
+                )
+            )
+        self._sequence += 1
+        self._envelopes.append(envelope)
+        self._terminal_envelope = envelope
         return envelope
 
     async def read_events(self, cursor: str | None = None, limit: int = 100) -> EventPage:
@@ -128,17 +189,61 @@ class RunEventMapper:
                 envelopes = persisted
         if envelopes is None:
             envelopes = self._envelopes
-        start = 0
-        if cursor is not None:
-            start = int(cursor) + 1
-        window = envelopes[start : start + limit]
-        next_index = start + len(window)
-        has_more = next_index < len(envelopes)
+        after = int(cursor) if cursor is not None else -1
+        pending = [envelope for envelope in envelopes if envelope.source_sequence > after]
+        window = pending[:limit]
+        has_more = len(pending) > len(window)
         return EventPage(
             events=tuple(window),
             next_cursor=str(window[-1].source_sequence) if window else cursor,
             has_more=has_more,
         )
+
+
+def extract_declared_artifacts(
+    declared: Any,
+    *,
+    issuer_domain: str,
+    verified_artifact_ids: Collection[str] = (),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split a result's declared artifact references into (accepted, rejected).
+
+    A reference is accepted only when it is a well-formed ARTIFACT reference
+    (``kind == "artifact"``, non-empty ``issuer_domain``/``id`` strings) whose
+    ``issuer_domain`` matches the platform issuer and its id has been
+    resolved in the verified workspace by the entry service. Anything else — wrong kind, foreign issuer, or a
+    malformed shape — is returned in ``rejected`` with a reason so the
+    contract never carries an unverifiable reference. Rejection evidence is
+    backend-side (envelope ``extra``); it never flips the execution terminal
+    state.
+    """
+    if declared is None:
+        return [], []
+    if not isinstance(declared, list):
+        return [], [{"ref": declared, "reason": "declared artifacts must be a list"}]
+    accepted: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for item in declared:
+        if not isinstance(item, dict):
+            rejected.append({"ref": item, "reason": "artifact reference must be an object"})
+            continue
+        kind = item.get("kind")
+        item_issuer = item.get("issuer_domain")
+        item_id = item.get("id")
+        if kind != RefKind.ARTIFACT.value:
+            rejected.append({"ref": item, "reason": f"unsupported reference kind: {kind!r}"})
+            continue
+        if not isinstance(item_issuer, str) or not item_issuer or not isinstance(item_id, str) or not item_id:
+            rejected.append({"ref": item, "reason": "artifact reference must carry issuer_domain and id"})
+            continue
+        if item_issuer != issuer_domain:
+            rejected.append({"ref": item, "reason": f"foreign issuer domain: {item_issuer!r}"})
+            continue
+        if item_id not in verified_artifact_ids:
+            rejected.append({"ref": item, "reason": "artifact ownership is not verified in workspace"})
+            continue
+        accepted.append({"kind": kind, "issuer_domain": item_issuer, "id": item_id})
+    return accepted, rejected
 
 
 @dataclass(frozen=True)

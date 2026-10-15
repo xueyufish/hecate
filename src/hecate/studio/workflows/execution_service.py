@@ -11,6 +11,7 @@ ConversationService orchestration.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import uuid
@@ -281,7 +282,10 @@ class WorkflowExecutionService:
         if input_data is not None:
             if agent_mode != "workflow" or not isinstance(input_data, dict):
                 raise ValueError("input_data requires workflow mode and a channel mapping")
-            if any(not isinstance(key, str) or key.startswith(("_", "sys.")) for key in input_data):
+            if any(
+                not isinstance(key, str) or key.startswith(("_", "sys.")) or key == "declared_artifacts"
+                for key in input_data
+            ):
                 raise ValueError("input_data cannot override runtime-owned channels")
 
         if messages is None:
@@ -525,22 +529,31 @@ class WorkflowExecutionService:
         """
         final_state: dict[str, Any] = {}
         engine_events: list[dict[str, Any]] = []
-        async for event in runtime.execute(
-            session_id=session_id,
-            initial_input=initial_input,
-            stream_mode=StreamMode.VALUES,
-            execution_mode=execution_mode,
-            resume_value=resume_value,
-        ):
-            # step5d contract closure: non-streaming runs carry their drained
-            # engine stream so the entry service maps the same envelope view
-            # the streaming path produces. The key is popped by the entry
-            # service and never reaches protocol output.
-            engine_events.append(dict(event))
-            if event.get("type") == "values":
-                final_state = event.get("state", {})
-            elif event.get("type") == "interrupt" and execution_mode == "conversational":
-                await self._mark_session_interrupted(session_id)
+        try:
+            async for event in runtime.execute(
+                session_id=session_id,
+                initial_input=initial_input,
+                stream_mode=StreamMode.VALUES,
+                execution_mode=execution_mode,
+                resume_value=resume_value,
+            ):
+                # step5d contract closure: non-streaming runs carry their drained
+                # engine stream so the entry service maps the same envelope view
+                # the streaming path produces. The key is popped by the entry
+                # service and never reaches protocol output.
+                engine_events.append(dict(event))
+                if event.get("type") == "values":
+                    final_state = event.get("state", {})
+                elif event.get("type") == "interrupt" and execution_mode == "conversational":
+                    await self._mark_session_interrupted(session_id)
+        except (Exception, asyncio.CancelledError) as exc:
+            # Events drained before the failure belong to the run's contract
+            # view, not just the logs: attach them so the entry failure path
+            # can still map the partial envelope stream before writing the
+            # terminal envelope.
+            with contextlib.suppress(Exception):
+                exc.engine_events = engine_events
+            raise
 
         messages = final_state.get("messages", [])
         content = ""
@@ -559,6 +572,13 @@ class WorkflowExecutionService:
         if suggested_questions:
             result["suggested_questions"] = suggested_questions
         result["_engine_events"] = engine_events
+        from hecate.core.output_artifacts import declared_output_artifacts
+
+        declared = declared_output_artifacts(
+            final_state, input_message_count=len((initial_input or {}).get("messages") or [])
+        )
+        if declared is not None:
+            result["declared_artifacts"] = declared
 
         return result
 
@@ -607,6 +627,15 @@ class WorkflowExecutionService:
             ):
                 if event.get("type") == "interrupt" and execution_mode == "conversational":
                     await self._mark_session_interrupted(session_id)
+                if event.get("type") == "values" and isinstance(event.get("state"), dict):
+                    from hecate.core.output_artifacts import declared_output_artifacts
+
+                    state = event["state"]
+                    declared = declared_output_artifacts(
+                        state, input_message_count=len((initial_input or {}).get("messages") or [])
+                    )
+                    if declared is not None:
+                        event = {**event, "state": {**state, "declared_artifacts": declared}}
                 yield event
         except BaseException as exc:
             # Best-effort save on disconnect; swallow save failures so the

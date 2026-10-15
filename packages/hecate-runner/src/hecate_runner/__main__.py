@@ -273,10 +273,15 @@ def main(argv: list[str] | None = None) -> int:
     httpd = server.serve()
     actual_port = httpd.server_address[1]
     # Optional port disclosure for harnesses that start the runner with an
-    # OS-assigned port (profile port 0); written after bind succeeds.
+    # OS-assigned port (profile port 0); written after bind succeeds. The
+    # temp+rename publication is atomic, so a poller that sees the file
+    # always sees the port — never an empty file between create and write.
     port_file = os.environ.get("RUNNER_PORT_FILE")
     if port_file:
-        Path(port_file).write_text(str(actual_port), encoding="utf-8")
+        port_path = Path(port_file)
+        staged = port_path.with_name(port_path.name + ".tmp")
+        staged.write_text(str(actual_port), encoding="utf-8")
+        staged.replace(port_path)
     print(
         f"hecate-runner: serving on {profile.config.host}:{actual_port} "
         f"(backend={profile.manifest.backend_type}, model={profile.config.model_backend}, "

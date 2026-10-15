@@ -30,6 +30,8 @@ _DEFAULT_WORKSPACE = uuid.UUID(int=0)
 
 _shared_event_store: Any = None
 _shared_session_state_store: Any = None
+_UNREGISTERED_FACTORY = object()
+_shared_registry_session_factory: Any = _UNREGISTERED_FACTORY
 
 
 def register_shared_event_store(store: Any) -> None:
@@ -51,6 +53,37 @@ def register_shared_session_state_store(store: Any) -> None:
     if _shared_session_state_store is not None and _shared_session_state_store is not store:
         logger.debug("Shared session-state store replaced by a newer registration")
     _shared_session_state_store = store
+
+
+def register_shared_registry_session_factory(factory: Any) -> None:
+    """Register the session factory for entry correlation/terminal writes.
+
+    Task/Run registration and terminal projections written through this
+    factory commit on their own connection, so they survive a rollback of
+    the caller's request transaction — the platform keeps the record of
+    an execution that actually happened without committing the caller's
+    business transaction. Entries without an ASGI lifespan lazily resolve
+    the application factory. Explicitly registering None selects the
+    legacy savepoint boundary, which does not guarantee this durability.
+    """
+    global _shared_registry_session_factory
+    if _shared_registry_session_factory is not None and _shared_registry_session_factory is not factory:
+        logger.debug("Shared registry session factory replaced by a newer registration")
+    _shared_registry_session_factory = factory
+
+
+def get_shared_registry_session_factory() -> Any | None:
+    """Resolve registry writes even for entries running without ASGI lifespan.
+
+    Registering None explicitly opts into the legacy transaction boundary;
+    an unregistered factory uses the configured application database.
+    """
+    global _shared_registry_session_factory
+    if _shared_registry_session_factory is _UNREGISTERED_FACTORY:
+        from hecate.core.database import async_session_factory
+
+        _shared_registry_session_factory = async_session_factory
+    return _shared_registry_session_factory
 
 
 def get_shared_event_store() -> Any:
