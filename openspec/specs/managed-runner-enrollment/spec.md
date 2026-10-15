@@ -260,3 +260,22 @@ The managed delivery gate SHALL be closed only by an installed Runner process co
 
 - **WHEN** 未配置 step6 PostgreSQL URL,或已配置并运行同一套验收
 - **THEN** 未配置时 PostgreSQL 参数化验收显式报告 skip(不作为通过);已配置时同一组场景在所配置的 PostgreSQL 上执行并如实报告结果
+
+### Requirement: 平台窗口与本地审批补位保持授权边界
+
+平台 SHALL 将操作员声明的陈旧窗口施加到签名授权有效期；宿主 SHALL 在所有租约期限判断中校验可信时间，已声明窗口缺少有效签发时间时 MUST 拒绝。窗口配置 MUST 是有限正数。本地审批补位 MUST 绑定实际动作、原任务及已验证受管 scope，不能扩大范围；真实装配中的本地策略硬拒绝、撤销及写入启用门 MUST 继续生效。
+
+#### Scenario: 平台窗口短于宿主窗口
+
+- **WHEN** enrollment 窗口短于宿主本地窗口和租约 TTL
+- **THEN** 签名租约的有效期受较短平台窗口限制
+
+#### Scenario: 超窗动作有有效本地审批
+
+- **WHEN** 最后已验证租约过期，动作在该租约 scope 内且有匹配有效审批
+- **THEN** 真实治理与派发链允许动作且不消费租约 nonce，范围外或已撤销动作零调用
+
+#### Scenario: 缺少签发时间或时钟回拨
+
+- **WHEN** 已声明窗口的租约缺少有效 iat 或期限判定时钟不可信
+- **THEN** 受保护动作拒绝，缺省窗口也不能因回拨延长授权
