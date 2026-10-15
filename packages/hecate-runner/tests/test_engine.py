@@ -237,10 +237,10 @@ async def test_lease_renewal_bounded_wait_times_out_and_renews(tmp_path, monkeyp
     await installer
 
 
-async def test_local_approval_bridges_disconnect_without_lease(tmp_path, monkeypatch):
+async def test_local_approval_bridges_expired_lease_without_consuming_nonce(tmp_path, monkeypatch):
     """step7 I-Cb authorization order: a valid pre-approved local binding
-    authorizes a protected dispatch even with no lease installed — the
-    disconnect bridge. The binding's CAS is consumed, the (absent) lease
+    authorizes a protected dispatch within the last verified lease scope —
+    the disconnect bridge. The binding's CAS is consumed, the expired lease
     nonce is not, and the evidence records the local_approval source."""
 
     from datetime import UTC, datetime
@@ -259,6 +259,19 @@ async def test_local_approval_bridges_disconnect_without_lease(tmp_path, monkeyp
         clock=lambda: now["t"],
     )
     consumed_refs: list[str] = []
+    lease, _ = lease_claims(
+        b"engine-lease-secret",
+        iss="issuer",
+        deployment_domain="host-root",
+        sub="host",
+        ttl_seconds=1,
+        scope=["domain_a"],
+        now=now["t"],
+    )
+    gate.update(lease)
+    from datetime import timedelta
+
+    now["t"] += timedelta(seconds=2)
 
     async def finder(request):
         return "appr-bridge-1"
@@ -285,8 +298,8 @@ async def test_local_approval_bridges_disconnect_without_lease(tmp_path, monkeyp
     state = RunState(run_id="r1", status="running", principal="reader", domains=("domain_a",), managed=True)
     assert await runtime._lease_refusal(state, "stock_write", {"domain": "domain_a"}) is None
     assert consumed_refs == ["appr-bridge-1"]
-    # The lease gate stayed untouched: still empty, still refusing.
-    with pytest.raises(CredentialError, match="no authorization lease"):
+    # Approval does not consume the expired lease's nonce.
+    with pytest.raises(CredentialError, match="expired"):
         await gate.check()
     basis = [record for record in evidence.query(kind="approval_basis")]
     assert basis and basis[0].detail["source"] == "local_approval"
@@ -307,7 +320,7 @@ async def test_local_approval_bridges_disconnect_without_lease(tmp_path, monkeyp
     )
     state2 = RunState(run_id="r2", status="running", principal="reader", domains=("domain_a",), managed=True)
     denial = await runtime2._lease_refusal(state2, "stock_write", {"domain": "domain_a"})
-    assert denial is not None and "no authorization lease" in denial["detail"]
+    assert denial is not None and "expired" in denial["detail"]
 
     # A gate that refuses the located binding falls through to the lease
     # gate too — the locator only prefilters, the gate is the authority.

@@ -163,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             config_fingerprint=lambda: profile.config_fingerprint(business_api),
         )
 
+    from hecate_governance.managed import ManagedRevocationView
     from hecate_governance.policy import GovernanceService
     from hecate_governance.usage import BudgetGate
 
@@ -196,13 +197,21 @@ def main(argv: list[str] | None = None) -> int:
             ),
             facts_provider=lease_gate.facts,
             anchor_provider=lease_gate.anchor,
+            approval_ledger=approval_ledger,
         )
     else:
         managed_profile = inner_profile
     governance_service = GovernanceService(
         managed_profile,
         approval_ledger=approval_ledger,
-        revocation=LocalRevocationView(current_governance),
+        revocation=(
+            ManagedRevocationView(
+                LocalRevocationView(current_governance),
+                trust_revoked_provider=lambda: channel.authorization_revoked if channel is not None else False,
+            )
+            if channel is not None
+            else LocalRevocationView(current_governance)
+        ),
     )
     approval_gate = (
         make_local_approval_gate(durable.store.session_factory, approvers=lambda: current_governance().approvers)

@@ -313,12 +313,16 @@ async def _enrollment_id_of(db) -> str:
 
 
 async def test_lease_gate_blocks_after_expiry_without_self_authorization(platform, host_store, secrets):
+    from hecate_governance.clock import TrustedClock
+
     await platform["admit"]()
     # The mutable clock starts at the real present (the platform issues
     # leases against real time) and jumps past the lease TTL to simulate a
     # disconnect.
     now = {"t": datetime.now(UTC)}
     channel = _make_channel(platform, clock=lambda: now["t"])
+    mono = {"t": 1000.0}
+    channel.gate._trusted_clock = TrustedClock(now_fn=lambda: now["t"], monotonic_fn=lambda: mono["t"])
     assert await channel.register() is True
     await platform["opt_in_last_enrollment"]()
     await channel.pull_once()
@@ -326,6 +330,7 @@ async def test_lease_gate_blocks_after_expiry_without_self_authorization(platfor
 
     # Time advances past the lease TTL (disconnect): the gate refuses.
     now["t"] = now["t"] + timedelta(seconds=7200)
+    mono["t"] += 7200
     from hecate.execution.managed_credentials import CredentialError
 
     with pytest.raises(CredentialError, match="expired"):

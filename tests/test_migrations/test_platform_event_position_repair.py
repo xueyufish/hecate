@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -37,7 +38,7 @@ def _pre_migration_table() -> sa.Table:
     return sa.Table(
         "platform_events",
         sa.MetaData(),
-        sa.Column("id", sa.Integer, primary_key=True),
+        sa.Column("id", sa.Uuid, primary_key=True, default=uuid.uuid4),
         sa.Column("created_at", sa.DateTime, nullable=True),
         sa.Column("updated_at", sa.DateTime, nullable=True),
         sa.Column("deleted", sa.Boolean, nullable=False, server_default=sa.false()),
@@ -63,10 +64,11 @@ def _pre_migration_table() -> sa.Table:
     )
 
 
-def _insert(table: sa.Table, conn, event_id: str, sequence: int) -> int:
+def _insert(table: sa.Table, conn, event_id: str, sequence: int) -> uuid.UUID:
     result = conn.execute(
         table.insert().values(
             event_id=event_id,
+            created_at=datetime.now(UTC),
             contract_version="0.1",
             kind="event",
             task_issuer_domain="iss",
@@ -109,7 +111,9 @@ def test_duplicate_positions_are_repaired_before_constraint(upgrade_binding):
     module.upgrade()
     conn.commit()
 
-    rows = conn.execute(sa.select(table.c.event_id, table.c.source_sequence).order_by(table.c.id)).fetchall()
+    rows = conn.execute(
+        sa.select(table.c.event_id, table.c.source_sequence).order_by(table.c.source_sequence)
+    ).fetchall()
     assert rows == [("evt-keep", 3), ("evt-other", 4)]
 
     # Enforcement is real: a same-position insert now collides.
@@ -133,7 +137,47 @@ def test_duplicate_positions_are_repaired_before_constraint(upgrade_binding):
         )
         conn.commit()
     conn.rollback()
-    assert keep_id < drop_id  # the deterministic rule kept the earliest row
+    assert keep_id != drop_id
+
+
+def test_repair_uses_creation_time_not_uuid_order(upgrade_binding):
+    conn, ops, table = upgrade_binding
+    oldest = _insert(table, conn, "oldest", 0)
+    newest = _insert(table, conn, "newest", 0)
+    conn.execute(
+        table.update()
+        .where(table.c.id == oldest)
+        .values(id=uuid.UUID(int=(1 << 128) - 1), created_at=datetime(2020, 1, 1))
+    )
+    conn.execute(
+        table.update().where(table.c.id == newest).values(id=uuid.UUID(int=1), created_at=datetime(2021, 1, 1))
+    )
+    conn.commit()
+    module = _load_revision()
+    module.op = ops
+    module.upgrade()
+    assert conn.execute(sa.select(table.c.event_id)).scalars().all() == ["oldest"]
+
+
+def test_unscoped_position_migration_repairs_and_enforces(upgrade_binding):
+    conn, ops, table = upgrade_binding
+    _insert(table, conn, "first", 0)
+    _insert(table, conn, "second", 0)
+    conn.execute(table.update().values(workspace_id=None))
+    conn.commit()
+    path = REVISION_PATH.with_name("7a6e5d4c3b20_unscoped_platform_event_positions.py")
+    spec = importlib.util.spec_from_file_location("unscoped_positions", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.op = ops
+    module.upgrade()
+    conn.commit()
+    assert conn.execute(sa.select(table.c.event_id)).scalars().all() == ["first"]
+    with pytest.raises(IntegrityError):
+        _insert(table, conn, "third", 0)
+        conn.execute(table.update().where(table.c.event_id == "third").values(workspace_id=None))
+        conn.commit()
+    conn.rollback()
 
 
 def test_clean_table_gains_constraint_without_repair(upgrade_binding):
@@ -148,4 +192,4 @@ def test_clean_table_gains_constraint_without_repair(upgrade_binding):
     conn.commit()
 
     rows = conn.execute(sa.select(table.c.event_id).order_by(table.c.id)).fetchall()
-    assert [row[0] for row in rows] == ["evt-a", "evt-b"]
+    assert {row[0] for row in rows} == {"evt-a", "evt-b"}

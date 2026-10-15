@@ -197,6 +197,19 @@ class TestManagedGate:
 
 
 class TestStalenessWindow:
+    async def test_missing_issue_time_cannot_satisfy_declared_window(self) -> None:
+        gate = _Gate(_facts(issued_at=None), TimeAnchor(wall=NOW, monotonic=1000.0))
+        config = ManagedLeasePolicyConfig(expected_policy_version="mp-2026.10", max_staleness_seconds=60)
+        outcome = await _profile(gate, config).evaluate(_context())
+        assert outcome.decision is ActionDecision.DENY
+        assert "issued-at" in outcome.reason
+
+    async def test_missing_expiry_is_not_unbounded_authorization(self) -> None:
+        gate = _Gate(_facts(expires_at=None), TimeAnchor(wall=NOW, monotonic=1000.0))
+        outcome = await _profile(gate, ManagedLeasePolicyConfig(expected_policy_version=None)).evaluate(_context())
+        assert outcome.decision is ActionDecision.DENY
+        assert "expiry" in outcome.reason
+
     async def test_staleness_deadline_earlier_than_expiry_governs(self) -> None:
         """Offline validity = min(exp, iat + staleness): the lease is not yet
         expired but its staleness window has passed — protected stops."""

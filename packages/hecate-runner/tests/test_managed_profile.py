@@ -181,12 +181,33 @@ def test_config_fingerprint_is_stable_and_secret_free(tmp_path: Path, monkeypatc
     second = profile.config_fingerprint(None)
     assert first == second
     assert len(first) == 64  # sha-256 hex
+    config_path = profile.directory / "runner.json"
+    original = json.loads(config_path.read_text())
+    for change in (
+        {"governance": {"approvers": ["alice"]}},
+        {"governance": {"revoked_principals": ["reader"]}},
+        {"governance": {"rules": [{"tool": "query_inventory", "domains": ["domain_b"]}]}},
+        {"control_plane": _control_plane(lease_policy={"policy_version": "other", "max_staleness_seconds": 10})},
+    ):
+        config_path.write_text(json.dumps({**original, **change}))
+        assert profile.config_fingerprint(None) != first
+    config_path.write_text(json.dumps(original))
+    (profile.directory / "secrets/app-reader-token").write_text("rotated-secret")
+    assert profile.config_fingerprint(None) == first
 
 
 def test_control_plane_absent_keeps_standalone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "tok")
     profile = load_profile(_write_profile(tmp_path))
     assert profile.config.control_plane is None
+
+
+@pytest.mark.parametrize("window", [float("nan"), float("inf"), -float("inf")])
+def test_non_finite_lease_window_rejected(window):
+    from hecate_runner.profile import _load_lease_policy
+
+    with pytest.raises(ProfileError, match="positive number"):
+        _load_lease_policy({"max_staleness_seconds": window})
 
 
 @pytest.mark.parametrize(

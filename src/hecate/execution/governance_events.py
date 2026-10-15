@@ -50,6 +50,11 @@ CONTRACT_VERSION = "0.1"
 # allocation either dedups against the stored winner or takes a fresh slot.
 _MAX_ALLOCATE_RETRIES = 3
 
+
+class PlatformEventConflictError(ValueError):
+    """An event id was reused with different facts or workspace ownership."""
+
+
 # Payload schema refs for the governance events this change emits. Each ref
 # names the payload shape so consumers can distinguish event families
 # without parsing payloads.
@@ -173,9 +178,20 @@ class PlatformEventService:
                     await self._db.flush()
                 return candidate
             except IntegrityError as exc:
-                existing = await self.find_by_event_id(candidate.event_id)
-                if existing is not None:
-                    return existing
+                row = (
+                    await self._db.execute(
+                        select(PlatformEventModel).where(PlatformEventModel.event_id == candidate.event_id)
+                    )
+                ).scalar_one_or_none()
+                if row is not None:
+                    expected = dict(row.envelope)
+                    presented = candidate.to_dict()
+                    for key in ("source_sequence", "received_at"):
+                        expected.pop(key, None)
+                        presented.pop(key, None)
+                    if row.workspace_id != workspace_id or expected != presented:
+                        raise PlatformEventConflictError("event_id replay conflicts with recorded event facts") from exc
+                    return EventEnvelope.from_dict(dict(row.envelope))
                 last_error = exc
         raise last_error if last_error is not None else RuntimeError("position allocation exhausted")
 

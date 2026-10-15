@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -56,6 +56,15 @@ class PlatformEventModel(BaseModel):
             "run_ref_id",
             "source_sequence",
             name="uq_platform_events_run_position",
+        ),
+        Index(
+            "uq_platform_events_unscoped_position",
+            "run_issuer_domain",
+            "run_ref_id",
+            "source_sequence",
+            unique=True,
+            postgresql_where=text("workspace_id IS NULL"),
+            sqlite_where=text("workspace_id IS NULL"),
         ),
         Index("ix_platform_events_task_ref", "task_issuer_domain", "task_ref_id"),
     )
