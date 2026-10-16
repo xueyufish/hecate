@@ -505,6 +505,20 @@ class ToolWorker(Worker):
             hook_resolution = await self._hook_resolution(session_key, execution_id)
         merged = _merge_resolutions(resolution, hook_resolution)
         if merged is not None:
+            recorded_content = merged.result_content
+            if (
+                recorded_content is None
+                and merged.state is ToolExecutionState.SUCCEEDED
+                and self._event_store is not None
+                and not any(
+                    isinstance(m, dict) and m.get("role") == "tool" and m.get("tool_call_id") == tc_id for m in messages
+                )
+            ):
+                # The channel lost the receipt (cross-turn restore or a
+                # reconnect); the session log's messages-channel writes still
+                # carry the real content — recover it instead of handing the
+                # model a placeholder.
+                recorded_content = await self._log_recorded_content(session_key, tc_id)
             decision = recovery_decision(
                 merged,
                 tc_id=tc_id,
@@ -512,7 +526,7 @@ class ToolWorker(Worker):
                 arguments_digest=arguments_digest,
                 classification=classification,
                 messages=messages,
-                recorded_content=merged.result_content,
+                recorded_content=recorded_content,
             )
             if decision is not None:
                 return self._checked_recovery_result(decision, execution_id)
@@ -527,6 +541,49 @@ class ToolWorker(Worker):
                 side_effect_class=classification.value,
             )
         return None
+
+    async def _log_recorded_content(self, session_key: Any, tc_id: str) -> str | None:
+        """Recover a tool result's real content from the session channel log.
+
+        The messages channel is write-logged with full lists; the newest
+        list carrying this call's tool message holds the receipt content
+        the channel lost. Store failures return None (the decision table
+        then applies its unavailable-content semantics)."""
+        if self._event_store is None:
+            return None
+        from hecate_runtime.eventstore import EventType
+
+        try:
+            events = await self._event_store.get_events(session_key)
+        except Exception:
+            logger.warning("Tool receipt log lookup failed", exc_info=True)
+            return None
+        latest: dict[str, Any] | None = None
+        for event in events:
+            if event.event_type is not EventType.CHANNEL_WRITE:
+                continue
+            payload = event.payload or {}
+            if payload.get("channel") != "messages":
+                continue
+            value = payload.get("value")
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                if (
+                    isinstance(item, dict)
+                    and item.get("role") == "tool"
+                    and item.get("tool_call_id") == tc_id
+                    and not item.get("is_error")
+                    and isinstance(item.get("content"), str)
+                ):
+                    # Older logs can contain withheld recovery markers. They
+                    # are not receipts for the succeeded action; stripping
+                    # is_error would let the model reason on the placeholder.
+                    latest = item
+        if latest is None:
+            return None
+        content = latest.get("content")
+        return content if isinstance(content, str) else None
 
     async def _hook_resolution(self, session_key: Any, execution_id: str) -> ToolExecutionResolution:
         """Resolve from the persistent ledger; store failure is explicit."""
@@ -600,6 +657,8 @@ class ToolWorker(Worker):
             content = str(decision.get("content", ""))
             if content.startswith("[needs review]"):
                 raise ExecutionStoppedError("needs_review", content, execution_id)
+            if content.startswith("[reconciliation required]"):
+                raise ExecutionStoppedError("reconciliation_required", content, execution_id)
         return decision
 
     async def _mirror_outcome(

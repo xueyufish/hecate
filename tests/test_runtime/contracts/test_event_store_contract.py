@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
+from hecate_runtime.errors import ExecutionStoppedError
 
 from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
 from hecate.runtime.workers.tool_worker import (
@@ -196,12 +197,18 @@ async def test_contract_worker_claim_is_atomic_on_either_store(event_store) -> N
     worker_b = ToolWorker(port=port, event_store=event_store)
     payload = _payload("call-1", "memory_add")
 
-    await asyncio.gather(
+    results = await asyncio.gather(
         worker_a.execute("tools", {}, payload, ctx),
-        worker_b.execute("tools", {}, payload, ctx),
+        worker_b.execute("tools", {}, dict(payload), ctx),
+        return_exceptions=True,
     )
 
     assert len(port.calls) == 1
+    # The losing dispatch stops for reconciliation (the event log carries a
+    # digest, not the result body) rather than feeding a placeholder.
+    stopped = [r for r in results if isinstance(r, ExecutionStoppedError)]
+    assert len(stopped) == 1
+    assert stopped[0].reason_category == "reconciliation_required"
     events = await event_store.get_events(session_id)
     claims = [e for e in events if e.event_type is EventType.TOOL_CALL]
     assert len(claims) == 1, "exactly one claim is recorded"

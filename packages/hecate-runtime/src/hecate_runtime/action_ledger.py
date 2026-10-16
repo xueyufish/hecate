@@ -272,6 +272,13 @@ def recovery_decision(
                 return dict(msg)
         if recorded_content is not None:
             return {"role": "tool", "tool_call_id": tc_id, "content": recorded_content}
+        # Recorded succeeded but the real content is gone. A readonly
+        # re-execution cannot duplicate a side effect and re-obtains the
+        # real content — better than any placeholder. A side-effecting
+        # action must NOT re-run and must NOT hand the model a placeholder
+        # to reason on: stop with an explicit reconciliation category.
+        if classification is SideEffectClass.READONLY:
+            return None
         digest_suffix = f" (result_digest={resolution.result_digest})" if resolution.result_digest else ""
         logger.warning(
             "Tool execution recorded succeeded but result content is unavailable — reconciliation required",
