@@ -414,6 +414,41 @@ class TestStructuredOutput:
         assert result.content == "plain text, not json"
         assert llm.calls == 1
 
+    async def test_no_schema_preserves_markdown_fence(self) -> None:
+        content = '```python\nprint("hello")\n```'
+        result, llm = await self._run([_final_response(content)], None)
+        assert result.content == content
+        assert llm.calls == 1
+
+    async def test_plain_response_enforcement_preserves_fences_without_schema(self) -> None:
+        from hecate.channel.api.v1.chat import _enforce_output_schema
+
+        response = _final_response('```python\nprint("hello")\n```')
+        reinvoke = AsyncMock()
+        result = await _enforce_output_schema(response, None, reinvoke)
+        assert result is response
+        assert result.content == '```python\nprint("hello")\n```'
+        reinvoke.assert_not_awaited()
+
+    async def test_markdown_fenced_json_passes_without_retry(self) -> None:
+        """Real models frequently wrap JSON in a code fence; the declared
+        schema enforcement strips one fence instead of failing the run."""
+        import json
+
+        fenced = _final_response('```json\n{"answer": "42"}\n```')
+        result, llm = await self._run([fenced], self.SCHEMA)
+        assert json.loads(result.content) == {"answer": "42"}
+        assert llm.calls == 1
+
+    async def test_fence_repair_recovers_in_one_retry(self) -> None:
+        import json
+
+        bad = _final_response("nope")
+        fenced = _final_response('```json\n{"answer": "42"}\n```')
+        result, llm = await self._run([bad, fenced], self.SCHEMA)
+        assert json.loads(result.content) == {"answer": "42"}
+        assert llm.calls == 2
+
 
 async def test_unresolved_replay_stops_before_any_dispatch():
     registry = _registry(

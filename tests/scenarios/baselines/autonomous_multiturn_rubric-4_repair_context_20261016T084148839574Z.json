@@ -1,0 +1,865 @@
+{
+  "_meta": {
+    "kind": "record",
+    "status": "recorded",
+    "gate": false,
+    "business_value": "unverified",
+    "recorded_at": "2026-10-16T08:39:15.831478+00:00",
+    "rubric_version": "autonomous-execution-rubric-4",
+    "source": "real_model",
+    "sampling": {
+      "temperature": 0,
+      "max_tokens": 2048,
+      "timeout_seconds": 60,
+      "num_retries": 0
+    },
+    "model": "zai/glm-4.5-flash",
+    "model_version": "unverified",
+    "tool_versions": {
+      "lookup_material": "synthetic-2",
+      "create_test_ticket": "synthetic-2"
+    },
+    "dataset_digest": "5315e10ac914921a5838e8302c2d6b02e620ed5807286d679a36edb8933bf7cb",
+    "prompt_digest": "82ebb06d006a4c993ef6a9fb9c8274c231cdabd6793c09f84913308c885cf7e2",
+    "tool_digest": "c3da1c09ef40beff6e55ced75b624a31230dd7a3d97a7323bca16b0d91732711",
+    "thresholds": {
+      "latency_ms": 60000.0,
+      "tokens": 20000,
+      "cost_usd": 1.0
+    },
+    "cost_threshold_conclusion": "unverified",
+    "unverified": [
+      "provider price and final billing",
+      "durable approval wait/resume",
+      "standalone Runner model selection",
+      "business value",
+      "managed deployment certification"
+    ],
+    "parent_record": "autonomous_multiturn_autonomous-execution-rubric-4_20261016T083041343667Z.json",
+    "scope": [
+      "engine/normal",
+      "engine/approval_resume"
+    ],
+    "mechanism_revision": "preserve-real-tool-context-during-schema-repair"
+  },
+  "runs": [
+    {
+      "path": "engine",
+      "case": "normal",
+      "rounds": [
+        {
+          "index": 0,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163174906132168657",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 20407.00000000652,
+          "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+          "usage": {
+            "completion_tokens": 129,
+            "prompt_tokens": 287,
+            "total_tokens": 416,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 43,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        },
+        {
+          "index": 1,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            },
+            {
+              "role": "assistant",
+              "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163174906132168657",
+                  "type": "function",
+                  "function": {
+                    "name": "lookup_material",
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163174906132168657",
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'ticket_body': 'SKU-A1 confirmed by warehouse-A'}"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163171676316759918",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 6827.999999979511,
+          "content": "\n",
+          "usage": {
+            "completion_tokens": 163,
+            "prompt_tokens": 384,
+            "total_tokens": 547,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 289,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        },
+        {
+          "index": 2,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            },
+            {
+              "role": "assistant",
+              "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163174906132168657",
+                  "type": "function",
+                  "function": {
+                    "name": "lookup_material",
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163174906132168657",
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'ticket_body': 'SKU-A1 confirmed by warehouse-A'}"
+            },
+            {
+              "role": "assistant",
+              "content": "\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163171676316759918",
+                  "type": "function",
+                  "function": {
+                    "name": "create_test_ticket",
+                    "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163171676316759918",
+              "content": "{'status': 'ok', 'ticket_id': 'TKT-BASELINE'}"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 21516.00000000326,
+          "content": "\nI've successfully checked the stock for SKU-A1 in domain_a and created the reorder ticket. Here's what happened:\n\n1. **Stock Check**: SKU-A1 in domain_a has confirmed stock status and requires reordering\n2. **Ticket Created**: A reorder ticket was successfully created with:\n   - **Ticket ID**: TKT-BASELINE\n   - **Title**: Reorder Ticket for SKU-A1\n   - **Body**: SKU-A1 confirmed by warehouse-A\n\nThe reorder ticket has been created and is ready for processing.",
+          "usage": {
+            "completion_tokens": 241,
+            "prompt_tokens": 445,
+            "total_tokens": 686,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 386,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        },
+        {
+          "index": 3,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            },
+            {
+              "role": "assistant",
+              "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163174906132168657",
+                  "type": "function",
+                  "function": {
+                    "name": "lookup_material",
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163174906132168657",
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'ticket_body': 'SKU-A1 confirmed by warehouse-A'}"
+            },
+            {
+              "role": "assistant",
+              "content": "\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163171676316759918",
+                  "type": "function",
+                  "function": {
+                    "name": "create_test_ticket",
+                    "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163171676316759918",
+              "content": "{'status': 'ok', 'ticket_id': 'TKT-BASELINE'}"
+            },
+            {
+              "role": "assistant",
+              "content": "\nI've successfully checked the stock for SKU-A1 in domain_a and created the reorder ticket. Here's what happened:\n\n1. **Stock Check**: SKU-A1 in domain_a has confirmed stock status and requires reordering\n2. **Ticket Created**: A reorder ticket was successfully created with:\n   - **Ticket ID**: TKT-BASELINE\n   - **Title**: Reorder Ticket for SKU-A1\n   - **Body**: SKU-A1 confirmed by warehouse-A\n\nThe reorder ticket has been created and is ready for processing."
+            },
+            {
+              "role": "user",
+              "content": "Your response violates the required output schema: final answer is not valid JSON: Expecting value at position 1. Respond again satisfying the schema."
+            }
+          ],
+          "tools_enabled": false,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 13796.999999991385,
+          "content": "\n{\"answer\":\"TKT-BASELINE\"}",
+          "usage": {
+            "completion_tokens": 180,
+            "prompt_tokens": 356,
+            "total_tokens": 536,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 4,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        }
+      ],
+      "final_content": "\n{\"answer\":\"TKT-BASELINE\"}",
+      "tool_receipts": [
+        {
+          "tool": "lookup_material",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "ticket_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "tool": "create_test_ticket",
+          "arguments": {
+            "title": "Reorder Ticket for SKU-A1",
+            "body": "SKU-A1 confirmed by warehouse-A"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "ticket_id": "TKT-BASELINE"
+          }
+        }
+      ],
+      "approval_decisions": [],
+      "approval_events": [],
+      "collection_error": null,
+      "stopped_reason": null,
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "zero_duplicate_side_effects": true,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": false,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 73030.99999998813,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "reported",
+        "token_total": 2185,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "engine",
+      "case": "approval_resume",
+      "rounds": [
+        {
+          "index": 0,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163175627686671864",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 11000.0,
+          "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+          "usage": {
+            "completion_tokens": 129,
+            "prompt_tokens": 287,
+            "total_tokens": 416,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 286,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        },
+        {
+          "index": 1,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            },
+            {
+              "role": "assistant",
+              "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163175627686671864",
+                  "type": "function",
+                  "function": {
+                    "name": "lookup_material",
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163175627686671864",
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'ticket_body': 'SKU-A1 confirmed by warehouse-A'}"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163175112290598855",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 27718.99999998277,
+          "content": "\n",
+          "usage": {
+            "completion_tokens": 163,
+            "prompt_tokens": 384,
+            "total_tokens": 547,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 383,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        },
+        {
+          "index": 2,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            },
+            {
+              "role": "assistant",
+              "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163175627686671864",
+                  "type": "function",
+                  "function": {
+                    "name": "lookup_material",
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163175627686671864",
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'ticket_body': 'SKU-A1 confirmed by warehouse-A'}"
+            },
+            {
+              "role": "assistant",
+              "content": "\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163175112290598855",
+                  "type": "function",
+                  "function": {
+                    "name": "create_test_ticket",
+                    "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163175112290598855",
+              "content": "Tool call rejected: baseline first-ask denial",
+              "is_error": true
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163168721379259738",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 7187.999999994645,
+          "content": "\n",
+          "usage": {
+            "completion_tokens": 208,
+            "prompt_tokens": 438,
+            "total_tokens": 646,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 426,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        },
+        {
+          "index": 3,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            },
+            {
+              "role": "assistant",
+              "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163175627686671864",
+                  "type": "function",
+                  "function": {
+                    "name": "lookup_material",
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163175627686671864",
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'ticket_body': 'SKU-A1 confirmed by warehouse-A'}"
+            },
+            {
+              "role": "assistant",
+              "content": "\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163175112290598855",
+                  "type": "function",
+                  "function": {
+                    "name": "create_test_ticket",
+                    "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163175112290598855",
+              "content": "Tool call rejected: baseline first-ask denial",
+              "is_error": true
+            },
+            {
+              "role": "assistant",
+              "content": "\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163168721379259738",
+                  "type": "function",
+                  "function": {
+                    "name": "create_test_ticket",
+                    "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163168721379259738",
+              "content": "{'status': 'ok', 'ticket_id': 'TKT-BASELINE'}"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 8344.000000011874,
+          "content": "\nI've successfully checked the stock for SKU-A1 in domain_a and created the reorder ticket. Here's what was accomplished:\n\n**Stock Check Results:**\n- Status: OK\n- Stock: Confirmed\n- Reorder: True\n- Ticket Body: \"SKU-A1 confirmed by warehouse-A\"\n\n**Reorder Ticket Created:**\n- Ticket ID: TKT-BASELINE\n- Status: OK\n\nThe reorder ticket has been created successfully using the ticket body returned from the stock lookup.",
+          "usage": {
+            "completion_tokens": 220,
+            "prompt_tokens": 499,
+            "total_tokens": 719,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 440,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        },
+        {
+          "index": 4,
+          "input_messages": [
+            {
+              "role": "system",
+              "content": "Read material first. If reorder is true, create one ticket using ticket_body verbatim. Return JSON {\"answer\":\"...\"} including the resulting ticket_id."
+            },
+            {
+              "role": "user",
+              "content": "Check stock for SKU-A1 in domain_a and create the reorder ticket."
+            },
+            {
+              "role": "assistant",
+              "content": "\nI'll help you check the stock for SKU-A1 in domain_a and create a reorder ticket if needed. Let me start by looking up the material information.\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163175627686671864",
+                  "type": "function",
+                  "function": {
+                    "name": "lookup_material",
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163175627686671864",
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'ticket_body': 'SKU-A1 confirmed by warehouse-A'}"
+            },
+            {
+              "role": "assistant",
+              "content": "\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163175112290598855",
+                  "type": "function",
+                  "function": {
+                    "name": "create_test_ticket",
+                    "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163175112290598855",
+              "content": "Tool call rejected: baseline first-ask denial",
+              "is_error": true
+            },
+            {
+              "role": "assistant",
+              "content": "\n",
+              "tool_calls": [
+                {
+                  "id": "call_-7163168721379259738",
+                  "type": "function",
+                  "function": {
+                    "name": "create_test_ticket",
+                    "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}"
+                  }
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "tool_call_id": "call_-7163168721379259738",
+              "content": "{'status': 'ok', 'ticket_id': 'TKT-BASELINE'}"
+            },
+            {
+              "role": "assistant",
+              "content": "\nI've successfully checked the stock for SKU-A1 in domain_a and created the reorder ticket. Here's what was accomplished:\n\n**Stock Check Results:**\n- Status: OK\n- Stock: Confirmed\n- Reorder: True\n- Ticket Body: \"SKU-A1 confirmed by warehouse-A\"\n\n**Reorder Ticket Created:**\n- Ticket ID: TKT-BASELINE\n- Status: OK\n\nThe reorder ticket has been created successfully using the ticket body returned from the stock lookup."
+            },
+            {
+              "role": "user",
+              "content": "Your response violates the required output schema: final answer is not valid JSON: Expecting value at position 1. Respond again satisfying the schema."
+            }
+          ],
+          "tools_enabled": false,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 4937.000000005355,
+          "content": "\n```json\n{\"answer\":\"TKT-BASELINE\"}\n```",
+          "usage": {
+            "completion_tokens": 165,
+            "prompt_tokens": 401,
+            "total_tokens": 566,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": {
+              "audio_tokens": null,
+              "cached_tokens": 192,
+              "image_tokens": null,
+              "text_tokens": null,
+              "video_tokens": null,
+              "initial_prompt_tokens": null
+            }
+          },
+          "provider_model": "zai/glm-4.5-flash"
+        }
+      ],
+      "final_content": "{\"answer\":\"TKT-BASELINE\"}",
+      "tool_receipts": [
+        {
+          "tool": "lookup_material",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "ticket_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "tool": "create_test_ticket",
+          "arguments": {
+            "title": "Reorder Ticket for SKU-A1",
+            "body": "SKU-A1 confirmed by warehouse-A"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "ticket_id": "TKT-BASELINE"
+          }
+        }
+      ],
+      "approval_decisions": [
+        {
+          "approved": false,
+          "side_effect_count": 0,
+          "arguments": {
+            "title": "Reorder Ticket for SKU-A1",
+            "body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "approved": true,
+          "side_effect_count": 0,
+          "arguments": {
+            "title": "Reorder Ticket for SKU-A1",
+            "body": "SKU-A1 confirmed by warehouse-A"
+          }
+        }
+      ],
+      "approval_events": [
+        {
+          "type": "APPROVAL_ASKED",
+          "payload": {
+            "tool_name": "create_test_ticket",
+            "tool_call_id": "call_-7163175112290598855",
+            "risk_level": "low",
+            "log_schema_version": 2
+          }
+        },
+        {
+          "type": "APPROVAL_DECIDED",
+          "payload": {
+            "tool_call_id": "call_-7163175112290598855",
+            "approved": false,
+            "reason": "baseline first-ask denial",
+            "scope": "once",
+            "arguments_digest": "7125ad680dd1f340620aa063b7994d637e50385b25f02b473405639083321c2f",
+            "approval_ref": null,
+            "log_schema_version": 2
+          }
+        },
+        {
+          "type": "APPROVAL_ASKED",
+          "payload": {
+            "tool_name": "create_test_ticket",
+            "tool_call_id": "call_-7163168721379259738",
+            "risk_level": "low",
+            "log_schema_version": 2
+          }
+        },
+        {
+          "type": "APPROVAL_DECIDED",
+          "payload": {
+            "tool_call_id": "call_-7163168721379259738",
+            "approved": true,
+            "reason": "baseline approved",
+            "scope": "once",
+            "arguments_digest": "7125ad680dd1f340620aa063b7994d637e50385b25f02b473405639083321c2f",
+            "approval_ref": "chat:b3f2038e-c786-4662-82d9-23a7a0272755:017eaf4f-0e35-4028-9a75-8d767bab6400",
+            "log_schema_version": 2
+          }
+        }
+      ],
+      "collection_error": null,
+      "stopped_reason": null,
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "zero_duplicate_side_effects": true,
+        "approval_resume_compliance": true,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 59203.000000008615,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "reported",
+        "token_total": 2894,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    }
+  ]
+}

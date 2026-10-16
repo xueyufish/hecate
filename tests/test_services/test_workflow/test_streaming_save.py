@@ -280,3 +280,46 @@ async def test_agent_save_does_not_overwrite_checkpoint_when_load_fails():
         user_id=uuid.uuid4(),
     )
     store.save.assert_not_awaited()
+
+
+@pytest.mark.parametrize("scope", ["same", "different", "legacy"])
+async def test_chat_history_restore_requires_same_user_and_agent(scope):
+    """A session-only log must not be read for an unverified agent scope."""
+    user, agent, session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    history = [{"role": "user", "content": "previous"}, {"role": "assistant", "content": "answer"}]
+    store = InMemorySessionStateStore()
+    metadata = {} if scope == "legacy" else {"chat_agent_id": str(agent if scope == "same" else uuid.uuid4())}
+    await store.save(user, user, session, SessionState(metadata=metadata))
+    runtime = MagicMock()
+    runtime.snapshot_at_version = AsyncMock(return_value={"channel_state": {"messages": history}})
+    events = MagicMock()
+    events.get_version = AsyncMock(return_value=9)
+    service = WorkflowExecutionService(port=MagicMock(), checkpoint_store=store, event_store=events)
+    incoming = [{"role": "user", "content": "continue"}]
+    restored, verified = await service._restore_chat_history(runtime, session, incoming, user_id=user, agent_id=agent)
+    assert restored == (history + incoming if scope == "same" else incoming)
+    assert runtime.snapshot_at_version.await_count == (1 if scope == "same" else 0)
+    assert verified == (scope == "same")
+    if scope == "same":
+        assert await service._restore_chat_history(
+            runtime, session, history + incoming, user_id=user, agent_id=agent
+        ) == (history + incoming, True)
+        explicit = [history[0], {"role": "assistant", "content": "normalized answer"}, *incoming]
+        assert await service._restore_chat_history(runtime, session, explicit, user_id=user, agent_id=agent) == (
+            explicit,
+            True,
+        )
+    other_user = uuid.uuid4()
+    assert await service._restore_chat_history(runtime, session, incoming, user_id=other_user, agent_id=agent) == (
+        incoming,
+        False,
+    )
+    await service._persist_session_state(
+        agent_state=AgentState(session_id=session, agent_id=agent, metadata={"execution_agent_mode": "chat"}),
+        session_id=session,
+        agent_id=agent,
+        org_id=other_user,
+        user_id=other_user,
+    )
+    adopted = await store.load(other_user, other_user, session)
+    assert "chat_agent_id" not in adopted.metadata

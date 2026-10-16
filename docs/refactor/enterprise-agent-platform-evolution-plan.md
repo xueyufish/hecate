@@ -338,7 +338,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 | step5b：独立发行包 | 已交付 | `hecate-runtime` wheel、依赖闭包、配置注入、兼容转发与干净安装；不反向依赖完整 Hecate |
 | step5c：独立宿主 | 预览范围已交付 | Runner 与 builtin 共享执行应用服务；公开请求/回执/事件契约、本地制品与身份校验、SC01/SC02 只读场景。固定工具计划与 Stub/endpoint 不能证明自主工具选择 |
 | step5d：平台入口收敛 | 部分完成 | HTTP/MCP/IM/评估/A2A/定时 Agent 已迁移，workspace 路由与会话亲缘、OpenAI/SSE 兼容和分层守卫已交付；剩余项如下 |
-| step5e：内置自主执行收敛与验证 | 技术切片已实现，待验收 | 双路径停止/结构化输出与 Workflow 子任务契约已有本地实现和确定性证据；真实模型记录 skipped，独立 Runner 自主选择与生产退出条件仍开放。见 [复核](../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md) |
+| step5e：内置自主执行收敛与验证 | 技术切片已实现，限定基线已记录 | 双路径停止/结构化输出与 Workflow 子任务契约已有证据；真实模型基线及限定断连恢复已记录，延迟/成本与生产退出门槛、独立 Runner 自主选择仍开放。见[原技术复核](../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md)与[基线复核](../../openspec/changes/step5e-real-model-baseline/review.md) |
 
 **step5d 剩余项：**
 
@@ -348,7 +348,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **step5e 操作与决策门槛：**
 
-**状态：技术切片已交付（change `builtin-autonomous-execution`，含复核修复）：差异矩阵与 ADR-036 定稿、双路径停止语义、先回放后派发的重放身份、结构化输出离线校验与一次修复、Workflow 子任务契约（产物校验先于推进、回调幂等、快子任务竞态闭合）已实现并登记 1.3.11h/1.3.11i；真实模型轨 skipped（无密钥），独立 Runner 自主选工具、审批后继续推理与生产退出条件仍开放。**
+**状态：技术切片已交付（change `builtin-autonomous-execution`，含复核修复），登记 1.3.11h/1.3.11i。`step5e-real-model-baseline` 保留原 rubric v3 观测，新增 `zai/glm-4.5-flash` 的 v4 原始记录：停止分支正确，实测暴露引擎格式修复丢失工具上下文，确定性复现与修正后的定向补采已记录，产物和同步审批续推通过。真实 TCP RST 恢复已核对 PG 持久取消终态、首轮真实回执与正确 JSON，工具无重复；SQLite 层只授予进程内恢复证据。同用户同 Agent 的新快照才可自动恢复历史，旧归属不推断，显式客户端历史保持原语义。部分延迟仍超阈，成本未核实，不宣告整体通过；独立 Runner 自主选择、持久审批、实际进程重启、独立 workflow 身份与生产退出门槛仍开放。详见[基线复核](../../openspec/changes/step5e-real-model-baseline/review.md)。**
 
 - [ ] 建立直接工具循环、Pregel Agent 图、确定性 Workflow 与 Runner 的差异矩阵：模型调用、工具选择/结果回灌、结构化输出、预算/停止、审批等待、持久化、取消及错误事件。普通 LLM 节点不必承担自主 Agent 循环。
 - [ ] 固定共享的外部行为与状态责任，优先复用现有执行应用服务、动作账本和治理接缝，消除相同能力在平台与独立宿主上的语义差异。
@@ -391,7 +391,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 ### step7 — 实现内置执行与宿主的强制治理
 
-受管租约交付的装配与存储边界已接受[复核修正](../../openspec/changes/managed-lease-review-hardening/review.md)：本地审批仍受最后已验证租约 scope、撤销和本地硬拒绝约束；平台窗口进入签名期限，指纹覆盖授权配置，历史事件补传不清除漂移；UUID 与无 workspace 的事件位置修复分别验证。功能回归不替代安装制品与完整断连场景认证。
+受管租约交付的装配与存储边界已接受[复核修正](../../openspec/changes/archive/2026-10-15-managed-lease-review-hardening/review.md)：本地审批仍受最后已验证租约 scope、撤销和本地硬拒绝约束；平台窗口进入签名期限，指纹覆盖授权配置，历史事件补传不清除漂移；UUID 与无 workspace 的事件位置修复分别验证。功能回归不替代安装制品与完整断连场景认证。
 
 **目标：**先完成内置执行与独立宿主必需的身份、动作授权、审批、凭据及预算闭环，与 step5e 并行。受管断连策略随 I-Cb 验证；新协议及外部 Agent 集成暂缓，先验证主流程与已有入口。
 

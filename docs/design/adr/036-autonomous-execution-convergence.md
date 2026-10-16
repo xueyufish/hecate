@@ -3,8 +3,19 @@
 ## Status
 
 Accepted for the bounded compatibility fixes and continued evidence collection.
-Real-model quality evidence is pending: the [record](../../../tests/scenarios/baselines/autonomous_multiturn_baseline.json)
-is explicitly skipped. This ADR does not authorize a default route switch or production certification.
+Real-model observations are **recorded** for `zai/glm-4.5-flash`. The original rubric v3
+record is retained; the [rubric v4 observation](../../../tests/scenarios/baselines/autonomous_multiturn_autonomous-execution-rubric-4_20261016T083041343667Z.json)
+adds actual model inputs/outputs, usage, tool receipts and approval events. It exposed
+lost tool context during engine output repair. A deterministic reproduction and bounded
+fix retain that context without dispatching tools again; a
+[targeted follow-up](../../../tests/scenarios/baselines/autonomous_multiturn_rubric-4_repair_context_20261016T084148839574Z.json)
+records valid artifacts and approval continuation. Some latency thresholds still fail,
+and cost remains unverified; observations are not a statistical quality certificate.
+Real TCP recovery now verifies the prior receipt in the recovery model's first input,
+with persisted PostgreSQL facts and no duplicate tool execution. The
+[review](../../../openspec/changes/step5e-real-model-baseline/review.md) records its scoped
+ownership and legacy boundaries. This ADR does not authorize a default route switch or
+production certification.
 
 ## Context
 
@@ -57,7 +68,7 @@ approval and recovery boundaries. That implementation is outside this change's d
 - HTTP callers receive explicit terminal categories; declared schema streaming buffers final content.
 - Formatting retries cannot start tools. Already-started parallel tools are drained before stop delivery.
 - Workflow output is accepted from persistent child records; forged caller summaries cannot supply artifacts.
-- Real-model quality, approval/resume, Runner selection, business value and managed deployment
+- Broader model-quality coverage, durable approval/resume, Runner selection, business value and managed deployment
   certification remain open. The
   [review](../../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md)
   records validation and limitations. step5e remains a partial technical delivery until its gates pass.

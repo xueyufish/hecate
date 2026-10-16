@@ -608,9 +608,10 @@ async def _process_chat_impl(
             workspace_id=agent.workspace_id if agent is not None else workspace_id or uuid.UUID(int=0),
         )
 
+        engine_model = _CheckedModelService(llm_service, cancel_check)
         port = create_runtime_port(
             db,
-            _CheckedModelService(llm_service, cancel_check),
+            engine_model,
             tool_registry=tool_registry,
             workspace_id=workspace_id or (agent.workspace_id if agent is not None else None),
             agent_id=agent.id if agent is not None else None,
@@ -764,7 +765,7 @@ async def _process_chat_impl(
                 # Repair only the final answer: restarting the graph with tools
                 # would allow a formatting retry to repeat business actions.
                 return await call_llm.chat(
-                    messages=msg_dicts
+                    messages=(engine_model._last_messages or msg_dicts)
                     + [
                         {"role": "assistant", "content": result.get("content", "")},
                         {"role": "user", "content": _schema_feedback(feedback)},
@@ -775,15 +776,12 @@ async def _process_chat_impl(
                     max_tokens=request.max_tokens,
                 )
 
-            violation = _validate_output_schema(result.get("content", ""), request.output_schema)
-            if violation is not None:
-                repaired = await _enforce_output_schema(
-                    LLMResponse(content=result.get("content", ""), model=effective_model),
-                    request.output_schema,
-                    retry_final,
-                )
-                result = {**result, "content": repaired.content, "finish_reason": repaired.finish_reason or "stop"}
-            return result
+            repaired = await _enforce_output_schema(
+                LLMResponse(content=result.get("content", ""), model=effective_model),
+                request.output_schema,
+                retry_final,
+            )
+            return {**result, "content": repaired.content, "finish_reason": repaired.finish_reason or "stop"}
 
         outcome = await entry.execute(
             agent_mode="chat",
@@ -1069,17 +1067,50 @@ def _replay_invocation_id(session_id: str | None, turn_index: int, tool_name: st
     return f"chat:{session_id or 'anon'}:{turn_index}:{tool_name}:{digest[:16]}"
 
 
+def _strip_markdown_fence(content: Any) -> Any:
+    """Strip one wrapping markdown code fence from string content.
+
+    Real models frequently emit ```json fences around otherwise-valid
+    documents; downstream parsers expect the bare document.
+    """
+    if not isinstance(content, str):
+        return content
+    text = content.strip()
+    if text.startswith("```") and text.endswith("```"):
+        first_newline = text.find("\n")
+        body = text[first_newline + 1 : -3] if first_newline != -1 else text[3:-3]
+        return body.strip()
+    return content
+
+
+def _normalized_schema_response(response: Any) -> Any:
+    from copy import copy
+
+    from pydantic import BaseModel
+
+    content = _strip_markdown_fence(response.content)
+    if content == response.content:
+        return response
+    if isinstance(response, BaseModel):
+        return response.model_copy(update={"content": content})
+    normalized = copy(response)
+    normalized.content = content
+    return normalized
+
+
 def _validate_output_schema(content: Any, output_schema: dict | None) -> str | None:
     """First JSON-Schema violation for the final assistant content, if any.
 
     Content is expected to be a JSON document when a schema is declared;
-    non-JSON content fails with the parse error. Returns None when valid or
-    when no schema is declared.
+    non-JSON content fails with the parse error. A single wrapping markdown
+    code fence is stripped before parsing. Returns None when valid or when
+    no schema is declared.
     """
     if output_schema is None:
         return None
     import json as _json
 
+    content = _strip_markdown_fence(content)
     if isinstance(content, str):
         try:
             document = _json.loads(content)
@@ -1097,9 +1128,13 @@ async def _enforce_output_schema(response: Any, output_schema: dict | None, rein
     the violation fed back; a second violation fails with the invalid_output
     reason. Without a declared schema the response passes through unchanged.
     """
+    if output_schema is None:
+        return response
     violation = _validate_output_schema(response.content, output_schema)
     if violation is None:
-        return response
+        # Normalize a fenced document in place so downstream JSON consumers
+        # see the bare document the schema validated.
+        return _normalized_schema_response(response)
     retry_response = await reinvoke(violation)
     if retry_response.tool_calls:
         raise _LoopStopError("invalid_output", f"output repair requested new tools; initial violation: {violation}")
@@ -1109,7 +1144,7 @@ async def _enforce_output_schema(response: Any, output_schema: dict | None, rein
             "invalid_output",
             f"final answer violates the declared output schema after retry: {violation}",
         )
-    return retry_response
+    return _normalized_schema_response(retry_response)
 
 
 def _disconnect_check(http_request: Request):
@@ -1190,6 +1225,7 @@ class _CheckedModelService:
     def __init__(self, service: Any, cancel_check: Any = None) -> None:
         self._service = service
         self._cancel_check = cancel_check
+        self._last_messages: list[dict[str, Any]] = []
 
     async def _check(self) -> None:
         if self._cancel_check is not None:
@@ -1202,6 +1238,7 @@ class _CheckedModelService:
     async def chat(self, **kwargs: Any) -> Any:
         """Check the caller before invoking a metered non-streaming round."""
         await self._check()
+        self._last_messages = list(kwargs.get("messages") or [])
         try:
             return await self._service.chat(**kwargs)
         except BudgetRefusedError as exc:
@@ -1210,6 +1247,7 @@ class _CheckedModelService:
     async def chat_stream(self, **kwargs: Any):
         """Handle budget refusal raised while the provider generator advances."""
         await self._check()
+        self._last_messages = list(kwargs.get("messages") or [])
         try:
             async for chunk in self._service.chat_stream(**kwargs):
                 yield chunk

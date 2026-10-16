@@ -25,7 +25,23 @@ separate recorded run. Runner model selection and managed deployment certificati
   exercise committed child facts, forged/duplicate/late callbacks and fresh dispatcher instances.
 - [Recorded comparison runner](../../tests/scenarios/baseline/run_autonomous_baseline.py)
   calls the actual DL and PG mechanisms with a real provider and synthetic tool boundaries.
-  [Current record](../../tests/scenarios/baselines/autonomous_multiturn_baseline.json) is explicitly
-  skipped because credentials were unavailable. Unknown cost is recorded as unknown.
-- Real-model approval/resume, independent Runner model selection, managed profiles and
-  business outcomes remain unverified. These gates prevent claiming step5e production completion.
+  [Original record](../../tests/scenarios/baselines/autonomous_multiturn_baseline.json) is
+  retained. The [rubric v4 observation](../../tests/scenarios/baselines/autonomous_multiturn_autonomous-execution-rubric-4_20261016T083041343667Z.json)
+  records both actual mechanisms with `zai/glm-4.5-flash`, including model inputs/outputs,
+  per-round usage, tool receipts and approval events. Stop-injection cases converge correctly;
+  initial engine artifact failures exposed missing tool context in schema repair. The
+  [targeted follow-up](../../tests/scenarios/baselines/autonomous_multiturn_rubric-4_repair_context_20261016T084148839574Z.json)
+  preserves that context and records correct artifacts and approval continuation. Some latency
+  thresholds remain exceeded; cost and supplier pricing remain unknown. Failed observations
+  remain in the original files, and a bounded follow-up is not a new full comparison.
+- [Real-model disconnect acceptance](../../tests/scenarios/test_real_model_disconnect.py)
+  uses the same TCP fixture for deterministic and actual providers. The
+  [PostgreSQL observation](../../tests/scenarios/baselines/real_model_disconnect_v1_20261016T083351993460Z.json)
+  verifies cancelled convergence, a unique persisted receipt/terminal, the real receipt in the
+  first recovery input and a correct structured answer without repeated execution. The
+  [SQLite observation](../../tests/scenarios/baselines/real_model_disconnect_v1_20261016T083647368984Z.json)
+  proves in-process recovery only; its events/snapshots are in memory. Automatic history restore
+  requires a service-verified same-user/same-agent snapshot; legacy ownership is not inferred.
+  Explicit client histories remain authoritative. Real-provider tests require manual opt-in.
+- Independent Runner model selection, managed profiles and business outcomes remain
+  unverified. These gates prevent claiming step5e production completion.

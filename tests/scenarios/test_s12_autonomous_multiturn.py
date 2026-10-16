@@ -25,6 +25,44 @@ from tests.scenarios.conftest import (
 MATERIAL_QUERY = {"domain": "domain_a", "sku": "SKU-A1"}
 
 
+@pytest.mark.parametrize("path", ["direct", "engine"])
+@pytest.mark.parametrize("stream", [False, True])
+async def test_fenced_schema_result_is_normalized_at_http_entry(
+    client, scripted_llm, db_session, default_workspace, monkeypatch, path, stream
+):
+    async def route(*args, **kwargs):
+        return path
+
+    monkeypatch.setattr("hecate.execution.entry_routing.resolve_chat_engine_path", route)
+
+    async def responder(messages):
+        return llm_response(content='```json\n{"answer":"42"}\n```')
+
+    scripted_llm(responder)
+    agent = await _two_tool_agent(db_session, default_workspace)
+    response = await client.post(
+        agent_chat_url(agent),
+        json={
+            **chat_body("return the answer"),
+            "stream": stream,
+            "output_schema": {"type": "object", "required": ["answer"]},
+        },
+    )
+    assert response.status_code == 200, response.text
+    if stream:
+        frames = [
+            json.loads(line[6:])
+            for line in response.text.splitlines()
+            if line.startswith("data: ") and line != "data: [DONE]"
+        ]
+        content = "".join(
+            frame["choices"][0].get("delta", {}).get("content", "") or "" for frame in frames if frame.get("choices")
+        )
+    else:
+        content = response.json()["choices"][0]["message"]["content"]
+    assert json.loads(content) == {"answer": "42"}
+
+
 def _feedback_responder():
     return feedback_driven_responder(
         read_tool="lookup_material",
