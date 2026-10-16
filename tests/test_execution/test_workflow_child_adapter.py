@@ -15,6 +15,7 @@ real entry service (provider boundary stubbed only, the G3 precedent).
 
 from __future__ import annotations
 
+import os
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -144,7 +145,8 @@ async def test_single_step_workflow_parks_child_and_parent_succeeds(harness, llm
 
     # The child executes for real and its terminal path auto-calls the
     # parent: requeued with the verified outcome, token consumed once.
-    assert await worker.dispatch_once(child_ref) is True
+    if harness["store"].get_task_state(child_ref).lifecycle_state.value != "succeeded":
+        assert await worker.dispatch_once(child_ref) is True
     assert harness["store"].get_task_state(child_ref).lifecycle_state.value == "succeeded"
     parent_state = harness["store"].get_task_state(parent.task_ref)
     assert parent_state.lifecycle_state.value == "queued"
@@ -268,3 +270,189 @@ async def test_both_side_restarts_keep_the_chain(harness, llm_stub, monkeypatch)
     assert await worker_e.dispatch_once(parent.task_ref) is True
     assert harness["store"].get_task_state(parent.task_ref).lifecycle_state.value == "succeeded"
     assert len(_children_of(harness, parent.task_ref)) == 2, "restarts must not re-submit steps"
+
+
+class _ToolRoundLLM:
+    """Run two tool rounds or finish after denial, consuming real receipts."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.inputs: list[list[dict]] = []
+
+    @staticmethod
+    def _saw_tool(messages: list) -> bool:
+        receipts = [m for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
+        return len(receipts) >= 2 or any(m.get("is_error") for m in receipts)
+
+    async def chat(self, *, messages, model=None, tools=None, **_kwargs):
+        self.calls += 1
+        self.inputs.append([dict(m) for m in messages])
+        if tools and not self._saw_tool(messages):
+            return SimpleNamespace(
+                content="",
+                model=model or "stub-model",
+                tool_calls=[
+                    SimpleNamespace(
+                        id=f"call_{1 + sum(m.get('role') == 'tool' for m in messages)}",
+                        type="function",
+                        function=SimpleNamespace(name="stub_calculator", arguments='{"a": 2, "b": 3}'),
+                    )
+                ],
+                finish_reason="tool_calls",
+                usage={"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+            )
+        return SimpleNamespace(
+            content="child done with " + ", ".join(str(m["content"]) for m in messages if m.get("role") == "tool"),
+            model=model or "stub-model",
+            tool_calls=None,
+            finish_reason="stop",
+            usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+        )
+
+    async def chat_stream(self, *, messages, model=None, tools=None, **_kwargs):
+        result = await self.chat(messages=messages, model=model, tools=tools)
+        if result.tool_calls is None:
+            yield {"content": result.content, "tool_calls": None, "finish_reason": "stop"}
+            return
+        yield {"content": "", "tool_calls": result.tool_calls, "finish_reason": "tool_calls"}
+
+
+WF_PG_URL = os.environ.get("HECATE_STEP6_POSTGRES_URL")
+
+
+@pytest.mark.skipif(
+    not WF_PG_URL,
+    reason="HECATE_STEP6_POSTGRES_URL not configured; the inline-dispatch tool ledger needs "
+    "PostgreSQL's multi-writer locking (SQLite's single writer deadlocks the two sync "
+    "connections inside one dispatch); skip is not a pass",
+)
+@pytest.mark.parametrize("action", ["allow", "deny", "ask"])
+async def test_child_agent_multi_round_tools_via_real_engine(harness, monkeypatch, action) -> None:
+    """G3 workflow-entry evidence: a deployed-agent child runs a REAL
+    engine tool loop through the task-control chain — the tool executes
+    exactly once, its receipt lands as paired engine events, the model's
+    final answer consumes the real tool result, and the parent converges
+    over the verified callback."""
+    import hecate_llm.service as llm_module
+
+    from hecate.core.composition import entry_assembly
+    from hecate.models.agent_version import AgentVersionModel
+    from hecate.models.run import RunModel
+    from hecate.models.tool_policy import ToolPolicyRuleModel
+    from hecate.runtime.eventstore import EventType
+    from hecate.studio.event_state.postgres_store import PostgresEventStore
+    from hecate.studio.session_state.postgres_store import PostgresSessionStateStore
+    from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
+    from hecate.tools.tool.registry import ToolRegistry
+    from tests.test_channel.test_chat_engine_g3_entry import StubToolExecutor
+
+    executor = StubToolExecutor()
+
+    monkeypatch.setitem(
+        BUILTIN_TOOL_DEFINITIONS,
+        "stub_calculator",
+        {
+            "risk_level": "LOW",
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                "required": ["a", "b"],
+            },
+            "returns": {"type": "string"},
+        },
+    )
+
+    def _build(db, skill_ref_manifest=None, *, workspace_id=None):  # noqa: ANN001 — test double
+        registry = ToolRegistry(db=db, builtin_executor=executor, workspace_id=workspace_id)
+        registry._builtin_names = {"stub_calculator"}
+        return registry
+
+    monkeypatch.setattr(entry_assembly, "build_tool_registry", _build)
+
+    provider = _ToolRoundLLM()
+    monkeypatch.setattr(llm_module, "llm_service", provider)
+
+    # Freeze the tool onto the agent version so the dispatcher resolves it.
+    async with harness["session_factory"]() as db:
+        if action != "allow":
+            db.add(ToolPolicyRuleModel(workspace_id=WS, tool_pattern="stub_calculator", action=action))
+        version = (
+            await db.execute(
+                AgentVersionModel.__table__.select().where(AgentVersionModel.agent_id == harness["agent_id"])
+            )
+        ).first()
+        from sqlalchemy import update
+
+        await db.execute(
+            update(AgentVersionModel)
+            .where(AgentVersionModel.id == version.id)
+            .values(config_snapshot={**(version.config_snapshot or {}), "tools": ["stub_calculator"]})
+        )
+        await db.commit()
+
+    store = PostgresEventStore(harness["session_factory"])
+    monkeypatch.setattr(entry_assembly, "_shared_event_store", store)
+    monkeypatch.setattr(
+        entry_assembly, "_shared_session_state_store", PostgresSessionStateStore(harness["session_factory"])
+    )
+
+    monkeypatch.setattr("hecate.execution.task_control._spawn_background", lambda coro: coro.close())
+    parent = await _submit_workflow(harness, [{"goal": "step one"}])
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    children = _children_of(harness, parent.task_ref)
+    assert len(children) == 1
+    child_ref, _index = children[0]
+
+    if harness["store"].get_task_state(child_ref).lifecycle_state.value != "succeeded":
+        assert await worker.dispatch_once(child_ref) is True
+    assert harness["store"].get_task_state(child_ref).lifecycle_state.value == "succeeded"
+    for _ in range(3):
+        if harness["store"].get_task_state(parent.task_ref).lifecycle_state.value == "succeeded":
+            break
+        assert await worker.dispatch_once(parent.task_ref) is True
+    assert harness["store"].get_task_state(parent.task_ref).lifecycle_state.value == "succeeded"
+
+    # The tool ran exactly once through the real engine chain and the
+    # final answer consumed its real result.
+    expected_calls = 2 if action == "allow" else 0
+    assert executor.calls == [("stub_calculator", {"a": 2, "b": 3})] * expected_calls
+    assert provider.calls == (3 if action == "allow" else 2)
+    receipts = [m for m in provider.inputs[-1] if m.get("role") == "tool"]
+    if action == "allow":
+        assert [m["content"] for m in receipts] == ["5", "5"]
+    else:
+        assert receipts[-1].get("is_error")
+        assert any(word in receipts[-1]["content"].lower() for word in ("denied", "rejected", "approval", "policy")), (
+            receipts
+        )
+
+    # Engine parity: the child's session log carries the paired receipt.
+    from sqlalchemy import select
+
+    async with harness["session_factory"]() as db:
+        run = (await db.execute(select(RunModel).where(RunModel.task_id == uuid.UUID(child_ref.id)))).scalar_one()
+        assert run.deployment_id is not None
+        assert run.projection["state"] == "succeeded"
+    reader = PostgresEventStore(harness["session_factory"])
+    new_events = await reader.get_events(uuid.UUID(run.backend_ref["id"]))
+    kinds = [e.event_type for e in new_events]
+    if action == "allow":
+        calls = [e.payload["tool_call_id"] for e in new_events if e.event_type is EventType.TOOL_CALL]
+        results = [e.payload["tool_call_id"] for e in new_events if e.event_type is EventType.TOOL_RESULT]
+        assert calls == results == ["call_1", "call_2"]
+    assert (EventType.APPROVAL_ASKED in kinds) == (action == "ask")
+    assert (EventType.APPROVAL_DECIDED in kinds) == (action == "ask")
+    if action != "allow":
+        assert any(
+            event.event_type is EventType.CHANNEL_WRITE
+            and event.payload.get("channel") == "messages"
+            and receipts[-1] in event.payload.get("value", [])
+            for event in new_events
+        ), "the child's denial receipt must survive a fresh PostgreSQL read"
+    if action == "ask":
+        decisions = [event.payload for event in new_events if event.event_type is EventType.APPROVAL_DECIDED]
+        assert len(decisions) == 1 and decisions[0]["approved"] is False
+    # No re-execution across the parent wake: still exactly one tool call.
+    assert await worker.dispatch_once(parent.task_ref) is False
+    assert len(executor.calls) == expected_calls

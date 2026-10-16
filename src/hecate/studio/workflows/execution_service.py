@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from anyio import CancelScope
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -77,13 +78,17 @@ class InvalidForkAnchorError(ValueError):
 async def _sync_event_position(
     state: SessionState, event_store: EventStore | None, session_id: uuid.UUID
 ) -> SessionState:
-    """Sync ``SessionState.event_position`` with ``event_store.get_version(session_id)``.
+    """Sync an agent-only snapshot's position, preserving materialized anchors.
 
     Returns a new ``SessionState`` instance via ``model_copy`` when the store
     is provided; returns the original instance unchanged when ``event_store``
     is ``None`` (no-op, backward compatible).
     """
     if event_store is None:
+        return state
+    if state.channel_state:
+        # A materialized channel snapshot owns its replay anchor. Advancing
+        # the cursor without folding the tail would silently skip state.
         return state
     position = await event_store.get_version(session_id)
     return state.model_copy(update={"event_position": position})
@@ -639,17 +644,23 @@ class WorkflowExecutionService:
                 yield event
         except BaseException as exc:
             # Best-effort save on disconnect; swallow save failures so the
-            # original exception remains the one that surfaces.
+            # original exception remains the one that surfaces. The save is
+            # shielded: without the shield, unwinding cancellation re-raises
+            # inside the first await and the checkpoint is silently lost —
+            # recovery would then replay the whole turn.
             if agent_state is not None:
                 try:
-                    await self._persist_session_state(
-                        agent_state=agent_state,
-                        session_id=session_id,
-                        agent_id=agent_id or agent_state.agent_id,
-                        org_id=org_id,
-                        user_id=user_id,
-                    )
-                except Exception:  # noqa: BLE001 - best-effort, never masks original
+                    with CancelScope(shield=True):
+                        await self._persist_session_state(
+                            agent_state=agent_state,
+                            session_id=session_id,
+                            agent_id=agent_id or agent_state.agent_id,
+                            org_id=org_id,
+                            user_id=user_id,
+                        )
+                except BaseException as persist_exc:  # noqa: BLE001 - best-effort, never masks original
+                    if not isinstance(persist_exc, Exception):
+                        raise exc from persist_exc
                     logger.warning("session_state_persist_failed", exc_info=True)
             raise exc
         # Save AgentState exactly once after streaming completes normally.
@@ -718,11 +729,11 @@ class WorkflowExecutionService:
         org_id: str | uuid.UUID | None,
         user_id: str | uuid.UUID | None,
     ) -> None:
-        """Persist ``agent_state`` as a ``SessionState`` snapshot (best-effort).
+        """Merge ``agent_state`` into the session snapshot (best-effort).
 
         Builds a ``SessionState`` whose ``agent_state`` field is the JSON
-        serialization of ``AgentState.model_dump(mode="json")``, synchronizes
-        ``event_position`` with the wired ``EventStore``, and writes it via the
+        serialization of ``AgentState.model_dump(mode="json")``, retains a
+        materialized checkpoint's replay position, and writes it via the
         wired ``SessionStateStore`` under the ``(org_id, user_id, session_id)``
         tenant-scoped key.
 
@@ -748,14 +759,19 @@ class WorkflowExecutionService:
         if org_uuid is None or user_uuid is None:
             return
 
-        snapshot = SessionState(agent_state=agent_state.model_dump(mode="json"))
-        snapshot = await _sync_event_position(snapshot, self._event_store, session_id)
-
         # Lock acquisition retries with jitter; lock contention fails fast after
         # the retry budget is exhausted. Non-lock save failures are swallowed.
         for attempt in range(_LOCK_MAX_RETRIES):
             try:
                 async with self._checkpoint_store.acquire_session_lock(org_uuid, user_uuid, session_id):
+                    # Read under the same lock as the save so a materializer
+                    # update while waiting cannot be replaced by a stale copy.
+                    # A failed load must skip the save rather than erase state.
+                    existing = await self._checkpoint_store.load(org_uuid, user_uuid, session_id)
+                    snapshot = (existing or SessionState()).model_copy(
+                        update={"agent_state": agent_state.model_dump(mode="json")}
+                    )
+                    snapshot = await _sync_event_position(snapshot, self._event_store, session_id)
                     await self._checkpoint_store.save(org_uuid, user_uuid, session_id, snapshot)
                 return
             except SessionStateConflictError:

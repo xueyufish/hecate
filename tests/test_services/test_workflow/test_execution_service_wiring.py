@@ -36,6 +36,7 @@ def _service(checkpoint_store: SessionStateStore | None = None) -> WorkflowExecu
 def test_constructor_accepts_checkpoint_store():
     """The constructor SHALL accept ``checkpoint_store`` and store it on the instance."""
     store = AsyncMock(spec=SessionStateStore)
+    store.load = AsyncMock(return_value=None)
     svc = _service(checkpoint_store=store)
     assert svc._checkpoint_store is store
 
@@ -113,6 +114,7 @@ async def test_persist_session_state_calls_wired_store_with_correct_keys():
     """``_persist_session_state`` SHALL call ``checkpoint_store.save`` with
     parsed UUID keys and carry ``agent_state`` as a JSON dict."""
     store = AsyncMock(spec=SessionStateStore)
+    store.load = AsyncMock(return_value=None)
     # acquire_session_lock is an async context manager; replace AsyncMock's
     # coroutine return with a real no-op async CM so ``async with`` works.
     store.acquire_session_lock = _noop_lock_cm
@@ -152,6 +154,7 @@ async def test_persist_session_state_swallows_save_failure_no_legacy_fallback():
     implementation SHALL swallow it (best-effort). The legacy
     ``state_store.save`` fallback was removed in 13.4a-7."""
     new_store = AsyncMock(spec=SessionStateStore)
+    new_store.load = AsyncMock(return_value=None)
     new_store.acquire_session_lock = _noop_lock_cm
     new_store.save = AsyncMock(side_effect=ConnectionError("tiered down"))
 

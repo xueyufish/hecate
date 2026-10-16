@@ -212,7 +212,10 @@ async def test_same_key_different_arguments_conflicts():
 @pytest.mark.asyncio
 async def test_concurrent_duplicate_worker_executes_once():
     """Two workers dispatching the same fresh non-idempotent call under a
-    healthy store: the event-lock claim admits exactly one execution."""
+    healthy store: the event-lock claim admits exactly one execution. The
+    losing dispatch resolves succeeded-without-content (the event log
+    records a digest, not the result body) and stops for reconciliation
+    instead of feeding the model a placeholder receipt."""
     store = InMemoryEventStore()
     session_id = uuid.uuid4()
     port = _StubPort()
@@ -221,12 +224,16 @@ async def test_concurrent_duplicate_worker_executes_once():
     ctx = _execution_context(session_id)
     payload = _payload("call-1", "memory_add", {"content": "x"})
 
-    await asyncio.gather(
+    results = await asyncio.gather(
         worker_a.execute("tools", {}, payload, ctx),
-        worker_b.execute("tools", {}, payload, ctx),
+        worker_b.execute("tools", {}, dict(payload), ctx),
+        return_exceptions=True,
     )
 
     assert len(port.calls) == 1, "duplicate workers must not double-execute a write"
+    stopped = [r for r in results if isinstance(r, ExecutionStoppedError)]
+    assert len(stopped) == 1
+    assert stopped[0].reason_category == "reconciliation_required"
 
 
 # ---------------------------------------------------------------------------
@@ -320,10 +327,11 @@ async def test_succeeded_recovers_real_result_from_channel_history():
 
 
 @pytest.mark.asyncio
-async def test_succeeded_without_content_marks_reconciliation():
+async def test_succeeded_without_content_readonly_reexecutes_for_real_result():
     """Receipt succeeded but the result content never reached the channel
-    (checkpoint rolled back): explicit reconciliation marker with the
-    recorded result digest — never fabricated content, never re-execution."""
+    (checkpoint rolled back): a readonly tool may re-execute — that cannot
+    duplicate a side effect and re-obtains the real content instead of
+    handing the model a placeholder."""
     store = InMemoryEventStore()
     session_id = uuid.uuid4()
     port = _StubPort()
@@ -335,10 +343,64 @@ async def test_succeeded_without_content_marks_reconciliation():
 
     replay = await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
 
-    assert len(port.calls) == 1
+    assert len(port.calls) == 2, "readonly re-execution re-obtains the real result"
     msg = replay.channel_updates["messages"][0]
-    assert "reconciliation" in msg["content"]
-    assert "result_digest" in msg["content"]
+    assert "reconciliation" not in msg["content"]
+    assert "executed" in msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_succeeded_without_content_write_stops_for_reconciliation():
+    """Receipt succeeded, content unavailable, side-effecting tool: the
+    execution stops with an explicit reconciliation category — the write
+    is neither re-executed nor handed to the model as placeholder text."""
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    port = _StubPort()
+    worker = ToolWorker(port=port, event_store=store)
+    ctx = _execution_context(session_id)
+
+    await worker.execute("tools", {}, _payload("call-1", "memory_add", {"content": "x"}), ctx)
+    assert len(port.calls) == 1
+
+    with pytest.raises(ExecutionStoppedError) as stopped:
+        await worker.execute("tools", {}, _payload("call-1", "memory_add", {"content": "x"}), ctx)
+
+    assert stopped.value.reason_category == "reconciliation_required"
+    assert len(port.calls) == 1, "succeeded write must not re-execute"
+
+
+async def test_logged_reconciliation_placeholder_is_not_a_real_receipt():
+    """Old channel logs may contain the pre-fix error marker, not content."""
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    port = _StubPort()
+    worker = ToolWorker(port=port, event_store=store)
+    payload = _payload("call-1", "memory_add", {"content": "x"})
+    await worker.execute("tools", {}, payload, _execution_context(session_id))
+    await store.append(
+        Event(
+            session_id=session_id,
+            superstep=1,
+            event_type=EventType.CHANNEL_WRITE,
+            node_id="tools",
+            payload={
+                "channel": "messages",
+                "value": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call-1",
+                        "is_error": True,
+                        "content": "[reconciliation required] result content is unavailable",
+                    }
+                ],
+            },
+        )
+    )
+    with pytest.raises(ExecutionStoppedError) as stopped:
+        await worker.execute("tools", {}, payload, _execution_context(session_id))
+    assert stopped.value.reason_category == "reconciliation_required"
+    assert len(port.calls) == 1
 
 
 # ---------------------------------------------------------------------------

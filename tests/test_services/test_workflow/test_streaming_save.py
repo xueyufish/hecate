@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hecate.runtime.session_state import SessionStateStore
+from hecate.runtime.session_state import InMemorySessionStateStore, SessionState, SessionStateStore
 from hecate.runtime.types import StreamMode
 from hecate.studio.state.state import AgentState
 from hecate.studio.workflows.execution_service import WorkflowExecutionService
@@ -55,6 +55,7 @@ async def test_stream_normal_end_persists_session_state():
     """When the generator exhausts normally, ``_persist_session_state`` SHALL
     be called exactly once (atomic save at stream end)."""
     checkpoint_store = AsyncMock(spec=SessionStateStore)
+    checkpoint_store.load = AsyncMock(return_value=None)
     checkpoint_store.acquire_session_lock = _noop_lock_cm
     svc = WorkflowExecutionService(port=MagicMock(), db=MagicMock(), checkpoint_store=checkpoint_store)
     # Spy on _persist_session_state (don't replace — let it run for real so
@@ -106,6 +107,7 @@ async def test_stream_client_disconnect_best_effort_save():
             raise ConnectionError("client disconnect")
 
     checkpoint_store = AsyncMock(spec=SessionStateStore)
+    checkpoint_store.load = AsyncMock(return_value=None)
     checkpoint_store.acquire_session_lock = _noop_lock_cm
     svc = WorkflowExecutionService(port=MagicMock(), db=MagicMock(), checkpoint_store=checkpoint_store)
 
@@ -146,6 +148,7 @@ async def test_stream_no_legacy_state_store_call():
     """``_stream_execute`` SHALL NOT reference ``self._state_store`` — the
     legacy branch at the old line 473-474 was removed."""
     checkpoint_store = AsyncMock(spec=SessionStateStore)
+    checkpoint_store.load = AsyncMock(return_value=None)
     checkpoint_store.acquire_session_lock = _noop_lock_cm
     svc = WorkflowExecutionService(
         port=MagicMock(),
@@ -181,6 +184,7 @@ async def test_stream_persist_failure_does_not_block_stream():
     as failed). On the disconnect path, save failures SHALL be swallowed
     so the original exception is the one that surfaces."""
     checkpoint_store = AsyncMock(spec=SessionStateStore)
+    checkpoint_store.load = AsyncMock(return_value=None)
     checkpoint_store.acquire_session_lock = _noop_lock_cm
     checkpoint_store.save = AsyncMock(side_effect=RuntimeError("pg down"))
     svc = WorkflowExecutionService(port=MagicMock(), db=MagicMock(), checkpoint_store=checkpoint_store)
@@ -206,3 +210,73 @@ async def test_stream_persist_failure_does_not_block_stream():
 
     assert len(events) == 1
     assert events[0]["content"] == "ok"
+
+
+async def test_agent_save_preserves_all_checkpoint_fields_under_lock():
+    """A concurrent materializer update must survive the agent-only save."""
+    org, user, session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    latest = SessionState(
+        channel_state={"messages": ["latest"]},
+        metadata={"superstep": 9},
+        intent={"goal": "keep this goal"},
+        event_position=42,
+    )
+
+    class UpdatingStore(InMemorySessionStateStore):
+        @asynccontextmanager
+        async def acquire_session_lock(self, *args, **kwargs):
+            await self.save(org, user, session, latest)
+            yield
+
+    store = UpdatingStore()
+    await store.save(org, user, session, SessionState(channel_state={"messages": ["stale"]}))
+    service = WorkflowExecutionService(port=MagicMock(), checkpoint_store=store)
+    await service._persist_session_state(
+        agent_state=AgentState(session_id=session, agent_id=uuid.uuid4(), summary="new agent state"),
+        session_id=session,
+        agent_id=None,
+        org_id=org,
+        user_id=user,
+    )
+    saved = await store.load(org, user, session)
+    assert saved.channel_state == latest.channel_state
+    assert saved.intent == latest.intent
+    assert saved.event_position == latest.event_position
+    assert saved.metadata == latest.metadata
+    assert saved.agent_state["summary"] == "new agent state"
+
+
+async def test_agent_save_does_not_advance_materialized_replay_anchor():
+    """Agent-only updates cannot consume channel writes not in the snapshot."""
+    org, user, session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    store = InMemorySessionStateStore()
+    await store.save(org, user, session, SessionState(channel_state={"messages": ["old"]}, event_position=4))
+    log = MagicMock()
+    log.get_version = AsyncMock(return_value=9)
+    service = WorkflowExecutionService(port=MagicMock(), checkpoint_store=store, event_store=log)
+    await service._persist_session_state(
+        agent_state=AgentState(session_id=session, agent_id=uuid.uuid4()),
+        session_id=session,
+        agent_id=None,
+        org_id=org,
+        user_id=user,
+    )
+    saved = await store.load(org, user, session)
+    assert saved.event_position == 4
+
+
+async def test_agent_save_does_not_overwrite_checkpoint_when_load_fails():
+    """A transient read failure cannot authorize an empty replacement."""
+    store = AsyncMock(spec=SessionStateStore)
+    store.load.side_effect = ConnectionError("checkpoint read unavailable")
+    store.acquire_session_lock = _noop_lock_cm
+    service = WorkflowExecutionService(port=MagicMock(), checkpoint_store=store)
+    session = uuid.uuid4()
+    await service._persist_session_state(
+        agent_state=AgentState(session_id=session, agent_id=uuid.uuid4()),
+        session_id=session,
+        agent_id=None,
+        org_id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+    )
+    store.save.assert_not_awaited()

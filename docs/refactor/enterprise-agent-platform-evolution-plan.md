@@ -342,9 +342,9 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **step5d 剩余项：**
 
-- [x] 完成错误/产物到平台契约的映射，保留安全的后端详情；聊天事件接入持久存储，同步与流式成为同一 Task/Run 的视图。同步失败终态信封、调用方事务回滚后的登记保留、声明产物引用映射及 PostgreSQL 实际入口端到端回归由 `step5d-entry-contract-completion` 交付。登记与终态独立提交，不提交调用方业务事务；产物须经 workspace 归属及删除状态校验，当前支持可解析的 evidence 引用，未知归属拒绝；公开 Run 投影、事件分页与订阅复用实际持久事实并隐藏内部字段。支持范围与复核证据见[入口契约复核](../../openspec/changes/step5d-entry-contract-completion/review.md)；未配置 PostgreSQL 的跳过不算验收通过。
+- [x] 完成错误/产物到平台契约的映射，保留安全的后端详情；聊天事件接入持久存储，同步与流式成为同一 Task/Run 的视图。同步失败终态信封、调用方事务回滚后的登记保留、声明产物引用映射及 PostgreSQL 实际入口端到端回归由 `step5d-entry-contract-completion` 交付。登记与终态独立提交，不提交调用方业务事务；产物须经 workspace 归属及删除状态校验，当前支持可解析的 evidence 引用，未知归属拒绝；公开 Run 投影、事件分页与订阅复用实际持久事实并隐藏内部字段。支持范围与复核证据见[入口契约复核](../../openspec/changes/archive/2026-10-15-step5d-entry-contract-completion/review.md)；未配置 PostgreSQL 的跳过不算验收通过。
 - [ ] 收口定时 WorkflowExecutor 经 `WorkflowTestRunner` 的路径、A2A per-agent 身份及入口安装/升级支持矩阵。定时 workflow 已经平台入口路径执行，并恢复业务输入 channel 和调度 workspace 隔离；当前只能登记 Task，独立 workflow 的 Run/部署身份及治理认证仍缺，不冒充完整收口。A2A 多 agent 作用域通过唯一默认部署所属 Agent 解析，调用方→agent 协议映射仍为登记缺口；[入口安装/升级支持矩阵](../design/entry-support-matrix.md)已区分功能回归与安装/升级未认证。
-- [ ] 完成 G3 实际入口的多轮、拒绝、取消、断连/恢复及默认启用证据；复用现有开关和路由，旧循环限制须显式保留。HTTP 确定性多轮/拒绝/边界取消及默认关闭决策已有证据；ASGI 缓冲传输的续轮用例不能证明中途真实断连，MCP/workflow 引擎路径证据也缺。默认维持关闭；翻转前置与跨轮回执对账标记边界见[step5d G3 默认启用复核](step5d-g3-default-enable-review.md)。
+- [ ] 完成 G3 实际入口的多轮、拒绝、取消、断连/恢复及默认启用证据；复用现有开关和路由，旧循环限制须显式保留。`step5d-g3-entry-conformance` 已补真实 TCP/SSE RST 中途断连、持久取消终态、零重复恢复与真实回执内容；内容不可恢复的写类动作显式对账停止，旧错误占位不进入推理。MCP 注册工具经协议会话覆盖多轮、策略/审批拒绝与取消恢复；Workflow 证据限定为有部署身份的 Agent 子任务多轮、拒绝及父任务核实收敛。PG 入口事实由新会话查询；SQLite 单写者限制与其他网络故障范围如实保留。默认维持关闭，仍需核对待发布入口/profile、翻转决策与实际放量审计；真实模型质量验收归 step5e。详见[step5d G3 默认启用复核](step5d-g3-default-enable-review.md)。
 
 **step5e 操作与决策门槛：**
 
