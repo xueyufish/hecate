@@ -358,7 +358,11 @@ class WorkflowExecutionService:
         # Build AgentState (13.4a-7: no longer loaded from the removed
         # AgentStateStore; SessionStateStore owns cross-call persistence
         # via the wired checkpoint_store).
-        agent_state = AgentState(session_id=session_id, agent_id=uuid.uuid4())
+        agent_state = AgentState(
+            session_id=session_id,
+            agent_id=uuid.UUID(str(agent_id)) if agent_id else uuid.uuid4(),
+            metadata={"execution_agent_mode": agent_mode},
+        )
         if environment_root:
             agent_state.environment_root = environment_root
 
@@ -441,6 +445,11 @@ class WorkflowExecutionService:
         )
         runtime = assembled.runtime
         initial_input = assembled.initial_input
+        if agent_mode == "chat" and not resume_interrupted:
+            initial_input["messages"], history_verified = await self._restore_chat_history(
+                runtime, session_id, messages, user_id=user_id, agent_id=agent_id
+            )
+            agent_state.metadata["chat_history_verified"] = history_verified
         if input_data is not None:
             initial_input = {**initial_input, **input_data}
         evidence_tracker = assembled.evidence_tracker
@@ -490,6 +499,50 @@ class WorkflowExecutionService:
                 user_id=user_id,
             )
         return response
+
+    async def _restore_chat_history(
+        self,
+        runtime: PregelRuntime,
+        session_id: uuid.UUID,
+        messages: list[dict],
+        *,
+        user_id: str | uuid.UUID | None,
+        agent_id: str | uuid.UUID | None,
+    ) -> tuple[list[dict], bool]:
+        """Append a new turn to a verified user's same-agent logged history."""
+        if not (user_id and agent_id and self._checkpoint_store is not None and self._event_store is not None):
+            return messages, False
+        user_uuid = uuid.UUID(str(user_id))
+        existing = await self._checkpoint_store.load(user_uuid, user_uuid, session_id)
+        # Legacy or differently scoped snapshots do not authorize reading the
+        # session-only log namespace. The marker is written by this service
+        # from the verified entry agent, never from incoming messages.
+        if existing is None:
+            # A caller cannot adopt an existing session-only log merely by
+            # creating its own tenant-scoped snapshot with the same UUID.
+            return messages, await self._event_store.get_version(session_id) == 0
+        if existing.metadata.get("chat_agent_id") != str(agent_id):
+            return messages, False
+        # Explicit client history can include normalized assistant output;
+        # preserve that contract instead of appending a conflicting copy.
+        if (
+            any(m.get("role") in ("assistant", "tool") for m in messages)
+            or sum(m.get("role") == "user" for m in messages) > 1
+        ):
+            return messages, True
+        snapshot = await runtime.snapshot_at_version(session_id)
+        previous = snapshot["channel_state"].get("messages") or []
+        if not previous or messages[: len(previous)] == previous:
+            return messages, True
+        incoming = list(messages)
+        if incoming and incoming[0].get("role") == "system" and incoming[0] == previous[0]:
+            incoming = incoming[1:]
+        # Avoid duplicating an exact suffix when a delta repeats the last turn.
+        overlap = 0
+        for size in range(1, min(len(previous), len(incoming)) + 1):
+            if previous[-size:] == incoming[:size]:
+                overlap = size
+        return [*previous, *incoming[overlap:]], True
 
     async def _mark_session_interrupted(self, session_id: uuid.UUID) -> None:
         """Event-driven session status wiring (1.3.19 requirement, delivered with
@@ -771,6 +824,19 @@ class WorkflowExecutionService:
                     snapshot = (existing or SessionState()).model_copy(
                         update={"agent_state": agent_state.model_dump(mode="json")}
                     )
+                    if (
+                        agent_state.metadata.get("chat_history_verified") is True
+                        and agent_id
+                        and agent_state.metadata.get("execution_agent_mode") == "chat"
+                    ):
+                        snapshot = snapshot.model_copy(
+                            update={
+                                "metadata": {
+                                    **snapshot.metadata,
+                                    "chat_agent_id": str(agent_id),
+                                }
+                            }
+                        )
                     snapshot = await _sync_event_position(snapshot, self._event_store, session_id)
                     await self._checkpoint_store.save(org_uuid, user_uuid, session_id, snapshot)
                 return

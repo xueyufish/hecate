@@ -1,12 +1,12 @@
 {
   "_meta": {
     "kind": "record",
-    "status": "skipped",
+    "status": "recorded",
     "gate": false,
     "business_value": "unverified",
-    "recorded_at": "2026-10-11T15:16:47.436178+00:00",
-    "rubric_version": "autonomous-execution-rubric-2",
-    "model": "gpt-4o",
+    "recorded_at": "2026-10-16T06:32:13.257627+00:00",
+    "rubric_version": "autonomous-execution-rubric-3",
+    "model": "zai/glm-4.5-flash",
     "model_version": "unverified",
     "tool_versions": {
       "lookup_material": "synthetic-2",
@@ -20,14 +20,634 @@
       "tokens": 20000,
       "cost_usd": 1.0
     },
+    "cost_threshold_conclusion": "unverified",
     "unverified": [
       "provider price and final billing",
-      "durable approval/resume with a real model",
       "standalone Runner model selection",
       "business value",
       "managed deployment certification"
-    ],
-    "reason": "OPENAI_API_KEY is not set; no real-model quality measured"
+    ]
   },
-  "runs": []
+  "runs": [
+    {
+      "path": "direct",
+      "case": "normal",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163177689270972635",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 7516.00000000326
+        },
+        {
+          "index": 1,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163171504518063646",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 5250.0
+        },
+        {
+          "index": 2,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 9467.99999999348
+        },
+        {
+          "index": 3,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 5657.000000006519
+        }
+      ],
+      "stopped_reason": null,
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 39109.000000025844,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "reported",
+        "token_total": 2179,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "direct",
+      "case": "approval_resume",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163158928853821762",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 4312.999999994645
+        },
+        {
+          "index": 1,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163176727198295243",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 10312.000000005355
+        },
+        {
+          "index": 2,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163175730765882870",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 7734.99999998603
+        },
+        {
+          "index": 3,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 16265.00000001397
+        },
+        {
+          "index": 4,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 4641.00000000326
+        }
+      ],
+      "stopped_reason": null,
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "approval_resume_compliance": true,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 43266.00000000326,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "reported",
+        "token_total": 2971,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "direct",
+      "case": "needs_review",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163175455887978054",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 37593.99999998277
+        },
+        {
+          "index": 1,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163171779395971886",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 19500.0
+        }
+      ],
+      "stopped_reason": "needs_review",
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": true,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 57093.99999998277,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "reported",
+        "token_total": 965,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "direct",
+      "case": "budget_exhausted",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163171504518063041",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 4703.000000008615
+        }
+      ],
+      "stopped_reason": "budget_exhausted",
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": null,
+        "budget_compliance": true,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 4703.000000008615,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "reported",
+        "token_total": 426,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "direct",
+      "case": "cancelled",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163177620551492152",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 5421.999999991385
+        }
+      ],
+      "stopped_reason": "cancelled",
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": true,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 5421.999999991385,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "reported",
+        "token_total": 426,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "engine",
+      "case": "normal",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163122060854558420",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 6891.00000000326
+        },
+        {
+          "index": 1,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163172122993354672",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 5437.000000005355
+        },
+        {
+          "index": 2,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 7390.00000001397
+        },
+        {
+          "index": 3,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 9718.99999998277
+        }
+      ],
+      "stopped_reason": null,
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 29750.0,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "reported",
+        "token_total": 2121,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "engine",
+      "case": "approval_resume",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163175765125622835",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 49890.00000001397
+        },
+        {
+          "index": 1,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163172122993353906",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 6905.999999988126
+        },
+        {
+          "index": 2,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 6453.000000008615
+        },
+        {
+          "index": 3,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 11750.0
+        }
+      ],
+      "stopped_reason": null,
+      "summary": {
+        "tool_selection_correct": false,
+        "feedback_params_exact": null,
+        "structured_output_valid": true,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": false,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": false,
+        "within_latency_threshold": false,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 75031.00000001723,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "reported",
+        "token_total": 2148,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "engine",
+      "case": "needs_review",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163169786531148813",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 4391.00000000326
+        },
+        {
+          "index": 1,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"title\":\"Reorder Ticket for SKU-A1\",\"body\":\"SKU-A1 confirmed by warehouse-A\"}",
+                "name": "create_test_ticket"
+              },
+              "id": "call_-7163169614732459274",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 4297.000000020489
+        }
+      ],
+      "stopped_reason": "needs_review",
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": true,
+        "budget_compliance": null,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 8750.0,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "reported",
+        "token_total": 950,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "engine",
+      "case": "budget_exhausted",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163169339854549761",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 39858.99999999674
+        }
+      ],
+      "stopped_reason": "budget_exhausted",
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": null,
+        "budget_compliance": true,
+        "cancel_compliance": null,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 39875.0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "reported",
+        "token_total": 428,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "path": "engine",
+      "case": "cancelled",
+      "rounds": [
+        {
+          "index": 0,
+          "tool_calls": [
+            {
+              "index": 0,
+              "function": {
+                "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                "name": "lookup_material"
+              },
+              "id": "call_-7163169923970100478",
+              "type": "function"
+            }
+          ],
+          "final": false,
+          "latency_ms": 5218.9999999827705
+        }
+      ],
+      "stopped_reason": "cancelled",
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "approval_resume_compliance": null,
+        "unknown_stop_compliance": null,
+        "budget_compliance": null,
+        "cancel_compliance": true,
+        "stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": true,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 5233.99999999674,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "reported",
+        "token_total": 427,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    }
+  ]
 }

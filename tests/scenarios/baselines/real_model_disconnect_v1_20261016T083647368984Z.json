@@ -1,0 +1,325 @@
+{
+  "source": "real_model",
+  "model": "zai/glm-4.5-flash",
+  "gate": false,
+  "storage": "sqlite_orm_memory_events_and_snapshots",
+  "status": "passed",
+  "cost_amount": null,
+  "price_version": "unverified",
+  "correlation": {
+    "status": "registered",
+    "task_ref": {
+      "kind": "task",
+      "issuer_domain": "hecate",
+      "id": "125d3d38-1ea6-420e-9071-3deb527a0b2c"
+    },
+    "run_ref": {
+      "kind": "run",
+      "issuer_domain": "hecate",
+      "id": "91810127-5aba-4f2f-bb63-9561622dcbcb"
+    }
+  },
+  "cancelled_terminal_verified": true,
+  "response_status": 200,
+  "recovery_response": {
+    "id": "chatcmpl-7954d3965fec",
+    "object": "chat.completion",
+    "created": 1792139807,
+    "model": "gpt-4o",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"5\"\n}",
+          "name": null,
+          "tool_calls": null,
+          "tool_call_id": null,
+          "annotations": null,
+          "suggested_questions": null
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    },
+    "hecate_correlation": {
+      "status": "registered",
+      "task_ref": {
+        "kind": "task",
+        "issuer_domain": "hecate",
+        "id": "002d8cdd-2612-4d75-a269-6502f6da0df3"
+      },
+      "run_ref": {
+        "kind": "run",
+        "issuer_domain": "hecate",
+        "id": "b084a0a8-c636-4bad-8919-d646d5626944"
+      }
+    }
+  },
+  "receipt_in_first_recovery_input": true,
+  "model_inputs": [
+    [
+      {
+        "role": "user",
+        "content": "Use stub_calculator to add 2 and 3. Return JSON with an answer field."
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "Use stub_calculator to add 2 and 3. Return JSON with an answer field."
+      },
+      {
+        "role": "assistant",
+        "content": "\nI'll use the stub_calculator to add 2 and 3, then return the result in JSON format.\n",
+        "tool_calls": [
+          {
+            "id": "call_-7163174596894522523",
+            "type": "function",
+            "function": {
+              "name": "stub_calculator",
+              "arguments": "{\"a\":2,\"b\":3}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_-7163174596894522523",
+        "content": "5"
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "Use stub_calculator to add 2 and 3. Return JSON with an answer field."
+      },
+      {
+        "role": "assistant",
+        "content": "\nI'll use the stub_calculator to add 2 and 3, then return the result in JSON format.\n",
+        "tool_calls": [
+          {
+            "id": "call_-7163174596894522523",
+            "type": "function",
+            "function": {
+              "name": "stub_calculator",
+              "arguments": "{\"a\":2,\"b\":3}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_-7163174596894522523",
+        "content": "5"
+      },
+      {
+        "role": "user",
+        "content": "Continue: what was the previous calculation result? Return JSON with an answer field."
+      }
+    ],
+    [
+      {
+        "role": "user",
+        "content": "Use stub_calculator to add 2 and 3. Return JSON with an answer field."
+      },
+      {
+        "role": "assistant",
+        "content": "\nI'll use the stub_calculator to add 2 and 3, then return the result in JSON format.\n",
+        "tool_calls": [
+          {
+            "id": "call_-7163174596894522523",
+            "type": "function",
+            "function": {
+              "name": "stub_calculator",
+              "arguments": "{\"a\":2,\"b\":3}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "tool_call_id": "call_-7163174596894522523",
+        "content": "5"
+      },
+      {
+        "role": "user",
+        "content": "Continue: what was the previous calculation result? Return JSON with an answer field."
+      },
+      {
+        "role": "assistant",
+        "content": "\n```json\n{\n  \"answer\": 5\n}\n```"
+      },
+      {
+        "role": "user",
+        "content": "Your response violates the required output schema: 5 is not of type 'string'. Respond again satisfying the schema."
+      }
+    ]
+  ],
+  "rounds": [
+    {
+      "index": 0,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use stub_calculator to add 2 and 3. Return JSON with an answer field."
+        }
+      ],
+      "tools_enabled": true,
+      "tool_calls": [
+        {
+          "index": 0,
+          "function": {
+            "arguments": "{\"a\":2,\"b\":3}",
+            "name": "stub_calculator"
+          },
+          "id": "call_-7163174596894522523",
+          "type": "function"
+        }
+      ],
+      "final": false,
+      "latency_ms": 19391.00000000326,
+      "content": "\nI'll use the stub_calculator to add 2 and 3, then return the result in JSON format.\n",
+      "usage": {
+        "completion_tokens": 151,
+        "prompt_tokens": 182,
+        "total_tokens": 333,
+        "completion_tokens_details": null,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 181,
+          "image_tokens": null,
+          "text_tokens": null,
+          "video_tokens": null,
+          "initial_prompt_tokens": null
+        }
+      },
+      "provider_model": "zai/glm-4.5-flash"
+    },
+    {
+      "index": 1,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use stub_calculator to add 2 and 3. Return JSON with an answer field."
+        },
+        {
+          "role": "assistant",
+          "content": "\nI'll use the stub_calculator to add 2 and 3, then return the result in JSON format.\n",
+          "tool_calls": [
+            {
+              "id": "call_-7163174596894522523",
+              "type": "function",
+              "function": {
+                "name": "stub_calculator",
+                "arguments": "{\"a\":2,\"b\":3}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_-7163174596894522523",
+          "content": "5"
+        },
+        {
+          "role": "user",
+          "content": "Continue: what was the previous calculation result? Return JSON with an answer field."
+        }
+      ],
+      "tools_enabled": true,
+      "tool_calls": [],
+      "final": true,
+      "latency_ms": 5047.000000020489,
+      "content": "\n```json\n{\n  \"answer\": 5\n}\n```",
+      "usage": {
+        "completion_tokens": 75,
+        "prompt_tokens": 257,
+        "total_tokens": 332,
+        "completion_tokens_details": null,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 256,
+          "image_tokens": null,
+          "text_tokens": null,
+          "video_tokens": null,
+          "initial_prompt_tokens": null
+        }
+      },
+      "provider_model": "zai/glm-4.5-flash"
+    },
+    {
+      "index": 2,
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "Use stub_calculator to add 2 and 3. Return JSON with an answer field."
+        },
+        {
+          "role": "assistant",
+          "content": "\nI'll use the stub_calculator to add 2 and 3, then return the result in JSON format.\n",
+          "tool_calls": [
+            {
+              "id": "call_-7163174596894522523",
+              "type": "function",
+              "function": {
+                "name": "stub_calculator",
+                "arguments": "{\"a\":2,\"b\":3}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_-7163174596894522523",
+          "content": "5"
+        },
+        {
+          "role": "user",
+          "content": "Continue: what was the previous calculation result? Return JSON with an answer field."
+        },
+        {
+          "role": "assistant",
+          "content": "\n```json\n{\n  \"answer\": 5\n}\n```"
+        },
+        {
+          "role": "user",
+          "content": "Your response violates the required output schema: 5 is not of type 'string'. Respond again satisfying the schema."
+        }
+      ],
+      "tools_enabled": false,
+      "tool_calls": [],
+      "final": true,
+      "latency_ms": 29983.99999999674,
+      "content": "\n```json\n{\n  \"answer\": \"5\"\n}\n```",
+      "usage": {
+        "completion_tokens": 103,
+        "prompt_tokens": 142,
+        "total_tokens": 245,
+        "completion_tokens_details": null,
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 4,
+          "image_tokens": null,
+          "text_tokens": null,
+          "video_tokens": null,
+          "initial_prompt_tokens": null
+        }
+      },
+      "provider_model": "zai/glm-4.5-flash"
+    }
+  ],
+  "tool_calls": [
+    [
+      "stub_calculator",
+      {
+        "a": 2,
+        "b": 3
+      }
+    ]
+  ]
+}
