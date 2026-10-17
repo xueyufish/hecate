@@ -377,7 +377,7 @@ class HecateExecutionBackend(AgentExecutionBackend):
 
             result = await runtime_execution_service.execute(
                 RuntimeExecutionRequest(
-                    runtime=assembled.runtime,
+                    runtime=assembled.driver,
                     session_id=session_id,
                     initial_input=assembled.initial_input,
                     execution_mode=assembled.execution_mode,

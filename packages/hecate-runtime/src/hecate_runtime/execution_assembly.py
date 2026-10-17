@@ -35,6 +35,7 @@ from hecate_runtime.compaction import CompactionSummarizer
 from hecate_runtime.compiler import GraphCompiler
 from hecate_runtime.context import PriorityContextEngine
 from hecate_runtime.evidence import EvidenceTracker
+from hecate_runtime.execution_driver import ExecutionDriver, PregelExecutionDriver
 from hecate_runtime.pregel import PregelRuntime
 from hecate_runtime.session_state import SessionStateStore
 from hecate_runtime.session_state_materializer import SessionStateMaterializer
@@ -276,9 +277,17 @@ def create_composite_worker(
 
 @dataclass
 class AssembledExecution:
-    """Everything the engine needs to execute one assembled run."""
+    """Everything the engine needs to execute one assembled run.
+
+    ``runtime`` is the assembled Pregel graph runtime for consumers that drive
+    the engine directly (the chat graph path, including engine-specific
+    snapshot access). ``driver`` is the ``ExecutionDriver`` view of the same
+    runtime for consumers that execute through the shared execution service —
+    they pass ``driver``, never the raw runtime.
+    """
 
     runtime: PregelRuntime
+    driver: ExecutionDriver
     initial_input: dict[str, Any]
     evidence_tracker: EvidenceTracker
     execution_mode: str
@@ -387,6 +396,7 @@ def assemble_execution(
 
     return AssembledExecution(
         runtime=runtime,
+        driver=PregelExecutionDriver(runtime),
         initial_input=initial_input,
         evidence_tracker=evidence_tracker,
         execution_mode=execution_mode,
