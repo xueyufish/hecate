@@ -50,6 +50,32 @@ class MaxSuperstepsError(EngineError):
         super().__init__(message)
 
 
+class ApprovalWaitSignal(BaseException):
+    """A protected action must park the durable task for a human decision.
+
+    Raised by the durable-wait approval callback when a policy-required
+    approval has no synchronous answerer. Derives from ``BaseException``
+    (same family as ``CancelledError``/``GeneratorExit``) so the tool loop's
+    ``except Exception`` upgrades (unknown receipt → ``needs_review``) and
+    the retry executor cannot rewrite or retry it: the signal must escape
+    the engine untouched and reach the dispatch boundary, which converts it
+    into a durable ``WAITING_APPROVAL`` park instead of a failed terminal.
+    """
+
+    def __init__(
+        self,
+        tool_name: str,
+        arguments: dict | None = None,
+        risk_level: str = "",
+        context: dict | None = None,
+    ) -> None:
+        self.tool_name = tool_name
+        self.arguments = dict(arguments or {})
+        self.risk_level = risk_level
+        self.context = dict(context or {})
+        super().__init__(f"tool '{tool_name}' waits for a durable approval decision")
+
+
 class GraphValidationError(EngineError):
     """Raised when a graph definition fails schema or structural validation.
 

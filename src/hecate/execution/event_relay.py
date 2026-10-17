@@ -89,6 +89,7 @@ class PlatformOutboxProjector:
                             "state": payload["status"],
                             "error": payload.get("error"),
                             "result_preview": str(payload.get("content") or "")[:2000],
+                            **({"error_category": payload["error_category"]} if payload.get("error_category") else {}),
                         },
                     )
                 await db.commit()

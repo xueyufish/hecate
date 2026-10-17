@@ -222,6 +222,8 @@ class FailingClosedApprovalCallback(ApprovalCallback):
                 try:
                     inner = await self._delegate_inner(tool_name, arguments, risk_level, context)
                 except Exception as exc:  # noqa: BLE001 — fail-closed
+                    if getattr(exc, "terminal_execution", False):
+                        raise
                     inner = ApprovalDecision(
                         approved=False,
                         reason=f"no_answerer:{type(exc).__name__}",

@@ -150,7 +150,13 @@ class PlatformGovernance:
             arguments_digest=tool_arguments_digest(arguments),
             invocation_id=invocation_id or call_context.get("invocation_id") or "",
             target_resources=target_resources_for(arguments),
-            task_ref=str(call_context.get("session_id")) if call_context.get("session_id") else None,
+            task_ref=(
+                str(call_identity["task_scope"])
+                if call_identity.get("task_scope")
+                else str(call_context.get("session_id"))
+                if call_context.get("session_id")
+                else None
+            ),
             deployment_id=call_identity.get("deployment_id"),
             workspace_id=str(self._workspace_id) if self._workspace_id else None,
             tool_metadata=call_context.get("tool_metadata"),

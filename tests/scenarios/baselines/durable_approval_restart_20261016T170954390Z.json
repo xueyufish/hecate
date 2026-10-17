@@ -1,0 +1,1134 @@
+{
+  "_meta": {
+    "kind": "real_model_durable_approval_restart",
+    "evidence_version": 2,
+    "status": "passed",
+    "gate": false,
+    "recorded_at": "2026-10-16T17:08:40.551606+00:00",
+    "model": "zai/glm-4.5-flash",
+    "source": "real_model",
+    "cost_amount": null,
+    "price_version": "unverified",
+    "historical_record": "durable_approval_restart_20261016T155804310Z.json"
+  },
+  "parked": true,
+  "resumed_after_process_restart": true,
+  "task_state": "succeeded",
+  "result": {
+    "status": "succeeded",
+    "content": "\nTicket created successfully! The ticket ID is **TCK-1** with the title \"fix the ladder\".",
+    "artifacts": {}
+  },
+  "wait_contract": {
+    "approval_ref": "task:5fb857e8-4e03-42e0-baa7-ca9401ac4c3a:304fcbb0-f505-4c75-9198-1ec6c266064a",
+    "tool_name": "stub_ticket",
+    "arguments_digest": "1dd560962e28aef5a1b6330f2cce16b0f6324f55b95d37e5df37b6fb4dc7ac91",
+    "principal_fingerprint": "9f083bac16553ca92b8f9d45d2491c8993c75fe360d3a3d39ede23cec2fce278",
+    "target_resources": [],
+    "task_scope": "5fb857e8-4e03-42e0-baa7-ca9401ac4c3a",
+    "invocation_id": "4b72ca7c-b32e-5ec2-b2e1-8fe02f023a93",
+    "risk_level": "low",
+    "run_id": "f8af0cb9-d8d8-42af-8fb4-071027d5e5ef",
+    "engine_session_id": "72f4df75-43ba-4e20-b9c7-4b468190aebc"
+  },
+  "approval_binding": {
+    "approval_ref": "task:5fb857e8-4e03-42e0-baa7-ca9401ac4c3a:304fcbb0-f505-4c75-9198-1ec6c266064a",
+    "principal_fingerprint": "9f083bac16553ca92b8f9d45d2491c8993c75fe360d3a3d39ede23cec2fce278",
+    "tool_name": "stub_ticket",
+    "arguments_digest": "1dd560962e28aef5a1b6330f2cce16b0f6324f55b95d37e5df37b6fb4dc7ac91",
+    "target_resources": [],
+    "deployment_id": null,
+    "domains": [],
+    "task_scope": "5fb857e8-4e03-42e0-baa7-ca9401ac4c3a",
+    "issued_at": "2026-10-16T17:09:20.082359Z",
+    "expires_at": "2026-10-16T18:09:20.082359Z",
+    "one_time": true,
+    "judgment": "approved",
+    "reason": "e2e approval",
+    "decided_by": "tester",
+    "revoked": false,
+    "consumed_by_invocation_id": "4b72ca7c-b32e-5ec2-b2e1-8fe02f023a93",
+    "anchor_wall": "2026-10-16T17:09:27.985616Z",
+    "anchor_monotonic": 170827.296,
+    "clock_epoch": "cbd8d61e-1ad4-47ce-b01a-53a8fa22d46f"
+  },
+  "executions": [
+    {
+      "tool": "stub_ticket",
+      "args": {
+        "title": "fix the ladder"
+      },
+      "pid": 23180
+    }
+  ],
+  "model_trace": [
+    {
+      "pid": 24488,
+      "phase": "input",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Create a ticket titled 'fix the ladder' with the create-ticket tool, then report the ticket id."
+        }
+      ],
+      "model": "zai/glm-4.5-flash",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "stub_ticket",
+            "description": "Create a ticket (synthetic restart-E2E tool)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "pid": 24488,
+      "phase": "output",
+      "chunks": [
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "\n",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "I",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "'ll",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " create",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " a",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " ticket",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " with",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " the",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " title",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " \"",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "fix",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " the",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " ladder",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "\"",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " and",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " then",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " report",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " the",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " ticket",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " ID",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": ".\n",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": [
+            {
+              "id": "call_08cdbe9a6d0547e4a04785d9",
+              "function": {
+                "arguments": "{\"title\":\"fix the ladder\"}",
+                "name": "stub_ticket"
+              },
+              "type": "function",
+              "index": 0
+            }
+          ],
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": "tool_calls"
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null,
+          "usage": {
+            "prompt_tokens": 183,
+            "completion_tokens": 142,
+            "total_tokens": 325,
+            "cache_read_tokens": 43
+          }
+        }
+      ],
+      "error_type": null
+    },
+    {
+      "pid": 23180,
+      "phase": "input",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Create a ticket titled 'fix the ladder' with the create-ticket tool, then report the ticket id."
+        },
+        {
+          "role": "assistant",
+          "content": "\nI'll create a ticket with the title \"fix the ladder\" and then report the ticket ID.\n",
+          "tool_calls": [
+            {
+              "id": "call_08cdbe9a6d0547e4a04785d9",
+              "type": "function",
+              "function": {
+                "name": "stub_ticket",
+                "arguments": "{\"title\":\"fix the ladder\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_08cdbe9a6d0547e4a04785d9",
+          "content": "TCK-1: fix the ladder"
+        }
+      ],
+      "model": "zai/glm-4.5-flash",
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "stub_ticket",
+            "description": "Create a ticket (synthetic restart-E2E tool)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "pid": 23180,
+      "phase": "output",
+      "chunks": [
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "\n",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "Ticket",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " created",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " successfully",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "!",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " The",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " ticket",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " ID",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " is",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " **",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "T",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "CK",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "-",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "1",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "**",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " with",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " the",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " title",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " \"",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "fix",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " the",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": " ladder",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": "\".",
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": "stop"
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null
+        },
+        {
+          "content": null,
+          "tool_calls": null,
+          "finish_reason": null,
+          "usage": {
+            "prompt_tokens": 237,
+            "completion_tokens": 62,
+            "total_tokens": 299,
+            "cache_read_tokens": 185
+          }
+        }
+      ],
+      "error_type": null
+    }
+  ],
+  "latency_seconds_total": 73.83
+}

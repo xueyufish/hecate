@@ -13,7 +13,7 @@ records valid artifacts and approval continuation. Some latency thresholds still
 and cost remains unverified; observations are not a statistical quality certificate.
 Real TCP recovery now verifies the prior receipt in the recovery model's first input,
 with persisted PostgreSQL facts and no duplicate tool execution. The
-[review](../../../openspec/changes/step5e-real-model-baseline/review.md) records its scoped
+[review](../../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md) records its scoped
 ownership and legacy boundaries. This ADR does not authorize a default route switch or
 production certification.
 
@@ -68,7 +68,16 @@ approval and recovery boundaries. That implementation is outside this change's d
 - HTTP callers receive explicit terminal categories; declared schema streaming buffers final content.
 - Formatting retries cannot start tools. Already-started parallel tools are drained before stop delivery.
 - Workflow output is accepted from persistent child records; forged caller summaries cannot supply artifacts.
-- Broader model-quality coverage, durable approval/resume, Runner selection, business value and managed deployment
+- Durable approval waiting on the durable task path (typed park signal, pending
+  authority binding, decision-gated resume wake, dispatch-time one-time consumption,
+  real worker-subprocess restart) is delivered by
+  `step5e-durable-approval-continuation`; the chat path keeps synchronous approval.
+  The reviewed task path retains the original approval reference and stable server action
+  ID across consumption-before-claim crashes; new actions require new decisions. PostgreSQL
+  authority time revalidates restarted clocks without extending expiry. Evidence uses
+  trusted service-level decisions and worker restarts, not new approval HTTP/UI or offline
+  authority. See the [reviewed observation](../../../tests/scenarios/baselines/durable_approval_restart_20261016T170954390Z.json).
+  Broader model-quality coverage, Runner selection, business value and managed deployment
   certification remain open. The
   [review](../../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md)
   records validation and limitations. step5e remains a partial technical delivery until its gates pass.

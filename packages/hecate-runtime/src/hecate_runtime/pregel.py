@@ -1107,9 +1107,11 @@ class PregelRuntime:
                 tail_events = []
             try:
                 if tail_events:
-                    last_version = fold_session(self._channel_manager, iter(tail_events))
-                    if last_version > self._superstep:
-                        self._superstep = last_version
+                    fold_session(self._channel_manager, iter(tail_events))
+                    # Audit positions grow independently of execution steps.
+                    # Treating a log version as a step exhausts the budget on
+                    # otherwise short approval/recovery chains.
+                    self._superstep = max(self._superstep, *(event.superstep for event in tail_events))
             except NonReplayablePrefix:
                 pass
 
