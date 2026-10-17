@@ -29,6 +29,7 @@ from hecate_durable.contracts.references import BackendRef
 from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_runtime.action_ledger import ActionLedgerHook, tool_arguments_digest
 from hecate_runtime.checkpoint import InMemoryCheckpointStore
+from hecate_runtime.execution_driver import PregelExecutionDriver
 from hecate_runtime.execution_service import (
     CooperativeCancellationError,
     RuntimeEventDecision,
@@ -1341,10 +1342,10 @@ class ExecutionEngine:
     def record_tool_result(self, state: RunState, tool_name: str, outcome: dict) -> None:
         self._append_event(state, {"type": "tool_result", "tool": tool_name, "outcome": outcome})
 
-    def _assemble_runtime(self, state: RunState):
+    def _assemble_runtime(self, state: RunState) -> PregelExecutionDriver:
         from hecate_runtime.pregel import PregelRuntime
 
-        return PregelRuntime(self._graph, _FanOutWorker(self, state), self._checkpoint_store)
+        return PregelExecutionDriver(PregelRuntime(self._graph, _FanOutWorker(self, state), self._checkpoint_store))
 
 
 class _FanOutWorker(Worker):

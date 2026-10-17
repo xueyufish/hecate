@@ -124,17 +124,21 @@ async def test_unimplemented_resource_bounds_are_not_silently_ignored(limit):
 async def test_interrupted_execution_is_not_reported_as_success(monkeypatch):
     from types import SimpleNamespace
 
+    from hecate_runtime.execution_driver import PregelExecutionDriver
+
     import hecate.execution.builtin as builtin_module
 
     class InterruptedRuntime:
         async def execute(self, **kwargs):
             yield {"type": "interrupt", "value": "approval required"}
 
+    interrupted = InterruptedRuntime()
     monkeypatch.setattr(
         builtin_module,
         "assemble_execution",
         lambda **kwargs: SimpleNamespace(
-            runtime=InterruptedRuntime(),
+            runtime=interrupted,
+            driver=PregelExecutionDriver(interrupted),
             initial_input={},
             execution_mode="conversational",
         ),

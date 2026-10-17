@@ -1,9 +1,12 @@
-"""Shared execution application service over an assembled Pregel runtime.
+"""Shared execution application service over an execution driver.
 
 The service owns only the execution-driving behavior shared by platform and
 standalone adapters: event capture, observer decisions, cooperative cancel
 checks, and honest outcome classification. It deliberately owns no identity,
-authorization, database, Task/Run projection, evidence, or transport state.
+authorization, database, Task/Run projection, evidence, or transport state,
+and it does not import any concrete execution mechanism — drivers (Pregel
+graphs today, the autonomous Agent Controller later) implement
+``ExecutionDriver`` and are injected by their assemblers.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any
 
-from hecate_runtime.pregel import PregelRuntime
+from hecate_runtime.execution_driver import ExecutionDriver
 from hecate_runtime.types import StreamMode
 
 
@@ -50,9 +53,9 @@ class RuntimeScheduleCancelledError(Exception):
 
 @dataclass(frozen=True)
 class RuntimeExecutionRequest:
-    """One invocation of an already-assembled runtime."""
+    """One invocation of an already-assembled execution driver."""
 
-    runtime: PregelRuntime
+    runtime: ExecutionDriver
     session_id: uuid.UUID
     initial_input: dict[str, Any]
     execution_mode: str = "conversational"
