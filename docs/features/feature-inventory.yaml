@@ -33,7 +33,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; current src/hecate/runtime; target hecate-runtime/hecate-runner
-  enforcement_point: Pregel/agent execution public contract and owning service; step5/8/19 conformance;
+  enforcement_point: Pregel/agent execution public contract and owning service; step5/19 conformance;
     protected actions require verified gateway receipts
   state_owner: executor run facts; platform task responsibility
   milestone: M-S; M-A
@@ -42,7 +42,7 @@ features:
   plan_mappings:
   - review-01
   target_boundary: current src/hecate/runtime; target hecate-runtime/hecate-runner; target deployment=out-of-process;
-    step5/8/19; existing runs stay pinned
+    step5/19; existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
@@ -3534,7 +3534,7 @@ features:
   responsibility: platform-guarantee
   implementation_mode: builtin
   provider_or_adapter: builtin reference or enterprise-selected service
-  enforcement_point: Trust admission public contract and owning service; step8/11/17 conformance; protected
+  enforcement_point: Trust admission public contract and owning service; step11/17 conformance; protected
     actions require verified gateway receipts
   state_owner: execution admission + enterprise/governance
   milestone: M-A; M-E (conditional)
@@ -3542,7 +3542,7 @@ features:
   disposition: core-contract
   plan_mappings:
   - core-03
-  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step8/11/17;
+  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step11/17;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -4378,22 +4378,22 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: ACP transport public contract and owning service; step8 conformance; protected actions
+  enforcement_point: ACP transport public contract and owning service; revoked step8 scope; certification only on revival (ADR-037); protected actions
     require verified gateway receipts
   state_owner: execution adapter
-  milestone: M-A
+  milestone: n/a (external-runtime scope revoked; revival requires a new proposal)
   superseded_by: n/a
   disposition: optional-component
   plan_mappings:
   - backend-02
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step8; existing
+  target_boundary: builtin reference or external adapter; target deployment=external-service; on-revival; existing
     runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
     actual production support requires per-profile tests
 - id: '13.15'
-  title: Durable Cross-Runtime Team Coordination
+  title: Durable Built-in Team Coordination
   phase: P4
   category: Multi-Agent Orchestration
   status: planned
@@ -4401,8 +4401,9 @@ features:
   dependencies: []
   evidence: docs/refactor/step2-review-report.md (planning/static evidence only; target behavior remains
     unverified)
-  acceptance: Cross-runtime durable assignments/handoff/acceptance via negotiated transport; no mandatory
-    ZMQ/gRPC; Business-authorized transition/callback/compensation receipts; unsupported resume becomes
+  acceptance: Built-in Runtime durable assignments/handoff/acceptance reuse shared Child Runs, explicit
+    inputs/artifacts and narrowed authorization; no mandatory ZMQ/gRPC or external-runtime integration;
+    Business-authorized transition/callback/compensation receipts; unsupported resume becomes
     linked new Run
   responsibility: platform-guarantee
   implementation_mode: builtin
@@ -4495,7 +4496,7 @@ features:
   responsibility: platform-guarantee
   implementation_mode: builtin
   provider_or_adapter: builtin reference or enterprise-selected service
-  enforcement_point: Neutral clients/distribution public contract and owning service; step3/5/8/18 conformance;
+  enforcement_point: Neutral clients/distribution public contract and owning service; step3/5/18 conformance;
     protected actions require verified gateway receipts
   state_owner: per-capability contracts; execution host
   milestone: M-S; M-E (conditional)
@@ -4503,7 +4504,7 @@ features:
   disposition: core-contract
   plan_mappings:
   - core-15
-  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step3/5/8/18;
+  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step3/5/18;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -4522,7 +4523,7 @@ features:
   responsibility: platform-guarantee
   implementation_mode: builtin
   provider_or_adapter: builtin reference or enterprise-selected service
-  enforcement_point: Neutral clients/distribution public contract and owning service; step3/5/8/18 conformance;
+  enforcement_point: Neutral clients/distribution public contract and owning service; step3/5/18 conformance;
     protected actions require verified gateway receipts
   state_owner: per-capability contracts; execution host
   milestone: M-S; M-E (conditional)
@@ -4530,7 +4531,7 @@ features:
   disposition: core-contract
   plan_mappings:
   - core-15
-  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step3/5/8/18;
+  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step3/5/18;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -4717,8 +4718,9 @@ features:
   dependencies: []
   evidence: docs/refactor/step2-review-report.md (planning/static evidence only; target behavior remains
     unverified)
-  acceptance: Cross-runtime durable assignments/handoff/acceptance via negotiated transport; no mandatory
-    ZMQ/gRPC; Business-authorized transition/callback/compensation receipts; unsupported resume becomes
+  acceptance: Built-in Runtime durable assignments/handoff/acceptance reuse shared Child Runs, explicit
+    inputs/artifacts and narrowed authorization; no mandatory ZMQ/gRPC or external-runtime integration;
+    Business-authorized transition/callback/compensation receipts; unsupported resume becomes
     linked new Run
   responsibility: platform-guarantee
   implementation_mode: builtin
@@ -5693,7 +5695,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: Browser/computer use public contract and owning service; step7/8/16 conformance;
+  enforcement_point: Browser/computer use public contract and owning service; step7/16 conformance;
     protected actions require verified gateway receipts
   state_owner: tool/environment provider
   milestone: M-A
@@ -5701,7 +5703,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-09
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step7/8/16;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step7/16;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -5799,7 +5801,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: Sandbox/isolation public contract and owning service; step3/8/11/16 conformance;
+  enforcement_point: Sandbox/isolation public contract and owning service; step3/11/16 conformance;
     protected actions require verified gateway receipts
   state_owner: environment provider; platform resource binding
   milestone: M-A; M-D
@@ -5807,7 +5809,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-10
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/8/11/16;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/11/16;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -5827,7 +5829,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: Sandbox/isolation public contract and owning service; step3/8/11/16 conformance;
+  enforcement_point: Sandbox/isolation public contract and owning service; step3/11/16 conformance;
     protected actions require verified gateway receipts
   state_owner: environment provider; platform resource binding
   milestone: M-A; M-D
@@ -5835,7 +5837,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-10
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/8/11/16;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/11/16;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -5855,7 +5857,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: Sandbox/isolation public contract and owning service; step3/8/11/16 conformance;
+  enforcement_point: Sandbox/isolation public contract and owning service; step3/11/16 conformance;
     protected actions require verified gateway receipts
   state_owner: environment provider; platform resource binding
   milestone: M-A; M-D
@@ -5863,7 +5865,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-10
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/8/11/16;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/11/16;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -5909,7 +5911,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: Sandbox/isolation public contract and owning service; step3/8/11/16 conformance;
+  enforcement_point: Sandbox/isolation public contract and owning service; step3/11/16 conformance;
     protected actions require verified gateway receipts
   state_owner: environment provider; platform resource binding
   milestone: M-A; M-D
@@ -5917,7 +5919,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-10
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/8/11/16;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/11/16;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -5937,7 +5939,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: Sandbox/isolation public contract and owning service; step3/8/11/16 conformance;
+  enforcement_point: Sandbox/isolation public contract and owning service; step3/11/16 conformance;
     protected actions require verified gateway receipts
   state_owner: environment provider; platform resource binding
   milestone: M-A; M-D
@@ -5945,7 +5947,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-10
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/8/11/16;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/11/16;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -5965,7 +5967,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: external-service
   provider_or_adapter: builtin reference or external adapter
-  enforcement_point: Sandbox/isolation public contract and owning service; step3/8/11/16 conformance;
+  enforcement_point: Sandbox/isolation public contract and owning service; step3/11/16 conformance;
     protected actions require verified gateway receipts
   state_owner: environment provider; platform resource binding
   milestone: M-A; M-D
@@ -5973,7 +5975,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-10
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/8/11/16;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step3/11/16;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -6622,7 +6624,7 @@ features:
   responsibility: platform-guarantee
   implementation_mode: builtin
   provider_or_adapter: builtin reference or enterprise-selected service
-  enforcement_point: Neutral clients/distribution public contract and owning service; step3/5/8/18 conformance;
+  enforcement_point: Neutral clients/distribution public contract and owning service; step3/5/18 conformance;
     protected actions require verified gateway receipts
   state_owner: per-capability contracts; execution host
   milestone: M-S; M-E (conditional)
@@ -6630,7 +6632,7 @@ features:
   disposition: core-contract
   plan_mappings:
   - core-15
-  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step3/5/8/18;
+  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step3/5/18;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8011,7 +8013,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8019,7 +8021,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8038,7 +8040,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8046,7 +8048,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8065,7 +8067,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8073,7 +8075,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8092,7 +8094,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8100,7 +8102,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8119,7 +8121,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8127,7 +8129,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8146,7 +8148,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8154,7 +8156,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8173,7 +8175,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8181,7 +8183,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8426,7 +8428,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8434,7 +8436,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8770,7 +8772,7 @@ features:
   responsibility: provider-guarantee
   implementation_mode: builtin
   provider_or_adapter: current builtin Python implementation; builtin reference or external adapter
-  enforcement_point: Pregel internals public contract and owning service; step5/8/19 conformance; protected
+  enforcement_point: Pregel internals public contract and owning service; step5/19 conformance; protected
     actions require verified gateway receipts
   state_owner: runtime
   milestone: M-S; M-A
@@ -8778,7 +8780,7 @@ features:
   disposition: optional-component
   plan_mappings:
   - backend-01
-  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/8/19;
+  target_boundary: builtin reference or external adapter; target deployment=external-service; step5/19;
     existing runs stay pinned
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
@@ -8875,33 +8877,33 @@ features:
   phase: P2
   category: Governance & Compliance
   status: planned
-  maturity: null
+  maturity: unverified
   dependencies: []
-  evidence: plan §一 hosted-combination table
-  acceptance: unverifiable residency/retention refuses or downgrades the binding
+  evidence: historical plan §一 hosted-combination table; ADR-037 scope withdrawal (planning only, no execution certification)
+  acceptance: Historical external-runtime condition (revival requires a new proposal); unverifiable residency/retention refuses or downgrades the binding
   responsibility: platform-guarantee
   implementation_mode: external-service
-  provider_or_adapter: null
-  enforcement_point: deployment admission per service version (step8/11)
+  provider_or_adapter: pending (external-runtime integration removed; revival requires a new proposal)
+  enforcement_point: Historical external-runtime boundary (not a current gate); deployment admission per service version (step11)
   state_owner: enterprise/governance
-  milestone: M-A
-  superseded_by: null
+  milestone: n/a (former M-A external-runtime scope revoked; revival requires a new proposal)
+  superseded_by: n/a
 - id: 2.10d
   title: Vendor Session/Turn Reconciliation & Usage Verification
   phase: P2
   category: Governance & Compliance
   status: planned
-  maturity: null
+  maturity: unverified
   dependencies: []
-  evidence: plan §一 hosted-combination table
-  acceptance: lost submissions reconcile or mark unknown; usage never treated as final billing
+  evidence: historical plan §一 hosted-combination table; ADR-037 scope withdrawal (planning only, no execution certification)
+  acceptance: Historical external-runtime condition (revival requires a new proposal); lost submissions reconcile or mark unknown; usage never treated as final billing
   responsibility: shared-contract
   implementation_mode: external-service
-  provider_or_adapter: null
-  enforcement_point: session reconciliation by provider idempotency (step8/10)
+  provider_or_adapter: pending (external-runtime integration removed; revival requires a new proposal)
+  enforcement_point: Historical external-runtime boundary (not a current gate); session reconciliation by provider idempotency (step10)
   state_owner: execution/ keeps mapping+cursors; vendor owns session
-  milestone: M-A
-  superseded_by: null
+  milestone: n/a (former M-A external-runtime scope revoked; revival requires a new proposal)
+  superseded_by: n/a
 - id: 2.10e
   title: Hosted-Tool Enforcement Point & Gateway Receipts
   phase: P2
@@ -9052,7 +9054,7 @@ features:
   evidence: docs/refactor/step2-review-report.md (planning/static evidence only; target behavior remains
     unverified)
   acceptance: Language-neutral execution request/event/error/artifact/control contracts; genuine non-Python
-    isolated probe at step3; per-item supported/cooperative/enforced certification at step8; no Pregel/ORM
+    isolated probe at step3; per-item supported/cooperative/enforced certification with named consumers (step8 scope revoked per ADR-037); no Pregel/ORM
     import; Neutral manifest + namespaced backend content; digest-pinned load without platform ID lookup
   disposition: core-contract
   responsibility: shared-contract
@@ -9060,7 +9062,7 @@ features:
   provider_or_adapter: versioned execution schemas; independently released builtin runner and external
     backend adapters
   state_owner: platform contract registry; executor owns execution facts
-  enforcement_point: Contract negotiation and per-capability conformance at step3/8; no Pregel/ORM prerequisite
+  enforcement_point: Contract negotiation and per-capability conformance at step3 with named consumers (step8 scope revoked per ADR-037); no Pregel/ORM prerequisite
   milestone: M-S
   superseded_by: n/a
   plan_mappings:
@@ -9357,3 +9359,32 @@ features:
     evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
     actual production support requires per-profile tests
+- id: 1.3.11l
+  title: Autonomous Agent Controller Convergence
+  phase: P1
+  category: Agent Runtime
+  status: planned
+  maturity: unverified
+  dependencies: []
+  evidence: docs/design/adr/037-agent-native-execution-model.md; unified-chat-execution and dynamic-orchestration
+    deltas (openspec/changes/archive/2026-10-17-step2-agent-native-baseline-alignment/specs/); planning evidence only — target
+    behavior remains unverified
+  acceptance: Open tasks execute a recoverable decision loop without graph compilation; accepted decisions,
+    action identity, waits and continuation position persist and survive restart; entries route through the
+    shared execution application service; default enablement requires per-entry G3 evidence and an explicit
+    decision record
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: hecate-runtime agent controller over the shared execution assembly
+  enforcement_point: trusted action boundary and shared durable execution semantics; per-entry G3 gate for
+    default enablement
+  state_owner: executor run facts; platform task responsibility
+  milestone: M-S; M-A
+  superseded_by: n/a
+  disposition: core-contract
+  plan_mappings:
+  - core-04a
+  target_boundary: runtime agent controller in hecate-runtime; target deployment=builtin; step5e/6/7 slices;
+    current chat paths and the Pregel-typed shared execution service retained until per-entry migration
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
+    evidence

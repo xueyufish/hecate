@@ -2,13 +2,13 @@
 
 ## Purpose
 
-将配置了工具的 agent 的 chat 执行收敛到统一 Pregel 运行时：一条执行路径产生一致的工具事件、审批记录、结束原因与恢复语义，HTTP 层只做协议适配。经功能开关渐进迁移，直连循环保留为回退。
+将聊天入口收敛到共享执行应用服务和统一的 Task/Run、动作、审批及事件语义。开放任务目标为不依赖 Pregel 的 Agent Controller，明确流程由 Workflow Executor 承接；Controller 尚待交付。现行 Pregel chat 图与直连循环保持迁移兼容契约，切流与默认启用仍需逐入口证据，活跃会话保留原绑定。
 
 ## Requirements
 
 ### Requirement: 有工具 agent 经统一运行时执行
 
-配置了工具的 agent 的 chat 请求(流式与非流式)的路由 SHALL 按解析后的生效开关决定:workspace 级覆盖(如设置)优先于全局 `CHAT_TOOL_LOOP_ENGINE_ENABLED`,两者均缺省时为关闭。生效开关开启时执行 SHALL 经平台入口执行服务与 Pregel chat 图完成,产生引擎事件(含 `TOOL_CALL`/`TOOL_RESULT` 回执);开关关闭时 SHALL 保持直连循环行为不变。会话 SHALL 保持路径亲缘:`session_resume`/会话续接沿用该会话已建立的路径,一次进行中的流式请求不受并发开关变更影响。引擎 ToolWorker 的 guardrail 装配 SHALL 与直连路径等价(`middleware_chains`、`denial_tracker`、`event_store` 完整下传)。带知识库或增强功能的请求 SHALL NOT 丢失 agent 配置的工具。workspace 覆盖的每次变更 SHALL 写入放量记录(workspace、操作者、旧值→新值、时间);兼容期直连循环不具备引擎路径的恢复/回放保证,G2 关闭前不得对新路径宣称可靠副作用恢复。
+配置了工具的 agent 的 chat 请求(流式与非流式)的路由 SHALL 按解析后的生效开关决定:workspace 级覆盖(如设置)优先于全局 `CHAT_TOOL_LOOP_ENGINE_ENABLED`,两者均缺省时为关闭。生效开关开启时执行 SHALL 经平台入口执行服务与现行引擎路径(Pregel chat 图)完成,产生引擎事件(含 `TOOL_CALL`/`TOOL_RESULT` 回执);开关关闭时 SHALL 保持直连循环行为不变。本要求规定的是迁移期开关路由契约:Pregel chat 图与直连循环均为兼容路径,收敛目标以"收敛目标为统一执行应用服务及语义"要求为准。会话 SHALL 保持路径亲缘:`session_resume`/会话续接沿用该会话已建立的路径,一次进行中的流式请求不受并发开关变更影响。引擎 ToolWorker 的 guardrail 装配 SHALL 与直连路径等价(`middleware_chains`、`denial_tracker`、`event_store` 完整下传)。带知识库或增强功能的请求 SHALL NOT 丢失 agent 配置的工具。workspace 覆盖的每次变更 SHALL 写入放量记录(workspace、操作者、旧值→新值、时间);兼容期直连循环不具备引擎路径的恢复/回放保证,G2 关闭前不得对新路径宣称可靠副作用恢复。
 
 #### Scenario: 开关开启时有工具 agent 走引擎
 
@@ -150,3 +150,22 @@
 
 - **WHEN** 已记录成功的只读动作在恢复时无法取得结果内容
 - **THEN** 按既有只读安全语义允许重新执行,不触发对账停止
+
+### Requirement: 收敛目标为统一执行应用服务及语义
+
+聊天入口执行 SHALL 以统一执行应用服务及统一的 Task/Run、动作、审批与事件语义为收敛目标,不以编译 Pregel 图作为自主执行的必经路径。开放任务的目标执行模型是 Runtime Agent Controller:以显式持久状态推进模型决策、受控动作、观察、等待与完成,不要求构造 Pregel 图;明确控制规则的任务由 Workflow Executor 承接,Pregel 承担图执行。Agent Controller 能力在交付并通过所属验收前 SHALL 登记为待实现,平台文档、规范与支持矩阵不得宣称已支持,也不得据该目标宣称入口收敛已完成。默认启用翻转 SHALL 继续要求逐入口 G3 证据与显式决策记录;新任务按路由切换,活跃 Run/会话保持原实现与状态格式,不以新配置重解释旧 checkpoint。共享执行应用服务对 Pregel 图执行的唯一类型绑定是待解除的实现现状,不是目标契约。
+
+#### Scenario: Controller 未交付前不宣称收敛完成
+
+- **WHEN** 共享执行应用服务仍直接绑定 Pregel 图执行且 Agent Controller 未交付
+- **THEN** 平台文档、规范与支持矩阵将聊天收敛登记为未完成,不宣称"已统一到目标执行模型"
+
+#### Scenario: 收敛目标变更不翻转默认开关
+
+- **WHEN** 本规范的收敛目标变更被接受
+- **THEN** 生效开关缺省值保持关闭,默认启用仍需逐入口 G3 证据与显式决策记录
+
+#### Scenario: 活跃会话保持原路径
+
+- **WHEN** 收敛目标变更后,某会话既有轮次经直连循环或 Pregel chat 图完成
+- **THEN** 该会话续接沿用原路径与状态格式,不因目标变更中途切换或重解释 checkpoint

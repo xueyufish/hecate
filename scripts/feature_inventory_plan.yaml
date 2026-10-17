@@ -10,9 +10,11 @@ mappings:
   target_mode: out-of-process
   provider_or_adapter: current src/hecate/runtime; target hecate-runtime/hecate-runner
   state_owner: executor run facts; platform task responsibility
-  step: 5/8/19
+  step: 5/19
   milestone: M-S; M-A
-  acceptance: Clean wheel install and shared assembly; external backend never imports Graph/Channel
+  acceptance: Clean wheel install and shared assembly; business clients consume public
+    contracts without Graph/Channel internals; the built-in runtime remains a maintained
+    execution product (ADR-037), not an external-runtime certification commitment
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
 - key: review-02
   section: review
@@ -258,7 +260,7 @@ mappings:
   target_mode: builtin
   provider_or_adapter: builtin reference or enterprise-selected service
   state_owner: execution admission + enterprise/governance
-  step: 8/11/17
+  step: 11/17
   milestone: M-A; M-E (conditional)
   acceptance: Per-capability attestation, delegation limits and revocation; unified trust scoring deferred
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
@@ -278,21 +280,26 @@ mappings:
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
 - key: core-04a
   section: core
-  scope: Autonomous execution semantics (step5e slice delivered)
+  scope: Autonomous execution semantics (delivered parity; Controller target pending)
   ids:
   - 1.3.11h
+  - 1.3.11l
   disposition: core-contract
   responsibility: platform-guarantee
   target_mode: builtin
-  provider_or_adapter: builtin direct tool loop and Pregel engine path behind one chat entry contract
+  provider_or_adapter: delivered builtin direct/Pregel chat paths; target shared Runtime
+    Agent Controller for platform and Runner (pending)
   state_owner: chat entry owns stop rendering; action claims own decided receipts; each field one authoritative
     writer
-  step: '5e'
-  milestone: M-A
+  step: '5e/6/7'
+  milestone: M-S; M-A
   acceptance: Unknown outcomes terminate needs_review with an action reference and never re-enter the model;
     budget, iteration cap, cancellation and invalid structured output are distinct terminal categories;
     re-entry replays decided receipts before new dispatch; declared output schemas validate offline with
-    exactly one tools-free repair and buffered streaming
+    exactly one tools-free repair and buffered streaming; Controller delivery additionally
+    requires graph-independent execution with persisted accepted decisions, action sets
+    and continuation, shared governance/recovery and per-entry G3 certification;
+    1.3.11h evidence does not certify planned 1.3.11l
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
 - key: core-04b
   section: core
@@ -338,7 +345,9 @@ mappings:
   state_owner: collaboration delegation; executor run facts
   step: '13'
   milestone: M-C
-  acceptance: Cross-runtime durable assignments/handoff/acceptance via negotiated transport; no mandatory ZMQ/gRPC
+  acceptance: Built-in Runtime durable assignments/handoff/acceptance reuse shared
+    Child Runs, explicit inputs/artifacts and narrowed authorization; no mandatory
+    ZMQ/gRPC or external-runtime integration
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
 - key: core-07
   section: core
@@ -478,7 +487,7 @@ mappings:
   target_mode: builtin
   provider_or_adapter: builtin reference or enterprise-selected service
   state_owner: per-capability contracts; execution host
-  step: 3/5/8/18
+  step: 3/5/18
   milestone: M-S; M-E (conditional)
   acceptance: Minimal public clients/HTTP samples; no builtin DSL/full-platform SDK dependency
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
@@ -517,7 +526,7 @@ mappings:
   target_mode: external-service
   provider_or_adapter: builtin reference or external adapter
   state_owner: runtime
-  step: 5/8/19
+  step: 5/19
   milestone: M-S; M-A
   acceptance: Backend capability declaration; never force external implementations to replicate checkpoints
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
@@ -531,8 +540,8 @@ mappings:
   target_mode: external-service
   provider_or_adapter: builtin reference or external adapter
   state_owner: execution adapter
-  step: '8'
-  milestone: M-A
+  step: '8 (revoked; revival requires a new proposal, ADR-037)'
+  milestone: n/a (external-runtime scope revoked)
   acceptance: ACP optional adapter; A2A/HTTP/SDK/RPC chosen per backend
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
 - key: backend-03
@@ -719,7 +728,7 @@ mappings:
   target_mode: external-service
   provider_or_adapter: builtin reference or external adapter
   state_owner: tool/environment provider
-  step: 7/8/16
+  step: 7/16
   milestone: M-A
   acceptance: Separate tool authority and environment isolation/egress evidence
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
@@ -738,7 +747,7 @@ mappings:
   target_mode: external-service
   provider_or_adapter: builtin reference or external adapter
   state_owner: environment provider; platform resource binding
-  step: 3/8/11/16
+  step: 3/11/16
   milestone: M-A; M-D
   acceptance: Lifecycle/lease/command/workspace/template/snapshot and resource reconciliation; no engine upgrade ladder
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence

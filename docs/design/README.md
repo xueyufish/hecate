@@ -117,3 +117,13 @@ ADRs capture the "why" behind major design choices. Each record documents the co
 | [ADR-030](adr/030-event-sourced-execution-state.md) | Event-Sourced Execution State (Log-as-Truth) |
 | [ADR-031](adr/031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture (Bypassing ChannelBase) |
 | [ADR-032](adr/032-dynamic-orchestration.md) | Dynamic Orchestration via Runtime-Emitted TaskDAG |
+
+### Platform Evolution (ADR 033–037)
+
+| ADR | Title |
+|-----|-------|
+| [ADR-033](adr/033-context-compaction-surface-replacement.md) | Context Compaction Surface Replacement |
+| [ADR-034](adr/034-platform-governance-semantics.md) | Platform Governance Semantics and Execution Backend Standing |
+| [ADR-035](adr/035-standalone-execution-package-direction.md) | Standalone Execution Component — Package and Directory Migration Direction |
+| [ADR-036](adr/036-autonomous-execution-convergence.md) | Autonomous Execution Convergence |
+| [ADR-037](adr/037-agent-native-execution-model.md) | Agent-Native Execution Model and Graph-Execution Boundary |

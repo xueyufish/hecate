@@ -17,6 +17,12 @@ with persisted PostgreSQL facts and no duplicate tool execution. The
 ownership and legacy boundaries. This ADR does not authorize a default route switch or
 production certification.
 
+Superseded in part by [ADR-037](037-agent-native-execution-model.md): the chat
+convergence target is no longer the Pregel graph but the shared execution application
+service and its unified semantics, and extracting the Harness semantic composition
+layer is no longer prohibited. The safety/compatibility fixes, real-model baseline
+evidence and G3 evidence gate recorded below remain in force.
+
 ## Context
 
 The [mechanism matrix](../execution-mechanism-matrix.md) records the actual behavior of
