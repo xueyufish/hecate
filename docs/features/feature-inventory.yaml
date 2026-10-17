@@ -9166,7 +9166,7 @@ features:
     actual production support requires per-profile tests
 - id: 1.3.11h
   title: Autonomous Execution Parity — Chat Paths
-  phase: P4
+  phase: P1
   category: Agent Runtime
   status: delivered
   maturity: unverified
@@ -9175,8 +9175,8 @@ features:
     tests/test_channel/test_loop_stop_semantics.py; tests/scenarios/test_s12_autonomous_multiturn.py;
     docs/design/execution-mechanism-matrix.md; docs/design/adr/036-autonomous-execution-convergence.md
     (real-model track skipped without credentials; Runner model-driven selection remains open)
-  acceptance: Unknown outcomes terminate needs_review with an action reference and never re-enter the model;
-    budget, iteration cap, cancellation and invalid structured output are distinct terminal categories;
+  acceptance: Unknown outcomes terminate needs_review with an action reference and never re-enter the
+    model; budget, iteration cap, cancellation and invalid structured output are distinct terminal categories;
     re-entry replays decided receipts before new dispatch; declared output schemas validate offline with
     exactly one tools-free repair; streaming buffers until validation passes
   responsibility: platform-guarantee
@@ -9197,7 +9197,7 @@ features:
     actual production support requires per-profile tests
 - id: 1.3.11i
   title: Workflow Agent Subtask Contract
-  phase: P4
+  phase: P1
   category: Agent Runtime
   status: delivered
   maturity: unverified
@@ -9282,6 +9282,42 @@ features:
   - labs-01
   target_boundary: selected provider + neutral binding/receipt contract; target deployment=external-service;
     step9c/9d/10; existing runs stay pinned
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
+    evidence
+  profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
+    actual production support requires per-profile tests
+- id: 1.3.11j
+  title: Durable Approval Waiting & Restart Continuation
+  phase: P1
+  category: Agent Runtime
+  status: delivered
+  maturity: unverified
+  dependencies: []
+  evidence: openspec/specs/execution-approval-binding/spec.md; openspec/specs/platform-task-control/spec.md;
+    archived change review (openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md);
+    tests/test_execution/test_approval_wait_park.py; tests/scenarios/test_durable_approval_restart.py;
+    tests/scenarios/baselines/durable_approval_restart_20261016T170954390Z.json (real model, gate=false)
+  acceptance: A policy-required approval on an opted-in durable task parks the attempt (waiting_approval stop
+    category) under a pending authority binding; the resume wake is authorized only by a persisted ledger
+    decision (pending refuses without consuming the token, rejection fails the task with zero executions,
+    payload self-claims never authorize); an authorized wake continues the same run/engine session natively,
+    consumes the binding once at dispatch with trusted-clock revalidation, and never re-executes completed
+    actions; real worker-subprocess restart (process A killed mid-park, process B resumes from PostgreSQL)
+    and a real-model run are recorded
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: builtin durable task dispatch over the platform approval authority
+  enforcement_point: resume wake authorization gate (task control); dispatch-time binding consumption
+    (approval gate); park fail-closed writes (dispatcher)
+  state_owner: task owns the wait contract and lifecycle; approval authority owns the decision and
+    consumption state
+  milestone: M-A
+  superseded_by: n/a
+  disposition: core-contract
+  plan_mappings:
+  - core-04b
+  target_boundary: builtin durable task dispatch + platform approval authority; target deployment=builtin;
+    step5e; chat-path synchronous approval unchanged
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
