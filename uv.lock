@@ -2303,6 +2303,9 @@ observability = [
     { name = "opentelemetry-semantic-conventions" },
     { name = "wrapt" },
 ]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+]
 rag = [
     { name = "chromadb" },
     { name = "docling" },
@@ -2338,6 +2341,12 @@ tools = [
     { name = "duckduckgo-search" },
     { name = "playwright" },
     { name = "tavily-python" },
+]
+
+[package.dev-dependencies]
+lint = [
+    { name = "pyyaml" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
@@ -2399,6 +2408,7 @@ requires-dist = [
     { name = "playwright", marker = "extra == 'tools'", specifier = ">=1.40,<2.0" },
     { name = "presidio-analyzer", marker = "extra == 'security'", specifier = ">=2.2" },
     { name = "presidio-anonymizer", marker = "extra == 'security'", specifier = ">=2.2" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'redis'", specifier = ">=3.1.0" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
@@ -2429,7 +2439,13 @@ requires-dist = [
     { name = "wrapt", marker = "extra == 'dev'", specifier = ">=1.13.0" },
     { name = "wrapt", marker = "extra == 'observability'", specifier = ">=1.13.0" },
 ]
-provides-extras = ["llm", "temporal", "rag", "security", "tools", "redis", "observability", "mysql", "scheduling", "dev"]
+provides-extras = ["postgres", "llm", "temporal", "rag", "security", "tools", "redis", "observability", "mysql", "scheduling", "dev"]
+
+[package.metadata.requires-dev]
+lint = [
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "ruff", specifier = ">=0.8.0" },
+]
 
 [[package]]
 name = "hecate-channel-feishu"

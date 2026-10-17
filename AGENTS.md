@@ -11,8 +11,10 @@ Hecate uses [uv](https://docs.astral.sh/uv/) with the venv at `.venv/`. The ship
 ## Commands
 
 ```bash
-# Install (uv + venv at .venv/; --prerelease=allow needed while fastmcp 4.x is beta-only)
-source .venv/bin/activate && uv pip install --prerelease=allow -e ".[dev]"
+# Install the locked development workspace into this worktree's .venv
+bash scripts/dev.sh sync
+bash scripts/dev.sh hooks install   # existing copied hooks: add --replace (keeps backups)
+bash scripts/dev.sh doctor
 
 # Run all tests (full suite, several minutes)
 python -m pytest tests/ -q
@@ -22,10 +24,8 @@ python -m pytest tests/test_runtime/test_pregel.py -v
 python -m pytest tests/test_runtime/test_pregel.py::test_linear_execution -v
 
 # Verify before pushing (run ALL of these)
-ruff check src/hecate/ tests/
-ruff format --check src/ tests/
-mypy src/
-python -m pytest <affected dirs/files> -q   # scope locally; the full suite runs in CI
+bash scripts/dev.sh check all
+bash scripts/dev.sh test <affected dirs/files> -q   # full suite and platform matrix run in CI
 
 # Start infrastructure (PostgreSQL 16, Qdrant, MinIO, Temporal)
 docker compose -f docker/docker-compose.yml up -d
@@ -37,7 +37,7 @@ alembic upgrade head
 uvicorn hecate.main:app --reload
 ```
 
-**Git hooks are split by stage**: pre-commit runs fast checks only (ruff check + format, seconds); commit-msg validates the message via commitizen; pre-push runs mypy on `src/` (seconds, hot cache) and lets CI be the single source of truth for tests — the local gate deliberately does not run pytest, since running it twice (local + CI) wasted more time than it caught. Use `pytest --testmon` interactively for fast inner-loop feedback on just the affected tests (see "Inner-loop testing" below). Never use `--no-verify`.
+**Git hooks are split by stage**: pre-commit runs fast checks only (ruff check + format, seconds); commit-msg validates the message via commitizen; pre-push runs the shared type check on `src/ packages/` and lets CI be the single source of truth for tests — the local gate deliberately does not run pytest, since running it twice (local + CI) wasted more time than it caught. Use `pytest --testmon` interactively for fast inner-loop feedback on just the affected tests (see "Inner-loop testing" below). Never use `--no-verify`.
 
 ## Architecture
 
@@ -50,11 +50,11 @@ Modular monolith after Phase R: domain directories (`runtime/`, `tools/`, `enter
 
 ## Gotchas and non-obvious facts
 
-- **Python env**: uv + Python 3.12, venv at `.venv/`. Use `uv pip install`, not bare `pip install`.
+- **Python env**: uv + Python 3.12, venv at `.venv/`. Use `bash scripts/dev.sh sync` for the declared development environment; package dependencies belong in `pyproject.toml`.
 - **Git**: GitHub Flow; all changes via PR. **`main` is a protected branch — never commit, amend, push, or edit directly on it.** Self-check before any write: `git rev-parse --abbrev-ref HEAD` must not return `main`; if it does, `git checkout -b <branch>` first (`feat/`, `fix/`, `docs/`, `chore/`). If you accidentally edited on main: `git stash push -u -m "..."` → `git checkout -b <topic>` → `git stash pop`; never `git reset --hard` on main. CI runs on push and PR to `main`; tag releases from `main` commits.
 - **Merge commits are disabled at the repo level** — only "Rebase and merge" or "Squash and merge" exist on GitHub; prefer `git rebase origin/main` over `git merge origin/main` locally so `main` stays linear.
 - **Push requires explicit user confirmation in chat** — any `git push`, `--force-with-lease`, or wrapper (`./scripts/opsx-flow.sh push`). After approval, the pre-push hook may rebase and re-push without a second confirmation. `--no-verify` (push or commit) needs explicit justification.
-- **Git hooks** (install once per clone; worktrees share `.git/hooks/`): `cp scripts/pre-commit.sh .git/hooks/pre-commit` — fast ruff checks; refuses commits on `main` (prints its own recovery recipe). `cp scripts/commit-msg.sh .git/hooks/commit-msg` — Conventional Commits check via commitizen. `cp scripts/pre-push.sh .git/hooks/pre-push` — rebases onto `origin/main` before push (aborts with printed steps on conflict), then runs mypy. Pytest runs in CI only.
+- **Git hooks**: install with `bash scripts/dev.sh hooks install`; use `--replace` to preserve and migrate existing hooks. Shared dispatchers execute the current worktree's tracked scripts and interpreter; `hooks check` verifies installation. Pre-push rebases onto `origin/main`, then runs the shared type check. Full pytest runs in CI.
 
 ## Conventions
 
@@ -120,7 +120,7 @@ Conventions (fixtures, in-memory SQLite, stub classes, no factories): [`tests/AG
 
 ## What to do / What not to do
 
-- **Do** reach **0 errors** on all four verification checks before pushing (pytest scoped to the tests your change touches locally — the full suite is CI's gate, not a local pre-push step).
+- **Do** reach **0 errors** on all required verification checks before pushing (pytest scoped to the tests your change touches locally — the full suite is CI's gate, not a local pre-push step).
 - **Don't** commit PDF files or large binary assets.
 - **Don't** use `as any`, `@ts-ignore`, or equivalent type suppression.
 - **Don't** assume test failures are "pre-existing" without investigating.

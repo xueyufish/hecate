@@ -28,9 +28,9 @@ Closes #
 
 ## Checklist
 
-- [ ] `ruff check src/hecate/ tests/` passes
-- [ ] `ruff format --check src/ tests/` passes
-- [ ] `mypy src/` passes
-- [ ] `python -m pytest tests/ -q` passes
-- [ ] Added/updated tests for new functionality
-- [ ] Updated documentation if needed
+- [ ] `bash scripts/dev.sh check all` passes
+- [ ] Relevant tests pass; list exact targets and results in this PR
+- [ ] Full test matrix is tracked in CI; pending/skipped checks are identified
+- [ ] OpenSpec tasks reflect implemented and verified behavior
+- [ ] Added/updated regression tests for changed behavior
+- [ ] Updated affected documentation and catalogs
