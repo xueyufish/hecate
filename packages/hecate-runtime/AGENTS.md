@@ -11,6 +11,16 @@ domain scope grew beyond the bare engine). Terms are used with fixed meanings:
   (LLM / Tool / Condition / Coordinator), retry, interrupt/approval, streaming
   modes, session state, handoff. Containment: engine ⊂ runtime.
 
+Target logical boundaries (ADR-037, not yet delivered here): open tasks
+default to an **Agent Controller** — a recoverable decision loop that does not
+require `GraphConfig`/`PregelRuntime`; the **Harness** is the semantic
+composition layer over the existing ContextEngine/processors/Middleware; both
+consume the **shared durable execution mechanism** (Run/ownership, decision and
+action identity, Child Runs, reliable wait/wake, recovery) and the trusted-action
+pipeline together with graph execution. The engine stays the Workflow/graph
+executor. When Controller code lands in this package it inherits the
+self-sufficiency invariant unchanged.
+
 Full definition and naming discipline: `docs/design/engine-design.md`
 ("Terminology: Engine vs. Runtime").
 

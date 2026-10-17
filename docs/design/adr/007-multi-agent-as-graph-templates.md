@@ -1,6 +1,9 @@
 # ADR-007: All Multi-Agent Patterns Unified as Graph Templates
 
 > **Status**: Accepted
+> Partially superseded by [ADR-037](037-agent-native-execution-model.md): the delivered
+> patterns remain usable as structured strategies; "all patterns as graph templates" is
+> no longer a universal claim over autonomous execution.
 
 ## Context
 

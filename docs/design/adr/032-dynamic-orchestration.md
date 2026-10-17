@@ -3,6 +3,7 @@
 ## Status
 
 Accepted (2026-08-17; extends ADR-001 graph-first, ADR-007 multi-agent-as-graph-templates, ADR-030 log-as-truth; seventh multi-agent collaboration pattern.)
+Partially superseded by [ADR-037](037-agent-native-execution-model.md): TaskDAG→sub-graph is scoped as a structured execution strategy, and "No new persistence" no longer covers reliable-execution tasks (channel-only plan history is observability, not persisted accepted decisions).
 
 ## Context
 

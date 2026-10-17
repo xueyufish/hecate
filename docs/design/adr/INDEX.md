@@ -23,7 +23,8 @@ The big-picture design that everything else builds on.
 | [ADR-033](033-context-compaction-surface-replacement.md) | LLM-Managed Context Compaction via Surface Replacement | Bracket events + shadowed ranges on the execution log; summary node in the fold; checkpoint source; 4.13 durable backend |
 | [ADR-034](034-platform-governance-semantics.md) | Platform Governance Semantics and Execution Backend Standing | Governance results vs replaceable implementations; built-in Runtime as reference; harness×environment dual-axis; single-writer state ownership; capability negotiation; no lossless state migration |
 | [ADR-035](035-standalone-execution-package-direction.md) | Standalone Execution Component — Package and Directory Migration Direction | `hecate-runtime`/`hecate-runner` package target; contracts→domain→adapter dependency direction; compatibility shims; distribution units, not a microservice split |
-| [ADR-036](036-autonomous-execution-convergence.md) | Autonomous Execution Convergence — Harness Direction for step5e | Direct loop / Pregel graph / lightweight harness comparison; runner model-selection sub-decision; evidence-led, conclusions pending |
+| [ADR-036](036-autonomous-execution-convergence.md) | Autonomous Execution Convergence — Harness Direction for step5e | Delivered direct/Pregel safety parity and evidence; chat convergence and Harness direction partially superseded by ADR-037; default routing and production acceptance remain gated |
+| [ADR-037](037-agent-native-execution-model.md) | Agent-Native Execution Model and Graph-Execution Boundary | Six execution responsibilities; open tasks default to a non-Pregel Agent Controller; precise supersede scope over ADR-001/007/032/036; ADR-032 persistence-premise review |
 
 ### ⚙️ Engine runtime
 
@@ -172,7 +173,7 @@ Multi-agent maturity + observability deepening:
 ### P3+ (Post-1.0)
 Future capabilities:
 
-`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`, `ADR-030`, `ADR-031`, `ADR-032`, `ADR-034`, `ADR-035`
+`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`, `ADR-030`, `ADR-031`, `ADR-032`, `ADR-034`, `ADR-035`, `ADR-037`
 
 ---
 

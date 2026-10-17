@@ -18,7 +18,7 @@ Three naming/boundary questions must be fixed before any directory moves or whee
 
 ### Package layout (target)
 
-- **`hecate-runtime`** — the execution kernel and Agent execution semantics: Pregel engine, compiler, workers, extension points, and the engine-facing contracts. Depends only on neutral contracts and its declared runtime needs; no platform ORM, no management-plane services.
+- **`hecate-runtime`** — the execution kernel and Agent execution semantics: Pregel engine, compiler, workers, the Agent Controller and Harness seams per [ADR-037](037-agent-native-execution-model.md) (Controller not yet delivered), extension points, and the engine-facing contracts. Depends only on neutral contracts and its declared runtime needs; no platform ORM, no management-plane services.
 - **`hecate-runner`** — the standalone execution host: local manifest loading, trusted configuration/secret-reference resolution, business identity and policy adapters, model/tool assembly, minimal execution/state/evidence interfaces, health and shutdown handling. Assembles `hecate-runtime`; never requires platform management tables to start.
 - **Neutral contracts** — language-agnostic schemas/types published per capability (execution backend, later Memory/Knowledge/Evaluation/Observability/Gateway), independently versioned. A shared all-platform version is prohibited; a contract must be implementable without importing Python classes, the ORM, composition, or Pregel modules.
 

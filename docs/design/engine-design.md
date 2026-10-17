@@ -36,6 +36,11 @@ Naming discipline:
 - In the feature catalog, "Execution Engine" appears as the chain-start component while "Agent Runtime" names the assembled capability; the dependency chain is consistent with this split.
 - If a managed hosting/deployment service ships later, avoid naming it "Runtime" — industry usage strongly associates that word with managed hosting tiers (serverless agent hosting with session isolation). Prefer Hosting/Delivery vocabulary for it.
 
+**Target execution model vs current implementation** ([ADR-037](../design/adr/037-agent-native-execution-model.md)):
+
+- **Target**: open tasks default to an autonomous **Agent Controller** — a recoverable decision loop that does not depend on `GraphConfig`/`PregelRuntime`; tasks with explicit control rules use the **Workflow Executor**, whose first graph implementation is this Pregel engine; both consume one shared durable execution mechanism (Run/ownership, decision and action identity, Child Runs, reliable wait/wake, recovery) and one trusted-action pipeline. The **Harness** is the semantic composition layer (context, Skills, Memory usage, planning/model policy) over the existing ContextEngine, processors and Middleware. Dynamic Plan is a revisable execution intent, not a third runtime.
+- **Current implementation**: the shared execution assembly and Pregel graphs plus the direct chat loop are delivered; the shared execution application service is still typed against `PregelRuntime` (an implementation status to be lifted, not a target contract); the Agent Controller and the Harness semantic layer are **not yet delivered**. The self-sufficiency invariant extends unchanged to future Controller code: no imports of platform domains, `hecate-durable`, or the Runner.
+
 ---
 
 ## Overview

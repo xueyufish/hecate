@@ -1,6 +1,9 @@
 # ADR-001: Graph-First Orchestration with Three-Layer Agent as Preset Template
 
 > **Status**: Accepted
+> Partially superseded by [ADR-037](037-agent-native-execution-model.md): graph-first
+> remains in force for Workflow expression and graph execution, but is no longer the
+> default premise for autonomous (open-task) execution.
 
 ## Context
 
