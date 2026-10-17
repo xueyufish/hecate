@@ -304,3 +304,33 @@ class OutboxReceiptRow(Base):
     state: Mapped[str] = mapped_column(String(16))
     failure_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[str] = mapped_column(String(64))
+
+
+class AcceptedDecisionRow(Base):
+    """One accepted Agent decision with its full, restorable action set.
+
+    Step6 reliable-commit semantics: the decision and its actions commit in
+    one transaction (single row here; actions live in the ``actions`` JSON
+    payload with real parameters, never digests alone). Unique per
+    (issuer_domain, run_id, decision_step_id); the normalized content digest
+    arbitrates idempotent re-submission versus explicit conflict. Fence
+    columns carry the submitter's monotonic fencing context; an expired
+    token is refused at commit time.
+    """
+
+    __tablename__ = "durable_accepted_decision"
+
+    __table_args__ = (UniqueConstraint("issuer_domain", "run_id", "decision_step_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    issuer_domain: Mapped[str] = mapped_column(String(256))
+    run_id: Mapped[str] = mapped_column(String(256))
+    decision_step_id: Mapped[str] = mapped_column(String(256))
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    input_refs: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    accepted_output: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    actions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    content_digest: Mapped[str] = mapped_column(String(128))
+    fence_holder: Mapped[str | None] = mapped_column(String(256))
+    fence_token: Mapped[int] = mapped_column(Integer, default=0)
+    accepted_at: Mapped[str] = mapped_column(String(64))
