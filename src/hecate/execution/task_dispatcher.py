@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from hecate_runtime.errors import ApprovalWaitSignal
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.contracts.execution.durable import ControlCommandKind, TaskLifecycleState, TaskStateRecord
@@ -132,6 +133,8 @@ class _DispatchContext:
     workflow_plan: WorkflowPlan | None = None
     workflow_parent: dict[str, Any] | None = None
     workflow_step: dict[str, Any] | None = None
+    # step5e: durable approval wait opt-in from the task input payload.
+    approval_wait: bool = False
 
 
 class PlatformTaskDispatcher:
@@ -177,15 +180,54 @@ class PlatformTaskDispatcher:
         latest = runs[-1] if runs else None
 
         resume_interrupted = False
-        if latest is not None and self._run_is_terminal(latest):
+        # step5e: a consumed resume-wait contract IS the authorization fact
+        # that this dispatch continues an approved approval park. The task
+        # path records no run-projection stop category (the entry service's
+        # shared-task correlation carries no run_ref), so the wait contract —
+        # not the projection — routes the wake.
+        wait_state = (record.extra or {}).get("wait") or {}
+        approval_wake = (
+            context.approval_wait
+            and wait_state.get("consumed") is True
+            and wait_state.get("wake_kind") == "resume"
+            and bool((wait_state.get("contract_ref") or {}).get("approval_ref"))
+            and latest is not None
+            and (wait_state.get("contract_ref") or {}).get("run_id") == str(latest.id)
+            and (
+                not self._run_is_terminal(latest)
+                or (latest.projection or {}).get("error_category") == "waiting_approval"
+            )
+        )
+        if latest is not None and self._run_is_terminal(latest) and not approval_wake:
+            projection = latest.projection or {}
+            if projection.get("error_category") == "waiting_approval":
+                # Defensive: a terminal waiting_approval projection without a
+                # consumed wait would mean the park lost its contract — fail
+                # closed instead of continuing.
+                outcome: dict[str, str | None] = {
+                    "status": "failed",
+                    "content": "",
+                    "error": "approval park lost its wait contract; fail closed",
+                }
+                await self._finish(
+                    db,
+                    task_ref,
+                    run_row_ref(latest),
+                    context,
+                    outcome,
+                    run=latest,
+                    expected_revision=record.revision + 1,
+                    lease=lease,
+                )
+                return
             # Crash window: the run finished but the task-terminal write
             # never landed. Backfill from the run projection; never
             # re-execute a finished attempt.
-            projection = latest.projection or {}
+            raw_error = projection.get("error")
             outcome = {
                 "status": projection.get("state", "failed"),
                 "content": str(projection.get("result_preview") or ""),
-                "error": projection.get("error"),
+                "error": str(raw_error) if raw_error is not None else None,
             }
             await self._finish(
                 db,
@@ -216,6 +258,29 @@ class PlatformTaskDispatcher:
 
         if record.revision == 0 and latest is not None and not (latest.projection or {}):
             run = latest  # the attempt minted at submit; never executed
+        elif approval_wake and latest is not None:
+            # An authorized approval wake continues the parked attempt
+            # NATIVELY (same run / engine session): the action ledger's
+            # recovery decisions are session-keyed, so a fresh session would
+            # lose the completed-action receipts and re-execute writes. The
+            # resumption gate still enforces digest/snapshot admission; the
+            # terminal-projection refusal is lifted for waiting_approval
+            # parks only (design D4).
+            resume_session = await self._resume_engine_session(db, latest, context, approval_wake=True)
+            if resume_session is None:
+                reason = self._last_resume_refusal or "approval wake could not resume the parked attempt"
+                await asyncio.to_thread(
+                    self._store.apply_task_state,
+                    task_ref,
+                    TaskLifecycleState.RECONCILIATION_REQUIRED,
+                    expected_revision=record.revision + 1,
+                    extra_update={"reconciliation_reason": reason},
+                    **({"lease": lease} if lease is not None else {}),
+                )
+                return
+            run = latest
+            engine_session = resume_session
+            resume_interrupted = True
         else:
             if latest is not None and hasattr(self._store, "list_run_actions"):
                 actions = await asyncio.to_thread(self._store.list_run_actions, run_row_ref(latest))
@@ -272,11 +337,64 @@ class PlatformTaskDispatcher:
                 db, task_ref, wait, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease
             )
             return
+        except ApprovalWaitSignal as signal:
+            # step5e: the durable-wait callback has no synchronous answerer.
+            # The run attempt is already finalized (waiting_approval stop
+            # category) by the entry service; park the task under a PENDING
+            # authority binding. Any persistence failure fails the task —
+            # a protected action must never run without its wait contract.
+            await db.commit()
+            try:
+                wait_error = await self._park_approval(db, context, task_ref, signal)
+                if wait_error is None:
+                    raise RuntimeError("approval authority unavailable")
+                wait_error.contract_ref["run_id"] = str(run.id)
+                wait_error.contract_ref["engine_session_id"] = str(engine_session)
+                await self._park(
+                    db, task_ref, wait_error, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease
+                )
+            except Exception:
+                logger.warning("task %s could not persist approval wait", task_ref.id, exc_info=True)
+                await db.rollback()
+                run = await registry.get_run(uuid.UUID(r_ref.id), context.workspace_id)
+                await self._finish(
+                    db,
+                    task_ref,
+                    r_ref,
+                    context,
+                    {
+                        "status": "failed",
+                        "content": "",
+                        "error": "approval wait could not be persisted; fail closed",
+                        "error_category": "approval_wait_persistence_failed",
+                    },
+                    run=run,
+                    expected_revision=record.revision + 1,
+                    lease=lease,
+                )
+            return
         except Exception as exc:
             from hecate_runtime.errors import ExecutionStoppedError
 
             if isinstance(exc, ExecutionStoppedError) and exc.reason_category == "needs_review":
                 raise
+            if isinstance(exc, ExecutionStoppedError) and exc.reason_category.startswith("approval_"):
+                await self._finish(
+                    db,
+                    task_ref,
+                    r_ref,
+                    context,
+                    {
+                        "status": "failed",
+                        "content": "",
+                        "error": exc.reason_category,
+                        "error_category": exc.reason_category,
+                    },
+                    run=run,
+                    expected_revision=record.revision + 1,
+                    lease=lease,
+                )
+                return
             if context.workflow_parent is None:
                 raise
             # A workflow child converges deterministically: an execution
@@ -503,6 +621,7 @@ class PlatformTaskDispatcher:
             workflow_plan=WorkflowChildTaskAdapter.plan(payload),
             workflow_parent=(payload["workflow_parent"] if isinstance(payload.get("workflow_parent"), dict) else None),
             workflow_step=payload.get("workflow_step"),
+            approval_wait=payload.get("approval_wait") is True,
         )
 
     @staticmethod
@@ -517,7 +636,7 @@ class PlatformTaskDispatcher:
     _last_resume_refusal: str | None = None
 
     async def _resume_engine_session(
-        self, db: AsyncSession, latest: RunModel, context: _DispatchContext
+        self, db: AsyncSession, latest: RunModel, context: _DispatchContext, *, approval_wake: bool = False
     ) -> uuid.UUID | None:
         """step6d resumption gate for a protected-interrupted attempt.
 
@@ -527,6 +646,12 @@ class PlatformTaskDispatcher:
         definition drift, a terminal projection on the run, or a missing
         engine-session snapshot. Admission (principal/deployment/version)
         has already been re-validated by the caller before this gate.
+
+        ``approval_wake`` lifts ONLY the terminal-projection refusal: a
+        parked approval attempt finalizes its run with the waiting_approval
+        stop category, and an authorized resume continues that same
+        attempt/session (session-keyed receipt recovery demands it). Every
+        other gate — digest match, snapshot loadable — still applies.
         """
 
         self._last_resume_refusal = None
@@ -535,7 +660,9 @@ class PlatformTaskDispatcher:
         if not recorded:
             self._last_resume_refusal = "resume refused: no recorded definition digest"
             return None
-        if (latest.projection or {}).get("state") in _RUN_PROJECTION_TERMINAL:
+        if (latest.projection or {}).get("state") in _RUN_PROJECTION_TERMINAL and not (
+            approval_wake and (latest.projection or {}).get("error_category") == "waiting_approval"
+        ):
             self._last_resume_refusal = "resume refused: run already reached a terminal projection"
             return None
 
@@ -663,6 +790,7 @@ class PlatformTaskDispatcher:
                     user_id=context.user_id,
                     dlp_scanner=None,
                 )
+        await self._wire_approval_backend(db, context, bundle, resume_interrupted=resume_interrupted)
 
         port = create_runtime_port(
             db,
@@ -673,6 +801,7 @@ class PlatformTaskDispatcher:
             identity={
                 "actor": str(context.user_id) if context.user_id else f"agent:{agent.id}",
                 "agent_principal": str(agent.id),
+                "task_scope": str(context.task_id) if context.approval_wait else None,
             },
         )
         action_hook = None
@@ -810,6 +939,11 @@ class PlatformTaskDispatcher:
         record = await asyncio.to_thread(self._store.get_task_state, task_ref)
         if record is None or record.lifecycle_state is not TaskLifecycleState.RUNNING:
             return  # cancelled or otherwise moved while the execution ran
+        if context.approval_wait and target is TaskLifecycleState.WAITING_APPROVAL:
+            await TaskRunRegistry(db).finalize_run(
+                uuid.UUID(run_ref.id), context.workspace_id, state="failed", error_category="waiting_approval"
+            )
+            await db.commit()
         await asyncio.to_thread(
             self._store.apply_task_state,
             task_ref,
@@ -830,6 +964,137 @@ class PlatformTaskDispatcher:
         logger.info("task %s parked in %s (token issued)", task_ref.id, target.value)
         if context.workflow_plan is not None:
             await self._wake_finished_child(db, task_ref, context, wait, token)
+
+    async def _park_approval(
+        self,
+        db: AsyncSession,
+        context: _DispatchContext,
+        task_ref: BackendRef,
+        signal: Any,
+    ) -> TaskWaitingSignalError | None:
+        """Mint the PENDING binding, then build the approval wait signal.
+
+        Returns ``None`` when the binding cannot be persisted — the caller
+        fails the task (fail closed) instead of parking without an authority
+        record. ``task_scope`` anchors to the durable task id (stable across
+        attempts); the fingerprint derives from the same dispatch identity
+        envelope the consumer will present, so ``check_binding`` matches
+        byte-for-byte at resume.
+        """
+
+        from hecate.execution.approval_wait import DEFAULT_PARK_TTL_MINUTES, mint_pending_approval_binding
+
+        ledger = self._approval_ledger(db)
+        if ledger is None:
+            return None
+        actor = str(context.user_id) if context.user_id else f"agent:{context.agent_id}"
+        try:
+            ref, binding = mint_pending_approval_binding(
+                ledger,
+                task_id=context.task_id,
+                actor=actor,
+                agent_principal=str(context.agent_id),
+                tool_name=signal.tool_name,
+                arguments=signal.arguments,
+            )
+            await ledger.save(binding)
+        except Exception:
+            logger.warning("task %s approval binding mint failed; parking refused", task_ref.id, exc_info=True)
+            return None
+        ttl_seconds = DEFAULT_PARK_TTL_MINUTES * 60
+        return TaskWaitingSignalError(
+            ControlCommandKind.RESUME,
+            {
+                "approval_ref": ref,
+                "tool_name": signal.tool_name,
+                "arguments_digest": binding.arguments_digest,
+                "principal_fingerprint": binding.principal_fingerprint,
+                "target_resources": list(binding.target_resources),
+                "task_scope": binding.task_scope,
+                "invocation_id": signal.context.get("invocation_id"),
+                "risk_level": signal.risk_level,
+            },
+            expires_in_seconds=ttl_seconds,
+        )
+
+    def _approval_ledger(self, db: AsyncSession) -> Any | None:
+        """The approval authority for this dispatch, or ``None`` when the
+        session cannot host one (stub sessions fail closed at the caller)."""
+
+        from hecate.enterprise.approval_wait_ledger import task_approval_ledger
+
+        return task_approval_ledger(db)
+
+    async def _wire_approval_backend(
+        self,
+        db: AsyncSession,
+        context: _DispatchContext,
+        bundle: Any | None,
+        *,
+        resume_interrupted: bool,
+    ) -> None:
+        """Swap the approval callback's answerer for the durable-wait pair.
+
+        First dispatch (opt-in via the task payload): the inner backend
+        raises the wait signal so the dispatcher parks. Authorized wake: the
+        inner backend consumes the approved binding at the protected action's
+        dispatch; a different protected call re-signals (a new park).
+        Crash-recovery resumes of an opt-in task without an approved ref also
+        re-signal — the parked action is still undecided.
+        """
+
+        if bundle is None or not context.approval_wait:
+            return
+        callback = bundle.approval_callback
+        if callback is None:
+            return
+        from hecate_runtime.security.approval import FailingClosedApprovalCallback
+
+        # The authority already exists. The chat wrapper would mint a second,
+        # differently scoped grant and lose revocation/consumption linkage.
+        callback = FailingClosedApprovalCallback(
+            event_store=callback.event_store,
+            session_id=callback.session_id,
+            workspace_id=callback.workspace_id,
+            agent_id=callback.agent_id,
+        )
+        bundle.approval_callback = callback
+        approval_ref: str | None = None
+        if resume_interrupted and isinstance(context.provided, dict):
+            raw = context.provided.get("approval_ref")
+            approval_ref = str(raw) if raw else None
+        if approval_ref:
+            from hecate.execution.approval_wait import DurableBindingConsumer
+
+            ledger = self._approval_ledger(db)
+            if ledger is None:
+                from hecate_runtime.errors import ExecutionStoppedError
+
+                raise ExecutionStoppedError("approval_unavailable", "approval authority is unavailable")
+            binding = await ledger.get(approval_ref)
+            state = await asyncio.to_thread(
+                self._store.get_task_state, BackendRef(RefKind.TASK, PLATFORM_ISSUER, str(context.task_id))
+            )
+            wait = (state.extra or {}).get("wait") or {} if state else {}
+            contract = wait.get("contract_ref") or {}
+            if state is not None and (wait.get("consumed") is not True or contract.get("approval_ref") != approval_ref):
+                from hecate_runtime.errors import ExecutionStoppedError
+
+                raise ExecutionStoppedError("approval_mismatch", "approval does not match the consumed wait")
+            callback._inner_backend = DurableBindingConsumer(
+                ledger,
+                approval_ref=approval_ref,
+                task_id=context.task_id,
+                actor=str(context.user_id) if context.user_id else f"agent:{context.agent_id}",
+                agent_principal=str(context.agent_id),
+                binding_tool_name=binding.tool_name if binding else None,
+                binding_arguments_digest=binding.arguments_digest if binding else None,
+                binding_invocation_id=contract.get("invocation_id"),
+            )
+            return
+        from hecate.execution.approval_wait import DurableWaitApprovalBackend
+
+        callback._inner_backend = DurableWaitApprovalBackend()
 
     async def _wake_finished_child(
         self,
@@ -908,6 +1173,7 @@ class PlatformTaskDispatcher:
                 projection={
                     "state": terminal.value,
                     "error": outcome.get("error"),
+                    "error_category": outcome.get("error_category"),
                     "result_preview": (outcome.get("content") or "")[:2000],
                 },
             )

@@ -25,6 +25,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from anyio import CancelScope
+from hecate_runtime.errors import ApprovalWaitSignal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -199,7 +200,7 @@ class EntryExecutionService:
                     if not isinstance(result, dict):
                         raise TypeError("result processing requires a non-streaming dict")
                     result = await process_result(result)
-        except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
+        except (Exception, ApprovalWaitSignal, asyncio.CancelledError, GeneratorExit) as exc:
             with CancelScope(shield=True):
                 await self._finalize_failure(correlation_result, workspace_id, exc, mapper=mapper)
             raise
@@ -281,6 +282,8 @@ class EntryExecutionService:
 
         if isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
             return "cancelled"
+        if isinstance(exc, ApprovalWaitSignal):
+            return "waiting_approval"
         if isinstance(exc, ExecutionStoppedError):
             return getattr(exc, "reason_category", None) or "execution_failed"
         if isinstance(exc, MaxSuperstepsError):
@@ -430,7 +433,7 @@ class EntryExecutionService:
                             if state.get("declared_artifacts") is not None:
                                 declared_artifacts = state.get("declared_artifacts")
                     yield chunk
-            except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
+            except (Exception, ApprovalWaitSignal, asyncio.CancelledError, GeneratorExit) as exc:
                 # Cancellation exceptions bypass Exception, and an ASGI cancel
                 # scope must not cancel the final evidence/projection writes.
                 with CancelScope(shield=True):

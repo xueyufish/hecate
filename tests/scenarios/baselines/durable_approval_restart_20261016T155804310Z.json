@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "kind": "real_model_durable_approval_restart",
+    "status": "recorded",
+    "gate": false,
+    "recorded_at": "2026-10-16T15:58:04.310024+00:00",
+    "model": "zai/glm-4.5-flash",
+    "source": "real_model"
+  },
+  "task_state": "succeeded",
+  "parked": true,
+  "resumed_after_process_restart": true,
+  "protected_action_executions": 1,
+  "approval_binding_consumed": true,
+  "final_content": "\nTicket created successfully! The ticket ID is **TCK-1**.",
+  "latency_seconds_total": 91.72
+}

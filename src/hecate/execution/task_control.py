@@ -133,6 +133,21 @@ def _spawn_background(coro) -> None:  # noqa: ANN001 — the coroutine type vari
     task.add_done_callback(_background_tasks.discard)
 
 
+@dataclass(frozen=True)
+class _ApprovalWakeGate:
+    """Outcome of the ``waiting_approval`` resume authorization gate.
+
+    ``refuse``: wake refused, token NOT consumed (a later real decision can
+    still resume the wait). ``reject_terminal``: consume the token and fail
+    the task (rejected decision). ``authorize``: proceed, ``fact`` merged
+    into the persisted wake input.
+    """
+
+    action: str
+    detail: str = ""
+    fact: dict[str, Any] | None = None
+
+
 def task_ref_of(task_id: uuid.UUID | str) -> BackendRef:
     """Platform-issued task reference for one task row."""
     return task_ref(PLATFORM_ISSUER, str(task_id))
@@ -271,6 +286,9 @@ class TaskControlService:
             "workflow": input.get("workflow"),
             "workflow_parent": input.get("workflow_parent"),
             "workflow_step": input.get("workflow_step"),
+            # step5e: durable approval wait opt-in — the dispatch assembly
+            # parks on a policy-required approval instead of asking inline.
+            "approval_wait": input.get("approval_wait") is True,
         }
         key = IdempotencyKey(
             key=idempotency_key or f"auto:{minted_task}",
@@ -906,6 +924,18 @@ class TaskControlService:
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "wake token expired; rejected"
         wake_payload = dict(payload)
+        if expected_state is TaskLifecycleState.WAITING_APPROVAL:
+            gate = await self._approval_wake_gate(current, wait, wake_payload, record)
+            if gate.action == "refuse":
+                # Token stays unconsumed: the wait remains resumable by a
+                # later real decision until its own deadline.
+                await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                return gate.detail
+            if gate.action == "reject_terminal":
+                applied = await self._apply_approval_rejected(t_ref, record, current, wait, gate, workspace_id)
+                return gate.detail if applied else "task moved on concurrently; wake rejected"
+            if gate.fact:
+                wake_payload.update(gate.fact)
         base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
         merged_input = {**base_input, "provided": wake_payload}
         extra_update = {"wait": {**wait, "consumed": True}}
@@ -948,6 +978,154 @@ class TaskControlService:
         if self._worker is None:
             _spawn_background(self._dispatch_task(t_ref))
         return f"wake accepted; task requeued (receipt {applied.state.value})"
+
+    def _approval_ledger(self) -> Any | None:
+        """The approval authority for wake gates; ``None`` fails closed."""
+
+        from hecate.enterprise.approval_wait_ledger import task_approval_ledger
+
+        return task_approval_ledger(self._db)
+
+    async def _approval_wake_gate(
+        self,
+        current: Any,
+        wait: dict[str, Any],
+        wake_payload: dict[str, Any],
+        record: ControlCommandRecord,
+    ) -> _ApprovalWakeGate:
+        """Authorization gate for ``waiting_approval`` resumes (step5e).
+
+        The wake token is transport; the durable approval decision is the
+        authorization. Reads the parked contract's ``approval_ref`` from the
+        wait record and consults the ledger: pending/missing bindings refuse
+        the wake WITHOUT consuming the token (a later real decision can still
+        resume); a rejected decision consumes the token and fails the task
+        with zero protected executions; an approved decision must still pass
+        ``check_binding`` (revocation/expiry/params) — the wake re-verifies,
+        the consumer later re-verifies again at dispatch.
+        """
+
+        from datetime import UTC, datetime
+
+        from hecate_governance.approval import (
+            ActionRequest,
+            ApprovalGate,
+            ApprovalJudgment,
+            BindingCheck,
+            check_binding,
+        )
+
+        contract = wait.get("contract_ref") or {}
+        ref = str(contract.get("approval_ref") or "")
+        if not ref:
+            return _ApprovalWakeGate("refuse", "wait contract carries no approval reference; wake rejected")
+        payload_ref = str(wake_payload.get("approval_ref") or "")
+        if payload_ref and payload_ref != ref:
+            return _ApprovalWakeGate("refuse", "payload approval reference does not match the wait contract; rejected")
+        ledger = self._approval_ledger()
+        if ledger is None:
+            return _ApprovalWakeGate("refuse", "no approval authority available; wake rejected")
+        try:
+            binding = await ledger.get(ref)
+        except Exception:
+            logger.warning("approval authority unavailable for task %s", record.task_ref.id, exc_info=True)
+            return _ApprovalWakeGate("refuse", "approval authority unavailable; wake rejected")
+        if binding is None:
+            return _ApprovalWakeGate("refuse", "no approval authority record for the parked action; wake rejected")
+        # APPROVED: verify the binding against the parked action identity.
+        # The request is built FROM the persisted contract so a drifted
+        # binding (different tool/params than parked) fails the check.
+        from hecate.execution.approval_wait import task_principal_fingerprint
+
+        persisted = await asyncio.to_thread(self._store.get_task_input, record.task_ref) or {}
+        actor = persisted.get("user_id") or f"agent:{persisted.get('agent_id')}"
+        request = ActionRequest(
+            invocation_id=str(contract.get("invocation_id") or f"wake:{record.command_id}"),
+            tool_name=str(contract.get("tool_name") or ""),
+            arguments_digest=str(contract.get("arguments_digest") or ""),
+            target_resources=tuple(contract.get("target_resources") or ()),
+            principal_fingerprint=task_principal_fingerprint(
+                actor=str(actor),
+                agent_principal=persisted.get("agent_id"),
+            ),
+            task_scope=record.task_ref.id,
+        )
+        verdict = check_binding(
+            binding.model_copy(update={"judgment": ApprovalJudgment.APPROVED}), request, now=datetime.now(UTC)
+        )
+        if verdict.check is not BindingCheck.OK:
+            detail = f"approval binding check failed ({verdict.check.value}); wake rejected"
+            if verdict.detail:
+                detail = f"approval binding check failed ({verdict.check.value}: {verdict.detail}); wake rejected"
+            return _ApprovalWakeGate("refuse", detail)
+        if binding.judgment is ApprovalJudgment.PENDING:
+            return _ApprovalWakeGate("refuse", "approval decision is still pending; wake rejected")
+        if binding.judgment is ApprovalJudgment.REJECTED:
+            return _ApprovalWakeGate(
+                "reject_terminal",
+                "approval decision is rejected; task failed without executing the protected action",
+            )
+        verdict = await ApprovalGate(ledger).authorize(ref, request, now=datetime.now(UTC))
+        if verdict.check is not BindingCheck.OK:
+            return _ApprovalWakeGate("refuse", f"approval binding check failed ({verdict.detail}); wake rejected")
+        if binding.consumed_by_invocation_id not in (None, request.invocation_id):
+            return _ApprovalWakeGate("refuse", "approval already consumed by another action; wake rejected")
+        return _ApprovalWakeGate("authorize", "", fact={"approval_ref": ref})
+
+    async def _apply_approval_rejected(
+        self,
+        t_ref: BackendRef,
+        record: ControlCommandRecord,
+        current: Any,
+        wait: dict[str, Any],
+        gate: _ApprovalWakeGate,
+        workspace_id: uuid.UUID,
+    ) -> bool:
+        """Consume the wait token and fail the task on a rejected decision."""
+
+        try:
+            outcome = {
+                "status": "failed",
+                "content": "",
+                "error": "approval_rejected",
+                "error_category": "approval_rejected",
+            }
+            await asyncio.to_thread(
+                self._store.apply_task_state,
+                t_ref,
+                TaskLifecycleState.FAILED,
+                expected_revision=record.expected_revision
+                if record.expected_revision is not None
+                else current.revision
+                if current is not None
+                else None,
+                extra_update={
+                    "wait": {**wait, "consumed": True},
+                    "result": outcome,
+                },
+                **(
+                    {
+                        "applied_command_id": record.command_id,
+                        "event_run_ref": record.run_ref,
+                        "terminal_payload": outcome,
+                    }
+                    if hasattr(self._store, "engine")
+                    else {}
+                ),
+            )
+        except (InvalidTaskTransitionError, ValueError):
+            logger.warning("task %s approval-rejected terminal skipped (moved concurrently)", t_ref.id)
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return False
+        if not hasattr(self._store, "engine"):
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
+        if record.run_ref is not None:
+            await TaskRunRegistry(self._db).finalize_run(
+                uuid.UUID(record.run_ref.id), workspace_id, state="failed", error_category="approval_rejected"
+            )
+            await self._db.commit()
+        logger.info("task %s failed on rejected approval decision", t_ref.id)
+        return True
 
     async def _request_cancel(self, t_ref: BackendRef, record: ControlCommandRecord, workspace_id: uuid.UUID) -> str:
         state = await self._lifecycle_state(t_ref)

@@ -175,6 +175,33 @@ def _make_linear_graph() -> CompiledGraph:
     )
 
 
+async def test_restore_counts_supersteps_independently_of_event_versions() -> None:
+    """Additional audit events must not consume the execution step budget."""
+    from hecate_runtime.eventstore import Event, EventType, InMemoryEventStore
+
+    session_id = uuid.uuid4()
+    events = InMemoryEventStore()
+    runtime = PregelRuntime(
+        graph=_make_linear_graph(),
+        worker=SimpleWorker(),
+        event_store=events,
+        checkpoint_store=InMemoryCheckpointStore(),
+    )
+    async for _ in runtime.execute(session_id):
+        pass
+    last_step = runtime._superstep
+    for _ in range(40):
+        await events.append(Event(session_id=session_id, superstep=last_step, event_type=EventType.CUSTOM, payload={}))
+    restored = PregelRuntime(
+        graph=_make_linear_graph(),
+        worker=SimpleWorker(),
+        event_store=events,
+        checkpoint_store=InMemoryCheckpointStore(),
+    )
+    await restored._restore_from_checkpoint(session_id, {"resume": True})
+    assert restored._superstep == last_step
+
+
 def _make_conditional_graph() -> CompiledGraph:
     """Build a graph with a conditional branch: start -> check -> branch_a | branch_b.
 

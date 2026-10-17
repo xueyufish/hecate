@@ -764,6 +764,7 @@ class ToolWorker(Worker):
         approval_ref = None
         context = dict(context or {})
         context["tool_call_id"] = tc_id
+        context["invocation_id"] = execution_id
         access_decision = self._check_access(name, arguments, context, tc_id=tc_id, execution_context=execution_context)
         if access_decision is not None:
             if access_decision == AccessDecision.DENY:

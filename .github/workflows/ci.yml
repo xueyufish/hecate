@@ -223,6 +223,11 @@ jobs:
           uv run pytest tests/test_execution/test_managed_lease_postgres_review.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
           uv run pytest tests/test_execution/test_entry_contract_pg_e2e.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
           uv run pytest tests/test_channel/test_g3_real_tcp_disconnect.py tests/test_mcp/test_agent_chat_entry_parity.py tests/test_execution/test_workflow_child_adapter.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          # step5e: durable approval park/wake/resume — deterministic tier plus
+          # the REAL worker-subprocess restart (process A killed mid-park,
+          # process B resumes from PostgreSQL only).
+          uv run pytest tests/test_execution/test_approval_wait_park.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          uv run pytest tests/scenarios/test_durable_approval_restart.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with
