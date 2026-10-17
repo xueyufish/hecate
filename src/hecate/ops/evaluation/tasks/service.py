@@ -51,6 +51,8 @@ def build_task_config(data: Any) -> dict:
     Workflow answer-source fields (7.3) are stored under the offline branch
     and ignored for online tasks.
     """
+    if data.task_type != TaskType.OFFLINE.value and getattr(data, "agent_version", None) is not None:
+        raise EvaluationTaskValidationError("agent_version requires an offline agent evaluation task")
     config: dict = {}
     if data.task_type == TaskType.OFFLINE.value:
         if data.dataset_id is None:
@@ -70,6 +72,11 @@ def build_task_config(data: Any) -> dict:
             config["agent_id"] = str(data.agent_id)
         if answer_source == "agent" and data.agent_id is None:
             raise EvaluationTaskValidationError('answer_source="agent" requires agent_id (the agent under test)')
+        declared_agent_version = getattr(data, "agent_version", None)
+        if declared_agent_version is not None:
+            if answer_source != "agent":
+                raise EvaluationTaskValidationError('agent_version requires answer_source="agent"')
+            config["agent_version"] = int(declared_agent_version)
         if answer_source == "workflow":
             if data.workflow_id is None:
                 raise EvaluationTaskValidationError('answer_source="workflow" requires workflow_id')
@@ -225,6 +232,7 @@ class EvaluationTaskService:
             "regression_threshold": data.regression_threshold,
             "tags": data.tags,
             "agent_id": data.agent_id,
+            "agent_version": getattr(data, "agent_version", None),
             "sampling_rate": data.sampling_rate,
             "max_traces_per_cycle": data.max_traces_per_cycle,
             "workflow_id": data.workflow_id,
@@ -252,6 +260,7 @@ class EvaluationTaskService:
                     "regression_threshold",
                     "tags",
                     "agent_id",
+                    "agent_version",
                     "sampling_rate",
                     "max_traces_per_cycle",
                     "workflow_id",
@@ -262,6 +271,7 @@ class EvaluationTaskService:
                 )
             )
             or data.evaluators is not None
+            or "agent_version" in getattr(data, "model_fields_set", set())
         )
 
         if config_changed:
@@ -280,6 +290,12 @@ class EvaluationTaskService:
                 ),
                 tags=_first_value(merged_data["tags"], stored.get("tags")),
                 agent_id=_first_uuid(merged_data["agent_id"], stored.get("agent_id")),
+                agent_version=(
+                    merged_data["agent_version"]
+                    if merged_data["agent_version"] is not None
+                    or "agent_version" in getattr(data, "model_fields_set", set())
+                    else stored.get("agent_version")
+                ),
                 sampling_rate=_first_value(merged_data["sampling_rate"], stored.get("sampling_rate")),
                 max_traces_per_cycle=_first_value(
                     merged_data["max_traces_per_cycle"], stored.get("max_traces_per_cycle")

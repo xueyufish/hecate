@@ -26,6 +26,7 @@ visible instead of pretending it cannot happen.
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import uuid
@@ -97,11 +98,70 @@ class ResolvedAgentConfig:
     ref_manifest: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class AgentVersionExecutionDefinition:
+    """Version-faithful execution definition for one agent invocation.
+
+    Built from a version-resolved :class:`ResolvedAgentConfig` and consumed
+    by the agent execution adapter through the ``agent_definition`` injection
+    path (same duck-typed attribute pattern as ``prompt_override``): every
+    field the direct agent loop consumes is taken from the frozen snapshot
+    instead of the live row. ``workflow_version`` is the snapshot's pinned
+    workflow version for callers that execute the referenced workflow.
+    """
+
+    version: int
+    prompt_override: str | None
+    model_config: dict[str, Any]
+    tools: list[str]
+    knowledge_base_ids: list[str]
+    skills: list[str]
+    workflow_version: int | None
+    ref_manifest: list[dict[str, Any]] = field(default_factory=list)
+    mode: str = "chat"
+    workflow_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
+    guardrail_config: dict[str, Any] | None = None
+
+
+def build_execution_definition(resolved: ResolvedAgentConfig) -> AgentVersionExecutionDefinition:
+    """Build the execution definition from a version-resolved config.
+
+    Live resolutions have no frozen identity to execute against — callers
+    evaluating the draft simply pass ``agent_definition=None``.
+    """
+    if resolved.source != "version" or resolved.version is None:
+        raise ValueError("execution definition requires a version-resolved config")
+    config = copy.deepcopy(resolved.config)
+    return AgentVersionExecutionDefinition(
+        version=resolved.version,
+        prompt_override=config.get("persona"),
+        model_config=config.get("model_config") or {},
+        tools=list(config.get("tools") or []),
+        knowledge_base_ids=list(config.get("knowledge_base_ids") or []),
+        skills=list(config.get("skills") or []),
+        workflow_version=resolved.workflow_version,
+        ref_manifest=copy.deepcopy(resolved.ref_manifest),
+        mode=config.get("mode", "chat"),
+        workflow_id=uuid.UUID(str(config["workflow_id"])) if config.get("workflow_id") else None,
+        agent_id=resolved.agent_id,
+        workspace_id=resolved.workspace_id,
+        guardrail_config=copy.deepcopy(config.get("guardrail_config")),
+    )
+
+
 # `canonical_hash` lives in `hecate.core.canonical_hash` and is re-exported
 # here: stored `AgentVersionModel.content_hash` values were produced by this
 # name, and the skill registry hashes the same content-field sets for
 # drift/pin comparability (5.9-enh).
-__all__ = ["AgentVersionService", "canonical_hash", "snapshot_own_config"]
+__all__ = [
+    "AgentVersionExecutionDefinition",
+    "AgentVersionService",
+    "build_execution_definition",
+    "canonical_hash",
+    "snapshot_own_config",
+]
 
 
 def snapshot_own_config(agent: AgentModel) -> dict[str, Any]:
@@ -514,25 +574,43 @@ class AgentVersionService:
         gate_blocking = False
         gate_config = self._resolve_gate_config(agent.evaluation_gate)
         if gate_config.mode != "off":
-            candidate_run = await self._latest_completed_run(agent.id)
-            gate_result = await self._evaluate_gate(gate_config, candidate_run)
+            # step11: the gate consumes only runs bound to the version being
+            # published; unbound or other-version runs never qualify, and a
+            # missing match blocks require-mode instead of borrowing evidence.
+            candidate_run = await self._latest_completed_run(agent.id, version)
+            baseline_run = (
+                await self._latest_completed_run(agent.id, agent.published_version)
+                if agent.published_version is not None
+                else None
+            )
+            gate_result = await self._evaluate_gate(gate_config, candidate_run, baseline_run)
             gate_blocking = gate_result.blocking
             if gate_blocking and not force:
                 report = self._gate_report(gate_result, bypassed=False)
+                if candidate_run is None:
+                    # Make the missing-match cause explicit instead of only
+                    # the gate's generic no-candidate signal detail.
+                    report["missing_matching_evaluation"] = {"version": version}
                 raise AgentPublishEvaluationGateBlockedError(
                     "publish rejected by evaluation_gate",
                     report,
                     gate_result,
                 )
 
+        bypassed = gate_blocking and force
+        if bypassed:
+            if actor_user_id is None:
+                raise ValueError("force publish requires an actor for the bypass audit")
+            await self._record_gate_bypass(agent, version, actor_user_id, gate_result)
+
         agent.published_version = version
         await self.db.flush()
 
-        if gate_blocking and force and actor_user_id is not None:
-            await self._record_gate_bypass(agent, version, actor_user_id, gate_result)
-
         logger.info("Published version %s for agent %s", version, agent_id)
-        return self._version_detail(record, agent.published_version)
+        detail = self._version_detail(record, agent.published_version)
+        if gate_result is not None:
+            detail["evaluation_report"] = self._gate_report(gate_result, bypassed=bypassed)
+        return detail
 
     async def rollback_to_version(
         self,
@@ -867,43 +945,80 @@ class AgentVersionService:
 
         return _resolve(raw)
 
-    async def _evaluate_gate(self, config, candidate_run):
-        """Evaluate the publish gate for an agent version.
+    async def _evaluate_gate(self, config, candidate_run, baseline_run=None):
+        """Evaluate scores and enforce version-bound evidence independently of signals."""
+        from hecate.ops.evaluation.publish_gate import GateSignalResult, evaluate_gate, live_dataset_hash
 
-        Baseline run and live dataset hash are ``None`` — agent
-        evaluation runs are not bound to agent versions yet, so the
-        regression signal has nothing to compare against and the drift
-        signal passes vacuously. ``require_run`` and ``min_pass_rate``
-        carry the real v1 gate value.
-        """
-        from hecate.ops.evaluation.publish_gate import evaluate_gate as _eval
-
-        return await _eval(self.db, config, candidate_run, None, None)
+        dataset_hash = (
+            await live_dataset_hash(self.db, candidate_run.dataset_id)
+            if config.block_on_drift and candidate_run is not None
+            else None
+        )
+        result = await evaluate_gate(self.db, config, candidate_run, baseline_run, dataset_hash)
+        if (
+            config.block_on_drift
+            and candidate_run is not None
+            and not (candidate_run.dataset_snapshot or {}).get("hash")
+        ):
+            for signal in result.signals:
+                if signal.name == "block_on_drift":
+                    signal.passed = False
+                    signal.detail["reason"] = "missing_dataset_snapshot"
+        result.signals.append(
+            GateSignalResult(
+                name="version_binding",
+                enabled=True,
+                passed=candidate_run is not None,
+                detail={
+                    "candidate_run_id": str(candidate_run.id) if candidate_run else None,
+                    "reason": None if candidate_run else "missing_matching_evaluation",
+                },
+            )
+        )
+        if config.block_on_regression and baseline_run is None:
+            for signal in result.signals:
+                if signal.name == "block_on_regression":
+                    signal.passed = False
+                    signal.detail["reason"] = "missing_matching_baseline"
+        return result
 
     @staticmethod
     def _gate_report(gate_result, bypassed: bool) -> dict:
         from hecate.ops.evaluation.publish_gate import result_to_report_payload as _render
 
-        return _render(gate_result, bypassed)
+        report = _render(gate_result, bypassed)
+        report["passed"] = not bypassed and all(s.passed for s in gate_result.signals)
+        return report
 
-    async def _latest_completed_run(self, agent_id: uuid.UUID) -> EvaluationRunModel | None:
-        """Most recent completed evaluation run for this agent.
-
-        Runs bind to agents through ``evaluation_tasks`` (``task_id``),
-        whose ``config`` JSON carries the owning ``agent_id``. There is
-        no relational ``agent_id`` on ``evaluation_runs``.
-        """
-        from hecate.models.evaluation import EvaluationTaskModel
-
+    async def _latest_completed_run(
+        self,
+        agent_id: uuid.UUID,
+        version: int | None = None,
+    ) -> EvaluationRunModel | None:
+        """Read immutable run-owned bindings, never mutable task configuration."""
+        agent = await self._get_agent(agent_id)
+        conditions: list[Any] = [
+            EvaluationRunModel.agent_id == agent_id,
+            EvaluationRunModel.agent_version.is_not(None),
+            EvaluationRunModel.status == "completed",
+            ~EvaluationRunModel.deleted,
+            EvaluationRunModel.workspace_id == agent.workspace_id,
+            EvaluationRunModel.agent_snapshot.is_not(None),
+        ]
+        if version is not None:
+            record = await self._get_version(agent_id, version)
+            if record is None or record.workspace_id != agent.workspace_id:
+                return None
+            conditions.extend(
+                [
+                    EvaluationRunModel.agent_version == version,
+                    EvaluationRunModel.agent_config_hash == record.content_hash,
+                ]
+            )
         result = await self.db.execute(
             select(EvaluationRunModel)
-            .join(EvaluationTaskModel, EvaluationRunModel.task_id == EvaluationTaskModel.id)
-            .where(
-                EvaluationTaskModel.config["agent_id"].as_string() == str(agent_id),
-                EvaluationRunModel.status == "completed",
-                ~EvaluationRunModel.deleted,
-            )
-            .order_by(EvaluationRunModel.completed_at.desc())
+            .where(*conditions)
+            .order_by(EvaluationRunModel.completed_at.desc(), EvaluationRunModel.id.desc())
             .limit(1)
         )
         return result.scalar_one_or_none()
@@ -919,23 +1034,21 @@ class AgentVersionService:
         from hecate.models.audit import AuditLogModel
 
         failing_signals = [s.name for s in gate_result.signals if not s.passed]
-        try:
-            self.db.add(
-                AuditLogModel(
-                    org_id=agent.workspace_id,
-                    workspace_id=agent.workspace_id,
-                    user_id=actor_user_id,
-                    action="AGENT_EVALUATION_GATE_BYPASS",
-                    resource_type="agent",
-                    resource_id=agent.id,
-                    success=True,
-                    metadata_={
-                        "version": version,
-                        "failing_signals": failing_signals,
-                        "deterministic_pass_rate": gate_result.deterministic_pass_rate,
-                    },
-                )
+        self.db.add(
+            AuditLogModel(
+                org_id=agent.workspace_id,
+                workspace_id=agent.workspace_id,
+                user_id=actor_user_id,
+                action="AGENT_EVALUATION_GATE_BYPASS",
+                resource_type="agent",
+                resource_id=agent.id,
+                success=True,
+                metadata_={
+                    "version": version,
+                    "failing_signals": failing_signals,
+                    "deterministic_pass_rate": gate_result.deterministic_pass_rate,
+                    "evaluation_report": self._gate_report(gate_result, bypassed=True),
+                },
             )
-            await self.db.flush()
-        except Exception:
-            logger.exception("Failed to record agent evaluation gate bypass audit")
+        )
+        await self.db.flush()

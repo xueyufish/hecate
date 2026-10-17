@@ -12,7 +12,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,9 +95,30 @@ class AgentExecutionPort(RuntimePort):
         if agent is None:
             raise ValueError(f"Agent {agent_id} not found")
 
+        # Version-bound evaluation: a frozen-snapshot definition replaces the
+        # live row for every direct-loop config field (model, persona via
+        # prompt_override below, tools via the whitelist filter below, skill
+        # bindings, knowledge bases). Lazy + isinstance-checked so the generic
+        # duck-typed overrides (prompt-optimization, self-evolution) and any
+        # Pydantic-based definition object are unaffected.
+        version_definition = None
+        if agent_definition is not None:
+            from hecate.studio.agents.versioning import AgentVersionExecutionDefinition
+
+            if isinstance(agent_definition, AgentVersionExecutionDefinition):
+                version_definition = agent_definition
+
         model_name = (
             agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
         )
+        if version_definition is not None:
+            if version_definition.agent_id not in (None, agent.id) or version_definition.workspace_id not in (
+                None,
+                agent.workspace_id,
+            ):
+                raise ValueError("version definition does not belong to this agent/workspace")
+            await self._validate_version_resources(agent, version_definition)
+            model_name = version_definition.model_config.get("model") or "gpt-4o"
 
         # Build system prompt from persona + skills. A per-invocation
         # prompt_override (top-level agent_definition, or the delegation
@@ -108,11 +129,16 @@ class AgentExecutionPort(RuntimePort):
             prompt_override = getattr(agent_definition, "prompt_override", None)
         if prompt_override is None and context is not None:
             prompt_override = context.get("prompt_override")
-        persona = prompt_override or agent.persona or "You are a helpful assistant."
-        loader = SkillLoader(self._db)
+        persona = (
+            version_definition.prompt_override or "You are a helpful assistant."
+            if version_definition is not None
+            else prompt_override or agent.persona or "You are a helpful assistant."
+        )
+        loader = SkillLoader(self._db, ref_manifest=version_definition.ref_manifest if version_definition else None)
         skills_block = await loader.format_skills(
             agent_id=agent_id,
             workspace_id=agent.workspace_id,
+            explicit_skill_names=version_definition.skills if version_definition is not None else None,
         )
         # Per-invocation extra skill instructions (agent_definition attribute,
         # mirroring the prompt_override pattern) — appends one ad-hoc skill
@@ -132,8 +158,17 @@ class AgentExecutionPort(RuntimePort):
         # memory tools from the surface, never add beyond the platform gate).
         from hecate.core.composition.memory_policy import narrowed_tool_names
 
-        policy_tool_names = await narrowed_tool_names(self._db, agent.workspace_id, agent.id, list(agent.tools or []))
-        tools = await self._load_agent_tools(policy_tool_names)
+        configured_tools = version_definition.tools if version_definition is not None else list(agent.tools or [])
+        policy_tool_names = await narrowed_tool_names(self._db, agent.workspace_id, agent.id, configured_tools)
+        if version_definition is not None:
+            tools = await self._load_agent_tools(policy_tool_names, workspace_id=agent.workspace_id)
+            if set(policy_tool_names) - {tool["name"] for tool in tools}:
+                raise ValueError("version-bound tool does not resolve in the agent workspace")
+        else:
+            tools = await self._load_agent_tools(policy_tool_names)
+
+        if version_definition is not None and version_definition.mode != "chat":
+            return await self._execute_versioned_mode(agent, version_definition, messages, tools)
 
         # Apply AgentDefinition tool filtering (whitelist/blacklist)
         if agent_definition is not None and hasattr(agent_definition, "tools"):
@@ -160,7 +195,12 @@ class AgentExecutionPort(RuntimePort):
             tools = inject_handoff_tools_from_targets(tools, handoff_targets, source_description=handoff_desc)
 
         # Query agent's knowledge bases and inject as context
-        kb_ids = agent.knowledge_base_ids or []
+        kb_ids = (
+            version_definition.knowledge_base_ids
+            if version_definition is not None
+            else (agent.knowledge_base_ids or [])
+        )
+        kb_ids = list(kb_ids or [])
         if kb_ids:
             query_text = messages[-1].get("content", "") if messages else ""
             kb_chunks = await self.knowledge_query(query_text, [UUID(kb_id) for kb_id in kb_ids])
@@ -197,11 +237,18 @@ class AgentExecutionPort(RuntimePort):
         shaped_messages = assembled.get("messages", full_messages)
         shaped_tools = assembled.get("tools", tools if tools else None)
 
+        model_options: dict[str, Any] = {}
+        if version_definition is not None:
+            for key in ("temperature", "max_tokens", "routing_config", "timeout", "num_retries"):
+                if key in version_definition.model_config:
+                    model_options[key] = version_definition.model_config[key]
+
         # LLM invocation
         response = await llm_service.chat(
             messages=shaped_messages,
             model=model_name,
             tools=shaped_tools if shaped_tools else None,
+            **model_options,
         )
 
         # Check for handoff tool call in LLM response
@@ -285,7 +332,116 @@ class AgentExecutionPort(RuntimePort):
             "model": response.model or model_name,
         }
 
-    async def _load_agent_tools(self, tool_names: list[str]) -> list[dict[str, Any]]:
+    async def _validate_version_resources(self, agent, definition) -> None:
+        """Reject unresolved or foreign references instead of silently falling back to live content."""
+        from hecate.models.skill_version import SkillVersionModel
+        from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+
+        for entry in definition.ref_manifest:
+            if entry.get("resource_type") != "skill" or entry.get("version") is None:
+                continue
+            record = (
+                await self._db.execute(
+                    select(SkillVersionModel).where(
+                        SkillVersionModel.skill_id == UUID(str(entry["skill_id"])),
+                        SkillVersionModel.version == int(entry["version"]),
+                        SkillVersionModel.workspace_id.in_([agent.workspace_id, UUID(int=0)]),
+                        ~SkillVersionModel.deleted,
+                    )
+                )
+            ).scalar_one_or_none()
+            if record is None:
+                raise ValueError("pinned skill version does not resolve in the agent workspace")
+        for kb_id in definition.knowledge_base_ids:
+            kb = await self._db.get(KnowledgeBaseModel, UUID(str(kb_id)))
+            if kb is None or kb.deleted or kb.workspace_id != agent.workspace_id:
+                raise ValueError("version-bound knowledge base does not resolve in the agent workspace")
+        if definition.mode == "workflow":
+            workflow = await self._db.get(WorkflowModel, definition.workflow_id) if definition.workflow_id else None
+            record = (
+                await self._db.execute(
+                    select(WorkflowVersionModel).where(
+                        WorkflowVersionModel.workflow_id == definition.workflow_id,
+                        WorkflowVersionModel.workspace_id == agent.workspace_id,
+                        WorkflowVersionModel.version == definition.workflow_version,
+                        ~WorkflowVersionModel.deleted,
+                    )
+                )
+            ).scalar_one_or_none()
+            if workflow is None or workflow.deleted or workflow.workspace_id != agent.workspace_id or record is None:
+                raise ValueError("pinned workflow version does not resolve in the agent workspace")
+
+    async def _execute_versioned_mode(self, agent, definition, messages, tools) -> dict:
+        """Execute frozen non-chat modes through the existing shared entry service."""
+        from hecate_llm.service import llm_service
+
+        from hecate.core.composition.entry_assembly import (
+            build_tool_registry,
+            get_shared_event_store,
+            get_shared_session_state_store,
+        )
+        from hecate.core.composition.guardrail_platform import assemble_guardrails
+        from hecate.core.composition.runtime_port_adapter import create_runtime_port
+        from hecate.execution.entry_service import EntryExecutionService
+
+        if definition.mode not in {"workflow", "three_layer"}:
+            raise ValueError("unsupported version-bound agent mode")
+        if definition.mode == "workflow" and (definition.workflow_id is None or definition.workflow_version is None):
+            raise ValueError("version-bound workflow requires a pinned workflow version")
+        event_store = get_shared_event_store()
+        bundle = await assemble_guardrails(
+            self._db,
+            workspace_id=agent.workspace_id,
+            agent_id=agent.id,
+            guardrail_config=definition.guardrail_config,
+            event_store=event_store,
+        )
+        port = create_runtime_port(
+            self._db,
+            llm_service,
+            tool_registry=build_tool_registry(
+                self._db,
+                skill_ref_manifest=definition.ref_manifest,
+                workspace_id=agent.workspace_id,
+                explicit_skill_names=definition.skills,
+            ),
+        )
+        entry = EntryExecutionService(
+            port=port,
+            entry_name="evaluation",
+            db=self._db,
+            event_store=event_store,
+            checkpoint_store=get_shared_session_state_store(),
+            access_policy=bundle.access_policy,
+            approval_callback=bundle.approval_callback,
+            tool_policy_rules=bundle.rules,
+            middleware_chains=bundle.middleware_chains,
+            denial_tracker=bundle.denial_tracker,
+        )
+        outcome = await entry.execute(
+            agent_mode=definition.mode,
+            model=definition.model_config.get("model") or "gpt-4o",
+            agent_persona=definition.prompt_override,
+            agent_id=agent.id,
+            agent_version=definition.version,
+            workspace_id=agent.workspace_id,
+            workflow_id=definition.workflow_id,
+            workflow_version=definition.workflow_version,
+            messages=messages,
+            tools=tools,
+            kb_ids=definition.knowledge_base_ids,
+            skill_ref_manifest=definition.ref_manifest,
+            stream=False,
+            session_id=uuid4(),
+        )
+        return {
+            "response": str((outcome.result or {}).get("content") or ""),
+            "usage": (outcome.result or {}).get("usage") or {},
+        }
+
+    async def _load_agent_tools(
+        self, tool_names: list[str], *, workspace_id: UUID | None = None
+    ) -> list[dict[str, Any]]:
         """Load tool definitions from the database by name.
 
         Args:
@@ -301,6 +457,7 @@ class AgentExecutionPort(RuntimePort):
             select(ToolModel).where(
                 ToolModel.name.in_(tool_names),
                 ~ToolModel.deleted,
+                *([ToolModel.workspace_id == workspace_id] if workspace_id is not None else []),
             )
         )
         tool_models = result.scalars().all()

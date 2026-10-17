@@ -155,6 +155,7 @@ class OfflineTaskRunner:
                     "answer_source": answer_source,
                     "tags": config.get("tags"),
                     "agent_id": uuid.UUID(str(config["agent_id"])) if config.get("agent_id") else None,
+                    "agent_version": int(config["agent_version"]) if config.get("agent_version") else None,
                     "run": run,
                     "summary_config": self._summary_config(task),
                     "repetitions": repetitions,
