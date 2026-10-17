@@ -1,0 +1,28 @@
+name: lightweight
+version: 1
+description: Low-risk focused changes
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Concise intent, acceptance criteria, and lightweight risk rationale
+    template: proposal.md
+    instruction: |
+      Create a concise change record. State the existing behavior or contract,
+      the requested local change, acceptance criteria, and why it qualifies
+      for the lightweight tier under AGENTS.md. Do not use this schema when
+      adding or changing product requirements or architectural decisions.
+    requires: []
+  - id: tasks
+    generates: tasks.md
+    description: Small implementation and targeted-verification checklist
+    template: tasks.md
+    instruction: |
+      List only the implementation and affected verification tasks. Each task
+      must have a checkable outcome. Preserve the common repository checks and
+      record the exact commands and results in the PR or verification notes.
+    requires:
+      - proposal
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md

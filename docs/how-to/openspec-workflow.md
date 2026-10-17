@@ -1,6 +1,14 @@
 # OpenSpec development workflow
 
-Use an isolated worktree for each change. The repository scripts own environment and check commands; OpenSpec owns proposal, design, delta specs and implementation tasks. Root [AGENTS.md](../../AGENTS.md) owns repository policy.
+Use an isolated worktree for each change. OpenSpec is required for every change, with the artifact depth selected by risk. Root [AGENTS.md](../../AGENTS.md) owns the exact classification and scope rules.
+
+## Choose the workflow by risk
+
+Use the lightweight schema for documentation-only or test-only changes, behavior-preserving mechanical refactors, local developer tooling that does not alter CI or release gates, and narrowly scoped fixes that restore an existing documented contract. The lightweight proposal records the existing contract, scope, acceptance criteria, and why the change qualifies; its tasks cover implementation and affected verification. It omits design and product delta specs. Record the actual focused tests and applicable shared checks in the PR or verification notes.
+
+Use the full `spec-driven` schema for new or changed product requirements, public or persisted contracts, API/event/schema changes, migrations, security or tenant-isolation semantics, runtime lifecycle/concurrency/recovery, architecture or extension points, CI/branch-protection/release gates, cross-domain work, and any uncertain risk. If scope expands while implementing a lightweight change, stop and promote it before proceeding. Both workflows retain relevant tests, applicable static checks, CI, review, and truthful reporting of skipped checks.
+
+In Hecate, `/opsx-propose` reads the repository's risk rules and selects the lightweight schema only when every condition is met; otherwise the configured full schema remains the default. To create a qualifying change manually, use `openspec new change <name> --schema lightweight`.
 
 ## Development commands
 
@@ -56,7 +64,7 @@ cd ../.worktrees/<change-name>
 
 The script creates the branch/worktree and synchronizes its development environment. It initializes commands for the selected Coding Agent; `--tools codex` selects Codex only, and `--no-tools` keeps existing checked-in skills without regenerating them. `HECATE_WORKTREE_ROOT` overrides the default worktree parent.
 
-The user triggers `/opsx-propose <change-name>` to prepare proposal, design, specs and tasks, then `/opsx-apply <change-name>` to implement. Natural-language requests can explicitly authorize those phases. Work from the change artifacts and related code; investigate material scope changes before expanding them.
+The user triggers `/opsx-propose <change-name>` to prepare artifacts for the selected risk tier, then `/opsx-apply <change-name>` to implement. Natural-language requests can explicitly authorize those phases. Work from the change artifacts and related code; escalate to full `spec-driven` if a lightweight change grows beyond its criteria.
 
 ## Implement and verify
 
@@ -83,6 +91,6 @@ Keep each PR focused on one purpose. Fix CI failures and review findings, and le
 
 ## Archive and cleanup
 
-After merge, the user triggers `/opsx-archive <change-name>` against an up-to-date feature worktree. Check positioning.md and prune obsolete AGENTS.md guidance before the archive move. Synchronize any delta specs and submit archive changes through a branch and PR; do not edit or commit directly on main.
+After merge, the user triggers `/opsx-archive <change-name>` against an up-to-date feature worktree. Synchronize delta specs when present. Review `positioning.md` only when product positioning or catalog text changed, and prune `AGENTS.md` when repository rules changed. Submit archive changes through a branch and PR; do not edit or commit directly on main.
 
 Archive is not a prerequisite for the implementation PR. Keep required catalog updates with their behavior; a large independent catalog change can use a separate focused PR. When all work on a worktree has merged and its state is preserved, use `opsx-flow.sh delete <change-name>` for cleanup. Review local changes before deleting a worktree.

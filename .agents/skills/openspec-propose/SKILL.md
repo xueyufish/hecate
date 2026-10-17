@@ -66,26 +66,24 @@ In both branches, never create the root as a side effect: do not run `openspec i
 
 3. **Determine the workflow schema**
 
-   Use the configured default schema unless the user explicitly requests a different workflow.
+   Read the repository's root `AGENTS.md` for change-risk rules. In Hecate, select `lightweight` automatically only when every lightweight criterion is met; otherwise use the configured full schema. For other projects, use the configured default unless the user explicitly requests another workflow. An explicit user schema choice always takes precedence unless it conflicts with a higher-priority repository safety rule.
 
-   **Use a different schema only if the user:**
-   - Explicitly requests a specific schema by name → use `--schema <schema-name>`
-   - Asks to "show workflows" or asks "what workflows" exist → resolve the authoritative root by running `openspec context --json` from the current working directory. If the user explicitly selected a registered store, use `openspec context --json --store "<store-id>"`. Then run `openspec schemas --json` with its working directory set to the returned `root.path` and let them choose. This preserves roots selected by a local `store:` pointer or the global `defaultStore`; when a registered store was explicitly selected, append `--store "<store-id>"` to `openspec schemas --json` as well. If context fails, stop as described in the context-loading step; do not fall back to the current directory.
+   If the user asks to "show workflows" or asks "what workflows" exist, resolve the authoritative root by running `openspec context --json` from the current working directory. If the user explicitly selected a registered store, use `openspec context --json --store "<store-id>"`. Then run `openspec schemas --json` with its working directory set to the returned `root.path` and let them choose. This preserves roots selected by a local `store:` pointer or the global `defaultStore`; when a registered store was explicitly selected, append `--store "<store-id>"` to `openspec schemas --json` as well. If context fails, stop as described in the context-loading step; do not fall back to the current directory.
 
-   Otherwise, omit `--schema` to preserve the configured default.
+   When the selected schema omits the `specs` artifact, confirm the generated `.openspec.yaml` declares `skip_specs: true`; the OpenSpec CLI normally adds this automatically.
 
 4. **Create the change directory**
 
    Choose one schema form below. If a registered store is selected, append `--store "<store-id>"` to that command and each later OpenSpec command shown below that accepts `--store`.
 
-   Using the configured default:
+   Using the risk-selected schema (omit `--schema` for the full configured default):
    ```bash
    openspec new change "<name>"
    ```
 
-   Using an explicitly requested schema:
+   For an eligible Hecate lightweight change, or an explicitly requested schema:
    ```bash
-   openspec new change "<name>" --schema "<schema-name>"
+   openspec new change "<name>" --schema "lightweight"
    ```
    This creates a scaffolded change in the planning home resolved by the CLI with `.openspec.yaml`.
 
