@@ -280,7 +280,9 @@ def test_worktree_start_delegates_sync_and_never_reports_failed_bootstrap_ready(
     root = tmp_path / "repository"
     _repository(root, branch="main")
     for name in ("opsx-flow.sh", "worktree-help.sh"):
-        shutil.copyfile(REPO_ROOT / "scripts" / name, root / "scripts" / name)
+        target = root / "scripts" / name
+        shutil.copyfile(REPO_ROOT / "scripts" / name, target)
+        target.chmod(0o755)
     (root / "scripts/dev.sh").write_text(
         'printf "%s" "$1" > bootstrap-argument\npwd > bootstrap-cwd\n' + f"exit {bootstrap_exit}\n",
         encoding="utf-8",
