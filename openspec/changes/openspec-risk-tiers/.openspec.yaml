@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-17
+goal: 为低风险改动定义轻量 OpenSpec 记录，为产品行为和关键不变量改动保留完整 spec-driven 流程
+skip_specs: true
