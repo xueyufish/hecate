@@ -13,7 +13,7 @@
 [![OpenAI compatible](https://img.shields.io/badge/OpenAI-compatible-74aa9c)](https://platform.openai.com/docs/api-reference/chat)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/xueyufish/hecate/blob/main/pyproject.toml)
 [![Type checked: mypy strict](https://img.shields.io/badge/mypy-strict-blue)](https://github.com/xueyufish/hecate/blob/main/pyproject.toml)
-[![Pre-commit enabled](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/xueyufish/hecate/blob/main/.pre-commit-config.yaml)
+[![Pre-commit enabled](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/xueyufish/hecate/blob/main/scripts/pre-commit.sh)
 
 </div>
 
