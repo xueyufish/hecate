@@ -340,7 +340,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 | step5b：独立发行包 | 已交付 | `hecate-runtime` wheel、依赖闭包、配置注入、兼容转发与干净安装；不反向依赖完整 Hecate |
 | step5c：独立宿主 | 预览范围已交付 | Runner 与 builtin 共享执行应用服务；公开请求/回执/事件契约、本地制品与身份校验、SC01/SC02 只读场景。固定工具计划与 Stub/endpoint 不能证明自主工具选择 |
 | step5d：平台入口收敛 | 部分完成 | HTTP/MCP/IM/评估/A2A/定时 Agent 已迁移，workspace 路由与会话亲缘、OpenAI/SSE 兼容和分层守卫已交付；剩余项如下 |
-| step5e：内置自主执行收敛与验证 | 技术切片已实现，限定基线已记录 | 双路径停止/结构化输出与 Workflow 子任务契约已有证据；真实模型基线、限定断连及持久审批 worker 重启恢复已记录，延迟/成本与生产退出门槛、独立 Runner 自主选择仍开放。见[原技术复核](../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md)、[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)与[审批续跑复核](../../openspec/changes/step5e-durable-approval-continuation/review.md) |
+| step5e：内置自主执行收敛与验证 | 技术切片已实现，限定基线已记录 | 双路径停止/结构化输出与 Workflow 子任务契约已有证据；真实模型基线、限定断连及持久审批 worker 重启恢复已记录，延迟/成本与生产退出门槛、独立 Runner 自主选择仍开放。见[原技术复核](../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md)、[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)与[审批续跑复核](../../openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md) |
 
 **step5d 剩余项：**
 
@@ -350,9 +350,9 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **step5e 操作与决策门槛：**
 
-**状态：技术切片已交付（change `builtin-autonomous-execution`，含复核修复），登记 1.3.11h/1.3.11i。`step5e-real-model-baseline` 保留原 rubric v3 观测，新增 `zai/glm-4.5-flash` 的 v4 原始记录：停止分支正确，实测暴露引擎格式修复丢失工具上下文，确定性复现与修正后的定向补采已记录，产物和同步审批续推通过。真实 TCP RST 恢复已核对 PG 持久取消终态、首轮真实回执与正确 JSON，工具无重复；SQLite 层只授予进程内恢复证据。同用户同 Agent 的新快照才可自动恢复历史，旧归属不推断，显式客户端历史保持原语义。部分延迟仍超阈，成本未核实，不宣告整体通过；独立 Runner 自主选择、独立 workflow 身份与生产退出门槛仍开放。详见[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)。**
+**状态：技术切片已交付（change `builtin-autonomous-execution`，含复核修复），登记 1.3.11h/1.3.11i。`step5e-real-model-baseline` 保留原 rubric v3 观测，新增 `zai/glm-4.5-flash` 的 v4 原始记录：停止分支正确，实测暴露引擎格式修复丢失工具上下文，确定性复现与修正后的定向补采已记录，产物和同步审批续推通过。真实 TCP RST 恢复已核对 PG 持久取消终态、首轮真实回执与正确 JSON，工具无重复；SQLite 层只授予进程内恢复证据。同用户同 Agent 的新快照才可自动恢复历史，旧归属不推断，显式客户端历史保持原语义。部分延迟仍超阈，成本未核实，不宣告整体通过；独立 Runner 自主选择、独立 workflow 身份与生产退出门槛仍开放。详见[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)。Workflow 组合已由 `step5e-workflow-agent-continuation` 补充限定证据：步骤声明 `approval_wait` 经子任务持久化输入启用审批链，系统发起执行以 agent principal 派生键持久化引擎快照（不伪造人类用户），子任务审批拒批经核实回调与持久 outbox 重试按父流程失败策略收敛，分别覆盖仅子 worker 重启及父、子 worker 分别重启，关联/审批/回执/流程位置从 PG 恢复、产物校验通过父流程才推进。原真实模型摘要保留（gate=false）；复核真实模型在原 Run 恢复且工具仅执行一次，但最终输出非 JSON，父按 Schema 正确拒绝推进，组合成功验收仍开放。复核结果见[组合复核](../../openspec/changes/archive/2026-10-17-step5e-workflow-agent-continuation/review.md)。等待到期自动收敛仍开放。**
 
-`step5e-durable-approval-continuation` 已为显式启用持久审批的内置任务记录 PostgreSQL worker 重启续跑证据：等待与 pending 绑定持久化，合法决定后在原 Run/会话继续，原审批与稳定动作 ID 保留；覆盖停车前成功写入、消费后领取前崩溃及相同参数新动作的再次审批，模型收到真实回执。跨进程时钟锚须由在线 SQL 权威重新核验，不延长原批准期限。真实模型补采保留原记录，gate=false、成本未知。审批决定经可信服务边界注入；新增企业审批 HTTP/UI、控制面进程重启、离线时钟信任及任意故障组合仍未认证。见[审批续跑复核](../../openspec/changes/step5e-durable-approval-continuation/review.md)。
+`step5e-durable-approval-continuation` 已为显式启用持久审批的内置任务记录 PostgreSQL worker 重启续跑证据：等待与 pending 绑定持久化，合法决定后在原 Run/会话继续，原审批与稳定动作 ID 保留；覆盖停车前成功写入、消费后领取前崩溃及相同参数新动作的再次审批，模型收到真实回执。跨进程时钟锚须由在线 SQL 权威重新核验，不延长原批准期限。真实模型补采保留原记录，gate=false、成本未知。审批决定经可信服务边界注入；新增企业审批 HTTP/UI、控制面进程重启、离线时钟信任及任意故障组合仍未认证。见[审批续跑复核](../../openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md)。
 
 - [ ] 建立直接工具循环、Pregel Agent 图、确定性 Workflow 与 Runner 的差异矩阵：模型调用、工具选择/结果回灌、结构化输出、预算/停止、审批等待、持久化、取消及错误事件。普通 LLM 节点不必承担自主 Agent 循环。
 - [ ] 固定共享的外部行为与状态责任，优先复用现有执行应用服务、动作账本和治理接缝，消除相同能力在平台与独立宿主上的语义差异。

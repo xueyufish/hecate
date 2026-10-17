@@ -212,7 +212,7 @@ def _wire_engine_doubles() -> None:
 
 async def _serve() -> None:
     from hecate_durable.storage import SqlDurableStore
-    from hecate_durable.worker import DurableWorker
+    from hecate_durable.worker import DurableWorker, OutboxRelay
 
     from hecate.core.composition.entry_assembly import (
         register_shared_event_store,
@@ -229,7 +229,29 @@ async def _serve() -> None:
     register_shared_event_store(PostgresEventStore(async_session_factory=async_session_factory))
     register_shared_registry_session_factory(async_session_factory)
 
-    store = SqlDurableStore(os.environ["HECATE_E2E_DURABLE_DSN"], source="platform")
+    role = os.environ.get("HECATE_E2E_TASK_ROLE")
+
+    class RoleStore(SqlDurableStore):
+        """Let separate test processes own parent and child dispatches."""
+
+        def list_tasks(self, states=None):
+            records = super().list_tasks(states)
+            if role is None:
+                return records
+            return [
+                record
+                for record in records
+                if bool((self.get_task_input(record.task_ref) or {}).get("workflow_parent")) == (role == "child")
+            ]
+
+    if role is not None:
+        import hecate.execution.task_control as task_control
+
+        # Inline dispatch would bypass the process split the test measures.
+        # Fleet workers, as in production's worker mode, own every claim.
+        task_control._spawn_background = lambda coroutine: coroutine.close()
+
+    store = RoleStore(os.environ["HECATE_E2E_DURABLE_DSN"], source="platform")
     dispatcher = PlatformTaskDispatcher(store, async_session_factory)
     worker = DurableWorker(
         store,
@@ -239,10 +261,19 @@ async def _serve() -> None:
         poll_interval=0.2,
         max_attempts=3,
     )
+    if os.environ.get("HECATE_E2E_PID_FILE"):
+        from pathlib import Path
+
+        Path(os.environ["HECATE_E2E_PID_FILE"]).write_text(str(os.getpid()), encoding="utf-8")
     print(f"worker ready pid={os.getpid()}", flush=True)
     # The parent kills this process (that IS the crash under test) or
     # terminates it after the terminal fact is asserted.
-    await worker.run_forever()
+    from hecate.execution.event_relay import PlatformOutboxProjector
+
+    relay = OutboxRelay(
+        store.session_factory, PlatformOutboxProjector(store, async_session_factory), relay_key="platform"
+    )
+    await asyncio.gather(worker.run_forever(), relay.run_forever())
 
 
 def main() -> None:

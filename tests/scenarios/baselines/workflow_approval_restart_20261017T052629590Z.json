@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "kind": "real_model_workflow_approval_restart",
+    "status": "recorded",
+    "gate": false,
+    "recorded_at": "2026-10-17T05:26:29.589375+00:00",
+    "model": "zai/glm-4.5-flash",
+    "source": "real_model"
+  },
+  "parent_state": "succeeded",
+  "child_state": "succeeded",
+  "parked": true,
+  "resumed_after_process_restart": true,
+  "protected_action_executions": 1,
+  "approval_binding_consumed": true,
+  "child_final_content": "\n{\"answer\": \"Ticket created successfully. Ticket ID: TCK-1\"}",
+  "latency_seconds_total": 61.45
+}

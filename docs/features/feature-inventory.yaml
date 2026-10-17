@@ -9297,9 +9297,9 @@ features:
     archived change review (openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md);
     tests/test_execution/test_approval_wait_park.py; tests/scenarios/test_durable_approval_restart.py;
     tests/scenarios/baselines/durable_approval_restart_20261016T170954390Z.json (real model, gate=false)
-  acceptance: A policy-required approval on an opted-in durable task parks the attempt (waiting_approval stop
-    category) under a pending authority binding; the resume wake is authorized only by a persisted ledger
-    decision (pending refuses without consuming the token, rejection fails the task with zero executions,
+  acceptance: A policy-required approval on an opted-in durable task parks the attempt (waiting_approval
+    stop category) under a pending authority binding; the resume wake is authorized only by a persisted
+    ledger decision (pending refuses without consuming the token, rejection fails the task with zero executions,
     payload self-claims never authorize); an authorized wake continues the same run/engine session natively,
     consumes the binding once at dispatch with trusted-clock revalidation, and never re-executes completed
     actions; real worker-subprocess restart (process A killed mid-park, process B resumes from PostgreSQL)
@@ -9309,14 +9309,49 @@ features:
   provider_or_adapter: builtin durable task dispatch over the platform approval authority
   enforcement_point: resume wake authorization gate (task control); dispatch-time binding consumption
     (approval gate); park fail-closed writes (dispatcher)
-  state_owner: task owns the wait contract and lifecycle; approval authority owns the decision and
-    consumption state
+  state_owner: task owns the wait contract and lifecycle; approval authority owns the decision and consumption
+    state
   milestone: M-A
   superseded_by: n/a
   disposition: core-contract
   plan_mappings:
   - core-04b
   target_boundary: builtin durable task dispatch + platform approval authority; target deployment=builtin;
+    step5e; chat-path synchronous approval unchanged
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
+    evidence
+  profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
+    actual production support requires per-profile tests
+- id: 1.3.11k
+  title: Workflow Child Approval Waiting & Composition
+  phase: P1
+  category: Agent Runtime
+  status: delivered
+  maturity: unverified
+  dependencies: []
+  evidence: openspec/specs/workflow-agent-subtask/spec.md; openspec/specs/execution-approval-binding/spec.md;
+    change review (openspec/changes/step5e-workflow-agent-continuation/review.md); tests/test_execution/test_workflow_approval_combo.py;
+    tests/scenarios/test_workflow_approval_restart.py
+  acceptance: A workflow step declaring approval_wait parks the child on a policy-required approval while
+    the parent holds its durable wait; rejection converges the parent through the verified callback under
+    the declared failure policy with a distinguishable source; after a real parent/child process restart
+    the association, approval, receipts and flow position recover from PostgreSQL and the parent advances
+    only on artifact-validated committed child facts; forged or repeated callbacks never double-advance;
+    the reviewed real-model run resumed with one protected effect but returned invalid JSON, so the parent
+    correctly refused advancement; real-model composition success remains open
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: builtin workflow adapter and durable task dispatch over the platform approval authority
+  enforcement_point: step declaration validation; child park/wake gate; parent callback verification and
+    artifact validation
+  state_owner: parent owns step advancement and callback ledger; child owns its approval wait and committed
+    facts
+  milestone: M-A
+  superseded_by: n/a
+  disposition: core-contract
+  plan_mappings:
+  - core-04b
+  target_boundary: builtin workflow child tasks + durable approval machinery; target deployment=builtin;
     step5e; chat-path synchronous approval unchanged
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
     evidence

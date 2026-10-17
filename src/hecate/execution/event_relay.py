@@ -74,31 +74,44 @@ class PlatformOutboxProjector:
         workspace_id = await self._resolve_workspace(envelope.task_ref)
         async with self._session_factory() as db:
             events = PlatformEventService(db)
-            if await events.find_by_event_id(envelope.event_id) is not None:
-                return  # already projected (relay retry/replay)
-            stored = replace(envelope, payload_schema_ref=schema_ref, received_at=stored_now())
-            try:
-                await events.append_resequenced(stored, workspace_id=workspace_id)
-                if event_type == "run_terminal" and workspace_id is not None:
-                    from hecate.execution.task_run_registry import TaskRunRegistry
+            if await events.find_by_event_id(envelope.event_id) is None:
+                stored = replace(envelope, payload_schema_ref=schema_ref, received_at=stored_now())
+                try:
+                    await events.append_resequenced(stored, workspace_id=workspace_id)
+                    if event_type == "run_terminal" and workspace_id is not None:
+                        from hecate.execution.task_run_registry import TaskRunRegistry
 
-                    await TaskRunRegistry(db).update_projection(
-                        uuid.UUID(envelope.run_ref.id),
-                        workspace_id,
-                        projection={
-                            "state": payload["status"],
-                            "error": payload.get("error"),
-                            "result_preview": str(payload.get("content") or "")[:2000],
-                            **({"error_category": payload["error_category"]} if payload.get("error_category") else {}),
-                        },
-                    )
+                        await TaskRunRegistry(db).update_projection(
+                            uuid.UUID(envelope.run_ref.id),
+                            workspace_id,
+                            projection={
+                                "state": payload["status"],
+                                "error": payload.get("error"),
+                                "result_preview": str(payload.get("content") or "")[:2000],
+                                **(
+                                    {"error_category": payload["error_category"]}
+                                    if payload.get("error_category")
+                                    else {}
+                                ),
+                            },
+                        )
+                    await db.commit()
+                except IntegrityError:
+                    await db.rollback()
+                    if await events.find_by_event_id(envelope.event_id) is None:
+                        raise
+            # Projection dedup must not acknowledge an undelivered callback:
+            # a crash may occur after committing the read model but before
+            # waking the parent. The outbox retries both using persisted facts.
+            if event_type == "run_terminal":
                 await db.commit()
-            except IntegrityError:
-                # Lost a dedup race with another relay instance — the event
-                # is projected; nothing to do.
-                await db.rollback()
-                if await events.find_by_event_id(envelope.event_id) is None:
-                    raise
+                task_input = await asyncio.to_thread(self._store.get_task_input, envelope.task_ref) or {}
+                if isinstance(task_input.get("workflow_parent"), dict):
+                    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+                    dispatcher = PlatformTaskDispatcher(self._store, self._session_factory)
+                    context = dispatcher._context_of(envelope.task_ref, task_input)
+                    await dispatcher._issue_child_callback(db, context, payload, retry_errors=True)
 
     async def _resolve_workspace(self, task_ref: Any) -> uuid.UUID | None:
         """Task attribution: the row column, then the persisted input payload."""

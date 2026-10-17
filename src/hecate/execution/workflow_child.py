@@ -50,9 +50,10 @@ class WorkflowChildTaskAdapter:
         """Validate one step declaration (step5e extended schema).
 
         ``goal`` stays required; ``mode`` (default chat), ``output_schema``
-        (a JSON Schema object) and ``artifact`` (the expected artifact key
-        the child result must carry) are optional. Illegal values are
-        rejected with a locatable error — never silently ignored.
+        (a JSON Schema object), ``artifact`` (the expected artifact key
+        the child result must carry) and ``approval_wait`` (a boolean opting
+        the child into durable approval parking) are optional. Illegal
+        values are rejected with a locatable error — never silently ignored.
         """
         reserved = {"workflow", "workflow_parent", "workflow_step", "provided", "task_ref", "step_index"}
         conflict = sorted(reserved.intersection(step))
@@ -76,6 +77,9 @@ class WorkflowChildTaskAdapter:
         artifact = step.get("artifact")
         if artifact is not None and (not isinstance(artifact, str) or not artifact.strip()):
             raise ValueError(f"workflow.steps[{index}].artifact must be a non-empty string when present")
+        approval_wait = step.get("approval_wait")
+        if "approval_wait" in step and not isinstance(approval_wait, bool):
+            raise ValueError(f"workflow.steps[{index}].approval_wait must be a boolean when present")
 
     @staticmethod
     def plan(payload: dict[str, Any]) -> WorkflowPlan | None:
@@ -108,12 +112,18 @@ class WorkflowChildTaskAdapter:
     ) -> dict[str, Any]:
         """Build the child task input: fresh (never inherits the parent's
         own ``workflow`` block — a child is not itself a workflow parent),
-        stamped with the parent reference the terminal hook will call."""
+        stamped with the parent reference the terminal hook will call.
+
+        A step declaring ``approval_wait`` opts its child into durable
+        approval parking: the flag rides the persisted input so the child
+        dispatch assembly enables the durable-wait approval callback
+        (step5e; the submit whitelist already carries the key)."""
 
         return {
             "messages": [{"role": "user", "content": goal}],
             "workflow_parent": {"task_ref": parent_ref.to_dict(), "step_index": step_index},
             "workflow_step": dict(step or {"goal": goal}),
+            "approval_wait": bool((step or {}).get("approval_wait") is True),
         }
 
     @staticmethod

@@ -809,7 +809,18 @@ class WorkflowExecutionService:
 
         org_uuid = org_id if isinstance(org_id, uuid.UUID) else uuid.UUID(str(org_id)) if org_id else None
         user_uuid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id)) if user_id else None
-        if org_uuid is None or user_uuid is None:
+        if org_uuid is None and user_uuid is None:
+            # System-initiated execution (no human user — step5e workflow
+            # children): persist under the agent-principal derived key so
+            # the snapshot lands on the SAME address the resume gate reads.
+            # No verified agent attribution → nothing to persist (unchanged).
+            from hecate_runtime.execution_assembly import system_execution_tenant
+
+            derived = system_execution_tenant(agent_id)
+            if derived is None:
+                return
+            org_uuid = user_uuid = derived
+        elif org_uuid is None or user_uuid is None:
             return
 
         # Lock acquisition retries with jitter; lock contention fails fast after
