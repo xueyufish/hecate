@@ -72,6 +72,10 @@ approval and recovery boundaries. That implementation is outside this change's d
   authority binding, decision-gated resume wake, dispatch-time one-time consumption,
   real worker-subprocess restart) is delivered by
   `step5e-durable-approval-continuation`; the chat path keeps synchronous approval.
+  The workflow composition (step-declared child approval waiting, system-execution
+  snapshot tenancy derived from the verified agent principal, rejection convergence
+  through the verified callback with durable outbox retry, separate parent/child process restart) is delivered by
+  `step5e-workflow-agent-continuation`.
   The reviewed task path retains the original approval reference and stable server action
   ID across consumption-before-claim crashes; new actions require new decisions. PostgreSQL
   authority time revalidates restarted clocks without extending expiry. Evidence uses

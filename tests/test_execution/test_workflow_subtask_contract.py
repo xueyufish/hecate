@@ -368,7 +368,7 @@ async def test_validated_multistep_restarts_and_callback_receipts(harness, monke
     assert await _worker_of(harness).dispatch_once(child)
     state = harness["store"].get_task_state(parent.task_ref)
     assert state.extra["_workflow_callbacks"]["0"]["child_task_id"] == child.id
-    assert state.extra["_workflow_callbacks"]["0"]["applied_fact_id"] == f"wf-callback-{child.id}"
+    assert state.extra["_workflow_callbacks"]["0"]["applied_fact_id"] == f"wf-callback-{child.id}-{token}"
     async with harness["session_factory"]() as db:
         duplicate = await _service_of(harness, db).submit_workflow_callback(
             workspace_id=HARNESS_WS,

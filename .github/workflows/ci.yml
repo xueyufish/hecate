@@ -223,6 +223,9 @@ jobs:
           # process B resumes from PostgreSQL only).
           python scripts/dev.py test tests/test_execution/test_approval_wait_park.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
           python scripts/dev.py test tests/scenarios/test_durable_approval_restart.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
+          # step5e continuation: workflow parent-child approval/restart combo.
+          python scripts/dev.py test tests/test_execution/test_workflow_approval_combo.py -q --timeout=240 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/scenarios/test_workflow_approval_restart.py -q --timeout=600 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with

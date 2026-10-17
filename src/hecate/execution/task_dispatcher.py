@@ -497,9 +497,15 @@ class PlatformTaskDispatcher:
         if done_index is not None:
             if type(done_index) is not int or not 0 <= done_index < len(plan.steps):
                 return {"status": "failed", "content": "", "error": "invalid workflow callback step_index"}
-            child_state = (provided.get("child_outcome") or {}).get("child_state")
+            child_outcome = provided.get("child_outcome") or {}
+            child_state = child_outcome.get("child_state")
             if child_state != "succeeded":
-                detail = f"workflow step {done_index} failed (source=execution): child ended {child_state}"
+                # step5e: an approval rejection converges here through the
+                # verified callback too — its category is distinguishable
+                # from a plain execution failure on the committed facts.
+                child_category = child_outcome.get("error_category")
+                suffix = f" ({child_category})" if child_category else ""
+                detail = f"workflow step {done_index} failed (source=execution): child ended {child_state}{suffix}"
                 if plan.on_failure == "await":
                     return {"status": "awaiting_reconciliation", "content": detail, "failure_source": "execution"}
                 return {"status": "failed", "content": "", "error": detail, "failure_source": "execution"}
@@ -545,16 +551,18 @@ class PlatformTaskDispatcher:
             session_factory=self._session_factory,
         )
 
-    async def _issue_child_callback(self, db: AsyncSession, context: _DispatchContext, outcome: dict[str, Any]) -> None:
+    async def _issue_child_callback(
+        self, db: AsyncSession, context: _DispatchContext, outcome: dict[str, Any], *, retry_errors: bool = False
+    ) -> None:
         """Auto-callback: a workflow child's terminal fact wakes its parent.
 
         The child's input payload carries the parent reference (stamped at
         submit); the callback is issued through the REAL verified path
         (``submit_workflow_callback``) with the parent's live wait token —
         the platform trusts its own records, so no external caller is
-        involved. Failures are logged, never surfaced: the child's terminal
-        fact is already committed and must not be un-done by a callback
-        problem.
+        involved. The immediate path logs failures after the terminal commit;
+        the outbox path propagates them to its durable retry cursor. Neither
+        path undoes the child's committed terminal fact.
         """
 
         parent = context.workflow_parent or {}
@@ -567,27 +575,38 @@ class PlatformTaskDispatcher:
             state = await asyncio.to_thread(self._store.get_task_state, parent_ref)
             wait = (state.extra or {}).get("wait") or {} if state else {}
             token = str(wait.get("wait_token") or "")
-            if not token:
-                logger.warning("task %s workflow parent has no live wait; callback skipped", context.task_id)
+            if (
+                not token
+                or state.lifecycle_state is not TaskLifecycleState.WAITING_INPUT
+                or wait.get("consumed")
+                or (wait.get("contract_ref") or {}).get("await_task_ref")
+                != BackendRef(RefKind.TASK, PLATFORM_ISSUER, str(context.task_id)).to_dict()
+            ):
                 return
             service = self._task_control(db)
-            await service.submit_workflow_callback(
+            receipt = await service.submit_workflow_callback(
                 workspace_id=context.workspace_id,
                 task_id=uuid.UUID(parent_ref.id),
-                command_id=f"wf-callback-{context.task_id}",
+                command_id=f"wf-callback-{context.task_id}-{token}",
                 wait_token=token,
                 child_task_id=context.task_id,
                 declared_state=str(declared),
                 payload={"step_index": parent.get("step_index")},
-                result_summary={
-                    "content": str(outcome.get("content") or ""),
-                    # step5e: declared artifacts ride the verified callback so
-                    # the parent validates the contract on platform records.
-                    "artifacts": outcome.get("artifacts") or {},
-                },
             )
-        except Exception:  # noqa: BLE001 — terminal fact is committed; callback problems must not undo it
-            logger.warning("task %s workflow auto-callback failed", context.task_id, exc_info=True)
+            if retry_errors and receipt.record.state.value != "applied":
+                current = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+                current_wait = (current.extra or {}).get("wait") or {} if current else {}
+                if (
+                    current is not None
+                    and current.lifecycle_state is TaskLifecycleState.WAITING_INPUT
+                    and current_wait.get("wait_token") == token
+                    and not current_wait.get("consumed")
+                ):
+                    raise RuntimeError(f"workflow callback was not applied: {receipt.detail}")
+        except Exception:  # noqa: BLE001 — the outbox retries without undoing the terminal
+            if retry_errors:
+                raise
+            logger.warning("task %s workflow auto-callback deferred to outbox", context.task_id, exc_info=True)
 
     # -- internals -------------------------------------------------------------
 
@@ -684,13 +703,24 @@ class PlatformTaskDispatcher:
             return None
 
         engine_session = self._engine_session_of(latest)
+        from hecate_runtime.execution_assembly import system_execution_tenant
+
         from hecate.core.composition.entry_assembly import get_shared_session_state_store
+
+        # The tenant key mirrors the save side (execution_assembly): the
+        # verified user for human-initiated tasks, the agent-principal
+        # derived key for system-initiated ones (workflow children —
+        # step5e). Both derive from the same persisted task payload.
+        tenant = context.user_id or system_execution_tenant(context.agent_id)
+        if tenant is None:
+            self._last_resume_refusal = "resume refused: execution carries no user or agent attribution"
+            return None
 
         try:
             state_store = get_shared_session_state_store()
             snapshot_state = await state_store.load(
-                org_id=context.user_id,
-                user_id=context.user_id,
+                org_id=tenant,
+                user_id=tenant,
                 session_id=engine_session,
             )
         except Exception as exc:  # noqa: BLE001 — unloadable is unresumable
@@ -1117,7 +1147,7 @@ class PlatformTaskDispatcher:
             await self._task_control(db).submit_workflow_callback(
                 workspace_id=context.workspace_id,
                 task_id=uuid.UUID(parent_ref.id),
-                command_id=f"wf-callback-{child_ref.id}",
+                command_id=f"wf-callback-{child_ref.id}-{token}",
                 wait_token=token,
                 child_task_id=uuid.UUID(child_ref.id),
                 declared_state=child.lifecycle_state.value,

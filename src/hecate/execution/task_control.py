@@ -1125,7 +1125,33 @@ class TaskControlService:
             )
             await self._db.commit()
         logger.info("task %s failed on rejected approval decision", t_ref.id)
+        await self._converge_workflow_parent_on_rejection(t_ref, outcome)
         return True
+
+    async def _converge_workflow_parent_on_rejection(self, t_ref: BackendRef, outcome: dict[str, Any]) -> None:
+        """A rejected workflow child converges its waiting parent (step5e).
+
+        The rejection terminal bypasses the dispatcher's ``_finish``, so
+        without this the parent would sit in its durable wait until the
+        token expired instead of applying its declared ``on_failure``
+        policy. The callback rides the SAME verified path as any child
+        terminal — the parent trusts only its own records — and its
+        idempotency/verification semantics are inherited unchanged.
+        Failures are logged, never surfaced: the child's terminal fact is
+        already committed.
+        """
+
+        try:
+            payload = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
+            if not isinstance(payload.get("workflow_parent"), dict):
+                return
+            from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+            dispatcher = PlatformTaskDispatcher(self._store, self._session_factory)
+            context = PlatformTaskDispatcher._context_of(t_ref, payload)
+            await dispatcher._issue_child_callback(self._db, context, {**outcome, "status": "failed"})
+        except Exception:  # noqa: BLE001 — convergence must not un-commit the terminal
+            logger.warning("task %s rejection callback to workflow parent failed", t_ref.id, exc_info=True)
 
     async def _request_cancel(self, t_ref: BackendRef, record: ControlCommandRecord, workspace_id: uuid.UUID) -> str:
         state = await self._lifecycle_state(t_ref)

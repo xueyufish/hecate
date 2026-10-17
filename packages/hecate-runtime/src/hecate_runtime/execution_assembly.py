@@ -47,12 +47,38 @@ from hecate_runtime.workers.suggestion_worker import SuggestionWorker
 from hecate_runtime.workers.tool_worker import ToolWorker
 from hecate_runtime.workers.variable_set_worker import VariableSetWorker
 
+_SYSTEM_TENANT_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "hecate:system-execution-tenant")
+
+
+def system_execution_tenant(agent_id: str | uuid.UUID | None) -> uuid.UUID | None:
+    """Deterministic tenant key for system-initiated executions (step5e).
+
+    Executions without a human user (workflow child tasks the platform
+    submitted) persist their engine snapshots under a key derived from the
+    server-verified agent attribution carried by the task's persisted
+    payload — never a fabricated human user id, never request-controlled
+    input. Save and restore derive the SAME key from the SAME persisted
+    fact, so an authorized resume can load the parked attempt's snapshot.
+    The key is a storage address only: it confers no authorization, which
+    stays with the approval binding and the wake gate.
+    """
+
+    if agent_id is None:
+        return None
+    try:
+        principal_id = uuid.UUID(str(agent_id))
+    except ValueError:
+        return None
+    return uuid.uuid5(_SYSTEM_TENANT_NAMESPACE, f"agent-principal:{principal_id}")
+
+
 __all__ = [
     "AssembledExecution",
     "CompositeWorker",
     "PortCompactionSummarizer",
     "WorkerDependencies",
     "assemble_execution",
+    "system_execution_tenant",
     "create_composite_worker",
 ]
 
@@ -319,7 +345,7 @@ def assemble_execution(
 
     checkpoint_store: Any = InMemoryCheckpointStore()
     if session_state_store is not None:
-        tenant_uuid = uuid.UUID(str(user_id)) if user_id is not None else None
+        tenant_uuid = uuid.UUID(str(user_id)) if user_id is not None else system_execution_tenant(agent_id)
         captured_user_id = tenant_uuid
 
         def _tenant_provider() -> tuple[uuid.UUID, uuid.UUID] | None:
