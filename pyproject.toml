@@ -87,7 +87,11 @@ hecate-ops = { workspace = true }
 hecate-llm = { workspace = true }
 hecate-sandbox = { workspace = true }
 
+[dependency-groups]
+lint = ["ruff>=0.8.0", "pyyaml>=6.0"]
+
 [project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
 llm = [
     "litellm>=1.50.0",
 ]
@@ -199,6 +203,7 @@ known-third-party = ["alembic", "pytest", "sqlalchemy"]
 "packages/hecate-runner/tests/**" = ["S101", "S603", "S607", "S105", "S107", "S310"]
 "packages/hecate-runner/smoke/**" = ["S101"]
 "scripts/**" = ["S101"]
+"scripts/dev.py" = ["S603"]
 "tests/test_services/test_browser/test_integration.py" = ["S310"]
 "alembic/versions/**" = ["S608"]
 "src/hecate/models/alert.py" = ["S105"]

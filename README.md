@@ -118,13 +118,10 @@ git clone https://github.com/xueyufish/hecate.git && cd hecate
 cp .env.example .env
 # Start the infrastructure services (PostgreSQL, Qdrant, MinIO, Temporal)
 docker compose -f docker/docker-compose.yml up -d postgres qdrant minio temporal
-# Create the virtual environment only if missing (keeps re-runs non-interactive)
-[ -d .venv ] || uv venv
-# Activate the virtual environment
+# Synchronize the locked development workspace (Windows and POSIX)
+uv run --no-project --python 3.12 scripts/dev.py sync
+# Activate the virtual environment (Git Bash on Windows: source .venv/Scripts/activate)
 source .venv/bin/activate
-# Install Hecate in editable mode with dev dependencies
-# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
-uv pip install --prerelease=allow -e ".[dev]"
 # Apply database migrations
 alembic upgrade head
 
@@ -335,7 +332,7 @@ Hecate ships three console-script entry points:
 - **`hecate-migrate`** — standalone migration runner. Designed for one-shot use as a Docker Compose init service, a Kubernetes init container, or a Helm pre-install hook — runs Alembic migrations without booting the full web application.
 - **`hecate-flag-audit`** — CI tool that scans the source tree for stale or orphaned `ENABLE_*` feature flags. See [`docs/reference/cli.md#hecate-flag-audit--feature-flag-audits`](docs/reference/cli.md#hecate-flag-audit--feature-flag-audits).
 
-After `uv pip install -e ".[dev]"`, all three commands are available on your `PATH`.
+After synchronizing the [development environment](docs/how-to/openspec-workflow.md#development-commands), all three commands are available on your `PATH`.
 
 ---
 

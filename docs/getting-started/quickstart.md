@@ -79,7 +79,7 @@ docker compose -f docker/docker-compose.yml up -d postgres qdrant minio temporal
 source .venv/bin/activate
 # Install Hecate in editable mode with dev dependencies
 # (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
-uv pip install --prerelease=allow -e ".[dev]"
+uv run --no-project --python 3.12 scripts/dev.py sync
 
 # Apply database migrations
 alembic upgrade head

@@ -48,12 +48,11 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - name: Install lint tools
         run: |
-          uv venv
-          uv pip install ruff pyyaml
+          python scripts/dev.py sync --profile lint
       - name: Lint
-        run: uv run --no-sync ruff check src/hecate/ packages/ tests/ scripts/feature_inventory.py
+        run: python scripts/dev.py check lint
       - name: Format check
-        run: uv run --no-sync ruff format --check src/hecate/ packages/ tests/ scripts/feature_inventory.py
+        run: python scripts/dev.py check format
       - name: Feature inventory admission (changed entries strict; historical debt reported)
         env:
           INVENTORY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
@@ -75,9 +74,9 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
+        run: python scripts/dev.py sync
       - name: Type check
-        run: uv run mypy src/ packages/
+        run: python scripts/dev.py check types
 
   test:
     needs: changes
@@ -113,9 +112,7 @@ jobs:
           cache: npm
           cache-dependency-path: pilots/execution-backend-ts/package-lock.json
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
-      - name: Install hecate-runner into the dev environment (package tests)
-        run: uv pip install --no-deps -e packages/hecate-runner
+        run: python scripts/dev.py sync
       - name: Run tests
         env:
           HECATE_REQUIRE_LIVE_PILOT: "1"
@@ -123,9 +120,9 @@ jobs:
           # npm ci stays here (not only in pilot-ts): the live_backend fixture
           # compiles the pilot with tsc for the B-side interop tests.
           npm ci --prefix pilots/execution-backend-ts
-          uv run pytest tests/ -q --timeout=600 -n auto --dist loadfile -p no:cacheprovider
-          uv run pytest packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
-          uv run pytest packages/hecate-runner/tests/ -q --timeout=120 -p no:cacheprovider
+          python scripts/dev.py test tests/ -q --timeout=600 -n auto --dist loadfile -p no:cacheprovider
+          python scripts/dev.py test packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
+          python scripts/dev.py test packages/hecate-runner/tests/ -q --timeout=120 -p no:cacheprovider
 
   # A-side of the execution-backend pilot spec (openspec/specs/execution-backend-pilot):
   # the self-contained vitest suite runs in parallel with the Python `test` job,
@@ -172,17 +169,16 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
+        run: python scripts/dev.py sync --profile postgres
       - name: Durable-core fault suite against real PostgreSQL
         env:
           DURABLE_TEST_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
         run: |
-          uv pip install pytest-timeout "psycopg[binary]>=3.2"
-          uv run pytest packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
+          python scripts/dev.py test packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
       - name: Fresh-database migration drift gate
         env:
           DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres
-        run: uv run pytest tests/test_migrations/test_upgrade_drift.py -v
+        run: python scripts/dev.py test tests/test_migrations/test_upgrade_drift.py -v
 
   # step6d continuation acceptance: the hang/resume + receipt-loss scenarios
   # need a real multi-connection database (SQLite's single-writer semantics
@@ -212,24 +208,21 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
-      - name: Install hecate-runner into the dev environment (scenario imports)
-        run: uv pip install --no-deps -e packages/hecate-runner
+        run: python scripts/dev.py sync --profile postgres
       - name: Platform-native continuation acceptance against real PostgreSQL
         env:
           HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
           HECATE_REVIEW_POSTGRES_URL: postgresql+asyncpg://hecate:hecate@localhost:5432/postgres
         run: |
-          uv pip install pytest-timeout "psycopg[binary]>=3.2" "asyncpg>=0.29"
-          uv run pytest tests/test_execution/test_builtin_continuation.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
-          uv run pytest tests/test_execution/test_managed_lease_postgres_review.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
-          uv run pytest tests/test_execution/test_entry_contract_pg_e2e.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
-          uv run pytest tests/test_channel/test_g3_real_tcp_disconnect.py tests/test_mcp/test_agent_chat_entry_parity.py tests/test_execution/test_workflow_child_adapter.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/test_execution/test_builtin_continuation.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/test_execution/test_managed_lease_postgres_review.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/test_execution/test_entry_contract_pg_e2e.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/test_channel/test_g3_real_tcp_disconnect.py tests/test_mcp/test_agent_chat_entry_parity.py tests/test_execution/test_workflow_child_adapter.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
           # step5e: durable approval park/wake/resume — deterministic tier plus
           # the REAL worker-subprocess restart (process A killed mid-park,
           # process B resumes from PostgreSQL only).
-          uv run pytest tests/test_execution/test_approval_wait_park.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
-          uv run pytest tests/scenarios/test_durable_approval_restart.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/test_execution/test_approval_wait_park.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/scenarios/test_durable_approval_restart.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with
@@ -266,15 +259,12 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
-      - name: Install hecate-runner into the dev environment (scenario imports)
-        run: uv pip install --no-deps -e packages/hecate-runner
+        run: python scripts/dev.py sync --profile postgres
       - name: Managed process matrix against real PostgreSQL
         env:
           HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
         run: |
-          uv pip install pytest-timeout "psycopg[binary]>=3.2" "asyncpg>=0.29"
-          uv run pytest tests/scenarios/test_sc04_lease_renewal_policy.py tests/scenarios/test_sc05_managed_wake_chain.py tests/scenarios/test_sc05_managed_reconnect.py -q --timeout=420 -p no:cacheprovider
+          python scripts/dev.py test tests/scenarios/test_sc04_lease_renewal_policy.py tests/scenarios/test_sc05_managed_wake_chain.py tests/scenarios/test_sc05_managed_reconnect.py -q --timeout=420 -p no:cacheprovider
 
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
   # requires Docker-in-Docker and is covered by integration tests locally.

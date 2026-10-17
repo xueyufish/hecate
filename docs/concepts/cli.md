@@ -198,7 +198,7 @@ The three entry points are installed via `pip` / `uv`:
 
 ```bash
 # Install Hecate (installs all three)
-uv pip install -e ".[dev]"
+uv run --no-project --python 3.12 scripts/dev.py sync
 
 # Or just the app (excludes flag-audit)
 uv pip install hecate

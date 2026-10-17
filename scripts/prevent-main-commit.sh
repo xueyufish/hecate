@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
 # Prevent commits directly to the protected main branch.
 #
-# Install once per clone:
-#   cp scripts/prevent-main-commit.sh .git/hooks/pre-commit
-#   chmod +x .git/hooks/pre-commit
-#
-# Worktrees share hooks with the main repo, so installing in the main
-# .git/hooks/ covers all worktrees.
-#
-# Bypass: git commit --no-verify (only for explicit edge cases such as
-# release tagging from main, never for routine edits).
+# Called by the tracked pre-commit hook before any development checks.
 
 set -euo pipefail
 
@@ -27,8 +19,6 @@ Recovery recipe:
   git stash pop
   git commit -m "..."
 
-Bypass only for explicit edge cases (e.g. release tagging):
-  git commit --no-verify -m "..."
 EOF
     exit 1
 fi
