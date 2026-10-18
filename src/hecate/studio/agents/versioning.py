@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.canonical_hash import canonical_hash
+from hecate.core.deps_workspace import WorkspaceRole, ensure_workspace_role
 from hecate.models.agent import AgentModel
 from hecate.models.agent_version import AgentPublicationModel, AgentPublicationReadSchema, AgentVersionModel
 from hecate.models.evaluation import EvaluationRunModel
@@ -448,13 +449,17 @@ class AgentVersionService:
         name: str = "",
         change_summary: str = "",
         actor_user_id: uuid.UUID | None = None,
+        auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         """Freeze the live agent row into a new immutable version.
 
         Raises:
-            ValueError: If the agent does not exist.
+            ValueError: If the agent does not exist (or is outside the
+                caller's workspace).
+            WorkspaceRoleRequiredError: If the caller's role is below editor.
         """
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.EDITOR)
 
         config = snapshot_own_config(agent)
         pinned_refs = await self._build_pinned_refs(agent)
@@ -493,9 +498,10 @@ class AgentVersionService:
             detail["warnings"] = publish_warnings
         return detail
 
-    async def list_versions(self, agent_id: uuid.UUID) -> list[dict[str, Any]]:
+    async def list_versions(self, agent_id: uuid.UUID, auth_context: AuthContext | None = None) -> list[dict[str, Any]]:
         """List an agent's versions, newest first, with publish flags."""
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.VIEWER)
         result = await self.db.execute(
             select(AgentVersionModel)
             .where(
@@ -512,9 +518,11 @@ class AgentVersionService:
         version: int,
         *,
         include_snapshot: bool = False,
+        auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         """Fetch one version; optionally include the full snapshot."""
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.VIEWER)
         record = await self._get_version(agent.id, version)
         if record is None:
             raise ValueError(f"Version {version} not found for agent {agent_id}")
@@ -529,12 +537,14 @@ class AgentVersionService:
         *,
         name: str | None = None,
         change_summary: str | None = None,
+        auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         """Rename a version / edit its release notes (metadata only).
 
         The snapshot content columns are never touched.
         """
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.EDITOR)
         record = await self._get_version(agent.id, version)
         if record is None:
             raise ValueError(f"Version {version} not found for agent {agent_id}")
@@ -564,17 +574,14 @@ class AgentVersionService:
         auth context; omitted contexts are reserved for trusted internal calls.
 
         Raises:
-            ValueError: If agent or version not found.
+            ValueError: If agent or version not found (including an agent
+                outside the caller's workspace).
+            WorkspaceRoleRequiredError: If the caller's role is below editor.
             AgentPublishEvaluationGateBlockedError: On a require-gate
                 rejection.
         """
         agent = await self._get_agent(agent_id)
-        if (
-            auth_context is not None
-            and not auth_context.is_system_scope
-            and (auth_context.workspace_id is None or agent.workspace_id != auth_context.workspace_id)
-        ):
-            raise ValueError(f"Agent {agent_id} not found")
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.EDITOR)
         record = await self._get_version(agent.id, version)
         if record is None:
             raise ValueError(f"Version {version} not found for agent {agent_id}")
@@ -667,21 +674,23 @@ class AgentVersionService:
         self,
         agent_id: uuid.UUID,
         *,
-        workspace_id: uuid.UUID | None = None,
-        is_system_scope: bool = False,
+        auth_context: AuthContext | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> dict[str, Any]:
         """List append-only publication receipts for an agent, newest first.
 
-        Pure snapshot reads — the gate is never recomputed. Missing workspace
-        identity fails closed unless the caller is explicitly system-scoped.
+        Pure snapshot reads — the gate is never recomputed. The shared
+        access boundary applies: cross-workspace agents surface as not
+        found, and the caller needs at least viewer role in the agent's
+        workspace (only explicit system scope crosses workspaces). Unlike
+        legacy lifecycle calls, this query has always required an explicit
+        workspace identity; omitted context must keep failing closed.
         """
-        if not is_system_scope and workspace_id is None:
+        if auth_context is None:
             raise ValueError(f"Agent {agent_id} not found")
         agent = await self._get_agent(agent_id)
-        if not is_system_scope and agent.workspace_id != workspace_id:
-            raise ValueError(f"Agent {agent_id} not found")
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.VIEWER)
         if not 1 <= limit <= 100 or offset < 0:
             raise ValueError("Invalid publication pagination")
         base = (
@@ -706,6 +715,7 @@ class AgentVersionService:
         target_version: int,
         *,
         actor_user_id: uuid.UUID | None = None,
+        auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         """Create a new version carrying a target version's frozen content.
 
@@ -713,6 +723,7 @@ class AgentVersionService:
         version must be published to go live.
         """
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.EDITOR)
         target = await self._get_version(agent.id, target_version)
         if target is None:
             raise ValueError(f"Version {target_version} not found for agent {agent_id}")
@@ -749,9 +760,12 @@ class AgentVersionService:
         )
         return self._version_detail(version, agent.published_version)
 
-    async def diff_versions(self, agent_id: uuid.UUID, v1: int, v2: int) -> dict[str, Any]:
+    async def diff_versions(
+        self, agent_id: uuid.UUID, v1: int, v2: int, auth_context: AuthContext | None = None
+    ) -> dict[str, Any]:
         """Compare two versions' snapshots (own config + reference changes)."""
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.VIEWER)
         ver1 = await self._get_version(agent.id, v1)
         if ver1 is None:
             raise ValueError(f"Version {v1} not found for agent {agent_id}")
@@ -783,13 +797,14 @@ class AgentVersionService:
 
         return {"v1": v1, "v2": v2, "identical": identical, "summary": summary, "details": details}
 
-    async def delete_version(self, agent_id: uuid.UUID, version: int) -> None:
+    async def delete_version(self, agent_id: uuid.UUID, version: int, auth_context: AuthContext | None = None) -> None:
         """Soft-delete a version, unless a constraint forbids it.
 
         Refused: the currently published version, and any version a
         channel pins in ``pinned`` bind mode.
         """
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.EDITOR)
         record = await self._get_version(agent.id, version)
         if record is None:
             raise ValueError(f"Version {version} not found for agent {agent_id}")
@@ -861,7 +876,7 @@ class AgentVersionService:
 
     # --- status / drift ------------------------------------------------------
 
-    async def get_version_status(self, agent_id: uuid.UUID) -> dict[str, Any]:
+    async def get_version_status(self, agent_id: uuid.UUID, auth_context: AuthContext | None = None) -> dict[str, Any]:
         """Badge state: latest version, published pointer, dirty flag.
 
         ``has_uncommitted_changes`` compares the live row's content hash
@@ -870,6 +885,7 @@ class AgentVersionService:
         exists.
         """
         agent = await self._get_agent(agent_id)
+        self._ensure_access(agent, auth_context, minimum_role=WorkspaceRole.VIEWER)
         latest = await self.db.execute(
             select(func.max(AgentVersionModel.version)).where(
                 AgentVersionModel.agent_id == agent.id,
@@ -888,7 +904,9 @@ class AgentVersionService:
             "has_uncommitted_changes": has_changes,
         }
 
-    async def version_drift(self, agent_id: uuid.UUID, version: int) -> dict[str, Any]:
+    async def version_drift(
+        self, agent_id: uuid.UUID, version: int, auth_context: AuthContext | None = None
+    ) -> dict[str, Any]:
         """Report manifest entries whose live content differs from the snapshot.
 
         Knowledge-base entries (``content_hash=None``) are skipped —
@@ -897,9 +915,10 @@ class AgentVersionService:
         content, so there is nothing to drift. Entries without a
         ``version`` field (legacy snapshots) resolve as unpinned.
         """
-        record = await self.get_version(agent_id, version, include_snapshot=True)
+        record = await self.get_version(agent_id, version, include_snapshot=True, auth_context=auth_context)
         drifted: list[dict[str, Any]] = []
-        live_manifest = await self._build_ref_manifest(await self._get_agent(agent_id))
+        agent = await self._get_agent(agent_id)
+        live_manifest = await self._build_ref_manifest(agent)
         live_by_key = {(entry["resource_type"], str(entry["resource_id"])): entry for entry in live_manifest}
         for entry in record["ref_manifest"]:
             if entry.get("content_hash") is None:
@@ -951,6 +970,33 @@ class AgentVersionService:
         if agent is None:
             raise ValueError(f"Agent {agent_id} not found")
         return agent
+
+    def _ensure_access(
+        self,
+        agent: AgentModel,
+        auth_context: AuthContext | None,
+        *,
+        minimum_role: WorkspaceRole,
+    ) -> None:
+        """Enforce the lifecycle access boundary: workspace ownership, then role.
+
+        A ``None`` context is the trusted-internal path (runtime resolution,
+        direct service calls from jobs) and skips both checks — REST callers
+        never qualify because the API layer always passes the request's
+        ``AuthContext``. Non-system identities outside the agent's workspace
+        (or without one) raise the same not-found ``ValueError`` as a missing
+        agent, so existence is never disclosed; same-workspace identities
+        below ``minimum_role`` raise ``WorkspaceRoleRequiredError`` (the API
+        layer maps it to 403). Ownership is checked first so a cross-workspace
+        caller sees not-found, not a role denial that would reveal existence.
+        """
+        if auth_context is None:
+            return
+        if not auth_context.is_system_scope and (
+            auth_context.workspace_id is None or agent.workspace_id != auth_context.workspace_id
+        ):
+            raise ValueError(f"Agent {agent.id} not found")
+        ensure_workspace_role(auth_context, minimum_role)
 
     async def _get_version(self, agent_id: uuid.UUID, version: int) -> AgentVersionModel | None:
         result = await self.db.execute(

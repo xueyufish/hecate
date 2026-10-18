@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import WorkspaceRoleRequiredError, get_auth_context
 from hecate.models.agent_version import (
     AgentVersionCommitSchema,
     AgentVersionDiffSchema,
@@ -52,6 +52,13 @@ def _not_found(exc: ValueError) -> HTTPException:
     )
 
 
+def _forbidden(exc: WorkspaceRoleRequiredError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"error": {"code": "FORBIDDEN", "message": exc.message, "details": None}},
+    )
+
+
 @router.get("/agents/{agent_id}/versions")
 async def list_agent_versions(
     agent_id: uuid.UUID,
@@ -60,9 +67,11 @@ async def list_agent_versions(
 ) -> dict:
     """List an agent's versions, newest first."""
     try:
-        items = await AgentVersionService(db).list_versions(agent_id)
+        items = await AgentVersionService(db).list_versions(agent_id, auth_context=ctx)
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     return {"items": items, "total": len(items)}
 
 
@@ -80,9 +89,12 @@ async def commit_agent_version(
             name=body.name,
             change_summary=body.change_summary,
             actor_user_id=ctx.user_id,
+            auth_context=ctx,
         )
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
 
 @router.get("/agents/{agent_id}/versions/{version}")
@@ -94,9 +106,11 @@ async def get_agent_version(
 ) -> dict:
     """Fetch one version including its full snapshot."""
     try:
-        return await AgentVersionService(db).get_version(agent_id, version, include_snapshot=True)
+        return await AgentVersionService(db).get_version(agent_id, version, include_snapshot=True, auth_context=ctx)
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
 
 @router.get("/agents/{agent_id}/versions/{version}/skill-closure")
@@ -114,9 +128,11 @@ async def get_agent_version_skill_closure(
     closure walk that are not in ``agent.skills`` directly.
     """
     try:
-        detail = await AgentVersionService(db).get_version(agent_id, version, include_snapshot=True)
+        detail = await AgentVersionService(db).get_version(agent_id, version, include_snapshot=True, auth_context=ctx)
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     manifest = detail.get("ref_manifest") or []
     skill_entries = [e for e in manifest if isinstance(e, dict) and e.get("resource_type") == "skill"]
     return {
@@ -141,9 +157,12 @@ async def update_agent_version(
             version,
             name=body.name,
             change_summary=body.change_summary,
+            auth_context=ctx,
         )
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
 
 @router.delete("/agents/{agent_id}/versions/{version}", status_code=status.HTTP_204_NO_CONTENT)
@@ -156,7 +175,9 @@ async def delete_agent_version(
     """Delete a version; published and channel-pinned versions are refused."""
     service = AgentVersionService(db)
     try:
-        await service.delete_version(agent_id, version)
+        await service.delete_version(agent_id, version, auth_context=ctx)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     except ValueError as e:
         message = str(e)
         if "published" in message:
@@ -181,9 +202,11 @@ async def get_agent_version_drift(
 ) -> dict:
     """Report manifest entries whose live content differs from the snapshot."""
     try:
-        return await AgentVersionService(db).version_drift(agent_id, version)
+        return await AgentVersionService(db).version_drift(agent_id, version, auth_context=ctx)
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
 
 @router.get("/agents/{agent_id}/publications")
@@ -204,13 +227,14 @@ async def list_agent_publications(
     try:
         return await AgentVersionService(db).list_publications(
             agent_id,
-            workspace_id=ctx.workspace_id,
-            is_system_scope=ctx.is_system_scope,
+            auth_context=ctx,
             limit=limit,
             offset=offset,
         )
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
 
 @router.post("/agents/{agent_id}/publish/{version}")
@@ -247,6 +271,8 @@ async def publish_agent_version(
                 }
             },
         ) from exc
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     except ValueError as e:
         raise _not_found(e) from e
 
@@ -260,11 +286,13 @@ async def get_published_agent_version(
     """Fetch the currently published version."""
     service = AgentVersionService(db)
     try:
-        status_data = await service.get_version_status(agent_id)
+        status_data = await service.get_version_status(agent_id, auth_context=ctx)
         published = status_data["published_version"]
         if published is None:
             raise ValueError(f"Agent {agent_id} has no published version")
-        return await service.get_version(agent_id, published)
+        return await service.get_version(agent_id, published, auth_context=ctx)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     except ValueError as e:
         message = str(e)
         code = "NO_PUBLISHED_VERSION" if "no published version" in message else "NOT_FOUND"
@@ -283,9 +311,13 @@ async def rollback_agent_version(
 ) -> dict:
     """Restore a target version's content as a new version (pointer untouched)."""
     try:
-        return await AgentVersionService(db).rollback_to_version(agent_id, version, actor_user_id=ctx.user_id)
+        return await AgentVersionService(db).rollback_to_version(
+            agent_id, version, actor_user_id=ctx.user_id, auth_context=ctx
+        )
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
 
 @router.get("/agents/{agent_id}/diff", response_model=AgentVersionDiffSchema)
@@ -298,9 +330,11 @@ async def diff_agent_versions(
 ) -> dict:
     """Compare two versions' snapshots (own config + reference changes)."""
     try:
-        return await AgentVersionService(db).diff_versions(agent_id, v1, v2)
+        return await AgentVersionService(db).diff_versions(agent_id, v1, v2, auth_context=ctx)
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
 
 @router.get("/agents/{agent_id}/version-status", response_model=AgentVersionStatusSchema)
@@ -311,6 +345,8 @@ async def get_agent_version_status(
 ) -> dict:
     """Badge state: latest version, published pointer, uncommitted-changes flag."""
     try:
-        return await AgentVersionService(db).get_version_status(agent_id)
+        return await AgentVersionService(db).get_version_status(agent_id, auth_context=ctx)
     except ValueError as e:
         raise _not_found(e) from e
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
