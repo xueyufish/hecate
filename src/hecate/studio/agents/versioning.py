@@ -975,11 +975,64 @@ class AgentVersionService:
                 },
             )
         )
-        if config.block_on_regression and baseline_run is None:
-            for signal in result.signals:
-                if signal.name == "block_on_regression":
+        from hecate.ops.evaluation.evidence import load_scoped_evidence
+        from hecate.ops.evaluation.publish_gate import REGRESSION_DELTA
+
+        evidence = await load_scoped_evidence(self.db, candidate_run)
+        result.signals.append(evidence.signal)
+        result.has_deterministic_scores = bool(evidence.scores)
+        result.deterministic_metric_averages = evidence.averages
+        result.deterministic_pass_rate = None
+        # Apply the shared scoring rules to exactly the active frozen pairs.
+        # Exemptions and out-of-scope rows must not change the quality verdict.
+        threshold = (candidate_run.summary or {}).get("threshold") if candidate_run else None
+        for signal in result.signals:
+            if signal.name == "min_pass_rate":
+                if not evidence.scores:
                     signal.passed = False
-                    signal.detail["reason"] = "missing_matching_baseline"
+                    signal.detail = {"reason": "no_deterministic_scores", "min_pass_rate": config.min_pass_rate}
+                elif threshold is not None:
+                    rate = evidence.pass_rate(float(threshold))
+                    result.deterministic_pass_rate = rate
+                    signal.passed = rate >= config.min_pass_rate
+                    signal.detail = {
+                        "min_pass_rate": config.min_pass_rate,
+                        "threshold": float(threshold),
+                        "deterministic_pass_rate": rate,
+                    }
+        if config.block_on_regression:
+            baseline = await load_scoped_evidence(self.db, baseline_run)
+            for signal in result.signals:
+                if signal.name != "block_on_regression":
+                    continue
+                if not evidence.signal.passed:
+                    signal.passed = False
+                    signal.detail = {"reason": "incomplete_candidate_evidence"}
+                elif not baseline.signal.passed:
+                    signal.passed = False
+                    signal.detail = {
+                        "reason": "missing_matching_baseline"
+                        if baseline_run is None
+                        else "incomplete_baseline_evidence",
+                        "coverage": baseline.signal.detail,
+                    }
+                elif evidence.metrics != baseline.metrics:
+                    signal.passed = False
+                    signal.detail = {"reason": "incompatible_evaluation_metrics"}
+                else:
+                    averages = evidence.averages
+                    regressions = [
+                        {
+                            "metric_name": metric,
+                            "baseline": value,
+                            "candidate": averages[metric],
+                            "drop": value - averages[metric],
+                        }
+                        for metric, value in baseline.averages.items()
+                        if averages[metric] < value * (1.0 - REGRESSION_DELTA)
+                    ]
+                    signal.passed = not regressions
+                    signal.detail = {"regressions": regressions}
         return result
 
     @staticmethod

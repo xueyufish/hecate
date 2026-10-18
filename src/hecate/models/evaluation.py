@@ -186,6 +186,14 @@ class EvaluationRunModel(BaseModel):
     - **dataset_version_id** — nullable link to the named dataset version
       the run was pinned to (7.3b); ``NULL`` for runs that froze the live
       dataset.
+    - **evaluation_scope** — frozen evidence scope for version-bound runs
+      (step11): schema version, actual evaluated item ids, supported builtin
+      deterministic metric names, known-bad exempted item ids and the
+      dataset snapshot hash — written before answer generation and never
+      revised. The publish gate checks coverage against exactly this
+      scope. ``NULL`` for live (unbound) runs and runs bound before scope
+      freezing, which the gate reports as unverifiable rather than
+      backfilling.
     - **repetitions** — number of times each item was executed; ``>=1``.
       When ``>1`` the run summary also exposes ``consistency_rate``.
     """
@@ -199,6 +207,7 @@ class EvaluationRunModel(BaseModel):
     agent_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     agent_config_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     agent_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    evaluation_scope: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     evaluator_configs: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=RunStatus.PENDING.value)
     summary: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
@@ -640,6 +649,7 @@ class EvaluationRunReadSchema(PydanticBase):
     agent_id: uuid.UUID | None = None
     agent_version: int | None = None
     agent_config_hash: str | None = None
+    evaluation_scope: dict | None = None
     evaluator_configs: list
     status: str
     summary: dict | None = None

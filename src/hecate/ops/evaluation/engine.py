@@ -258,6 +258,22 @@ class EvaluationEngine:
             else:
                 exempted_item_ids = {str(it.id) for it in items if it.known_bad}
 
+            # step11: freeze the evidence scope for version-bound runs before
+            # any answer generation — the publish gate checks coverage against
+            # exactly this set, so later task/dataset/draft edits cannot move
+            # it. Live (unbound) runs keep their legacy no-scope behavior.
+            if run.agent_version is not None:
+                from hecate.ops.evaluation.evidence import freeze_evaluation_scope
+
+                scope = freeze_evaluation_scope(
+                    items, evaluators, exempted_item_ids, (run.dataset_snapshot or {}).get("hash")
+                )
+                if run.evaluation_scope is not None and run.evaluation_scope != scope:
+                    raise ValueError("evaluation_scope_conflict: cannot replace a frozen evaluation scope")
+                if run.evaluation_scope is None:
+                    run.evaluation_scope = scope
+                await self.db.flush()
+
             concurrency = max(1, max_in_flight) if answer_source == AnswerSource.WORKFLOW else 1
             semaphore = asyncio.Semaphore(concurrency) if concurrency > 1 else None
 
@@ -687,6 +703,7 @@ class EvaluationEngine:
                     value=score.value,
                     reasoning=score.reasoning,
                     source=score.source,
+                    workspace_id=run.workspace_id,
                 )
             )
 
