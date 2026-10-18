@@ -50,6 +50,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CORE_RUNTIME_MODULES: tuple[str, ...] = (
     "hecate_runtime.types",
     "hecate_runtime.ports",
+    "hecate_runtime.tool_call_executor",
+    "hecate_runtime.sandbox_router",
     "hecate_runtime.eventstore",
     "hecate_runtime.context",
     "hecate_runtime.pregel",

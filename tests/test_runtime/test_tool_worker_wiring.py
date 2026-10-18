@@ -277,7 +277,7 @@ async def test_check_access_threads_tenant_attribution_to_policy():
             captured["context"] = context
             return AccessDecision.EXECUTE
 
-    worker._access_policy = _SpyPolicy()
+    worker._executor._access_policy = _SpyPolicy()
 
     snapshot = await _messages_with_tool_call("tc-attr", "bash", {"command": "ls"})
     exec_ctx = {

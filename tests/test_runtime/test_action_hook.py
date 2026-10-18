@@ -382,3 +382,66 @@ async def test_platform_assembly_wires_sql_ledger_and_backfills_real_result(tmp_
         assert actions[0]["result_payload"] == {"executed": True}
     finally:
         durable.dispose()
+
+
+@pytest.mark.parametrize("use_worker", [False, True], ids=["executor", "worker"])
+@pytest.mark.parametrize("lose_outcome", [False, True], ids=["recorded", "receipt-lost"])
+async def test_shared_tool_call_recovers_sql_ledger_after_store_recreation(tmp_path, use_worker, lose_outcome) -> None:
+    """A new executor and SQL store recover receipts without graph history."""
+    from hecate_durable.runtime_hook import SqlActionLedgerHook
+    from hecate_durable.storage import SqlDurableStore
+    from hecate_runtime.tool_call_executor import ToolCallExecutor
+
+    from hecate.contracts.execution.references import run_ref, task_ref
+
+    class StubLostOutcomeHook(SqlActionLedgerHook):
+        async def record_outcome(self, **kwargs) -> None:
+            """Simulate the durable receipt write failing after dispatch."""
+            raise OSError("receipt unavailable")
+
+    url = f"sqlite:///{tmp_path / 'shared-actions.db'}"
+    task, run = task_ref("platform", "task"), run_ref("platform", "run")
+    session_id, port = uuid.uuid4(), _StubPort()
+    content = None
+    for attempt in range(2):
+        durable = SqlDurableStore(url)
+        try:
+            if attempt == 0:
+                durable.create_schema()
+            hook_class = StubLostOutcomeHook if lose_outcome and attempt == 0 else SqlActionLedgerHook
+            hook = hook_class(durable, task_ref=task, run_ref=run)
+            component = (
+                ToolWorker(port=port, action_hook=hook) if use_worker else ToolCallExecutor(port=port, action_hook=hook)
+            )
+
+            async def invoke(component=component):
+                if isinstance(component, ToolCallExecutor):
+                    return await component.execute_call(
+                        {"id": "call-sql", "name": "write_file", "arguments": {"path": "f"}},
+                        {},
+                        {"session_id": session_id},
+                        "standalone",
+                    )
+                return _last_result(
+                    await component.execute(
+                        "tools",
+                        {},
+                        _payload("call-sql", "write_file", {"path": "f"}),
+                        {"session_id": session_id},
+                    )
+                )
+
+            if lose_outcome and attempt == 1:
+                with pytest.raises(ExecutionStoppedError, match="needs_review"):
+                    await invoke()
+            else:
+                content = (await invoke())["content"]
+                assert content in (str({"executed": True}), json.dumps({"executed": True}))
+            actions = durable.list_run_actions(run)
+            assert len(actions) == 1
+            assert actions[0]["tool_call_id"] == "call-sql"
+            if not lose_outcome:
+                assert actions[0]["result_payload"] == {"executed": True}
+        finally:
+            durable.dispose()
+    assert len(port.calls) == 1

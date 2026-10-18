@@ -106,9 +106,10 @@ def test_engine_tool_worker_receives_full_guardrail_bundle():
         assert candidates, "composite worker must own a ToolWorker"
         engine_tool_worker = candidates[0]
 
-    assert engine_tool_worker._middleware_chains is chains
-    assert engine_tool_worker._denial_tracker is tracker
+    assert engine_tool_worker._executor._middleware_chains is chains
+    assert engine_tool_worker._executor._denial_tracker is tracker
     assert engine_tool_worker._event_store is store
+    assert engine_tool_worker._executor._event_store is store
 
 
 # ---------------------------------------------------------------------------
