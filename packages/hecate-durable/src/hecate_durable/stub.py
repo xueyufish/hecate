@@ -33,7 +33,7 @@ from .contracts.durable import (
     validate_command_transition,
     validate_task_transition,
 )
-from .contracts.references import BackendRef
+from .contracts.references import BackendRef, RefKind, require_kind
 
 
 class InMemoryDurableTaskStore(DurableTaskStore):
@@ -245,6 +245,30 @@ class InMemoryControlCommandRecorder(ControlCommandRecorder):
                 for record in self._commands.values()
                 if record.state is CommandState.REQUESTED and record.extra.get("workspace_id") == str(workspace_id)
             ]
+
+    def list_task_commands(
+        self,
+        workspace_id: str,
+        task_ref: BackendRef,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ControlCommandRecord], int]:
+        """Read-only page of one task's receipts, matching the SQL store."""
+
+        require_kind(task_ref, RefKind.TASK)
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("Invalid command pagination")
+
+        with self._lock:
+            matching = [
+                record
+                for record in self._commands.values()
+                if record.extra.get("workspace_id") == str(workspace_id)
+                and record.task_ref.issuer_domain == task_ref.issuer_domain
+                and record.task_ref.id == task_ref.id
+            ]
+            matching.sort(key=lambda r: (r.issued_at, r.command_id), reverse=True)
+            return matching[offset : offset + limit], len(matching)
 
 
 class InMemoryActionLedger(ActionLedger):

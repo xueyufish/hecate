@@ -16,6 +16,8 @@ Task lifecycle surface over :class:`TaskControlService`:
   ``GET /api/commands/{command_id}`` — control-command receipts. An HTTP
   success here records a request; it never claims the command was
   applied.
+- ``GET /api/tasks/{id}/commands`` — read-only paged receipts of one
+  task's commands, recorded states verbatim (no lazy expiry here).
 - ``GET /api/reconciliation/pending`` — the pending-reconciliation view.
 
 This module is protocol adaptation only (auth context, request/response
@@ -285,6 +287,32 @@ async def issue_command(task_id: uuid.UUID, body: CommandRequest, service: Servi
     return await _issue(ctx, service, task_id, body.kind, body)
 
 
+def _command_summary(record: Any) -> dict[str, Any]:
+    """Use the shared whitelist for the existing single-command response."""
+    from hecate.execution.task_control import command_receipt_summary
+
+    return command_receipt_summary(record)
+
+
+@router.get("/{task_id}/commands")
+async def list_task_commands(
+    task_id: uuid.UUID,
+    service: ServiceDep,
+    ctx: AuthDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    """Read-only page of one task's command receipts, newest first.
+
+    Recorded states verbatim — the list never advances a command, never
+    triggers execution and never performs the single-read lazy expiry.
+    """
+    try:
+        return await service.list_task_commands(_workspace_id(ctx), task_id, limit=limit, offset=offset)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+
+
 async def _issue(
     ctx: AuthContext,
     service: TaskControlService,
@@ -410,17 +438,7 @@ async def get_command(command_id: str, service: ServiceDep, ctx: AuthDep) -> dic
         record = await service.get_command(_workspace_id(ctx), command_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
-    return {
-        "command_id": record.command_id,
-        "kind": record.kind.value,
-        "state": record.state.value,
-        "issued_at": record.issued_at,
-        "issuer": record.issuer,
-        "task_ref": record.task_ref.to_dict(),
-        "run_ref": record.run_ref.to_dict() if record.run_ref is not None else None,
-        "expires_at": record.expires_at,
-        "expected_revision": record.expected_revision,
-    }
+    return _command_summary(record)
 
 
 @reconciliation_router.get("/pending")
