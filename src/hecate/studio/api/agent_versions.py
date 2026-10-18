@@ -186,6 +186,33 @@ async def get_agent_version_drift(
         raise _not_found(e) from e
 
 
+@router.get("/agents/{agent_id}/publications")
+async def list_agent_publications(
+    agent_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> dict:
+    """List append-only publication receipts, newest first.
+
+    Read-only snapshots of the evidence each publish consumed at the time —
+    the gate is never recomputed here. Agents outside the caller's
+    workspace surface as not found. Historical publications made before
+    receipts existed have no records and are never backfilled.
+    """
+    try:
+        return await AgentVersionService(db).list_publications(
+            agent_id,
+            workspace_id=ctx.workspace_id,
+            is_system_scope=ctx.is_system_scope,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as e:
+        raise _not_found(e) from e
+
+
 @router.post("/agents/{agent_id}/publish/{version}")
 async def publish_agent_version(
     agent_id: uuid.UUID,
@@ -199,12 +226,16 @@ async def publish_agent_version(
     The optional JSON body ``{"force": true}`` overrides a require-mode
     evaluation gate; the bypass is recorded in the audit log. A rejected
     publish returns 409 ``EVALUATION_GATE_BLOCKED`` with the gate
-    verdict.
+    verdict. A successful publish persists a publication receipt
+    (candidate/baseline run identity, gate snapshots, outcome) in the same
+    transaction as the pointer move.
     """
     service = AgentVersionService(db)
     force = bool((body or {}).get("force") or False)
     try:
-        return await service.publish_version(agent_id, version, force=force, actor_user_id=ctx.user_id)
+        return await service.publish_version(
+            agent_id, version, force=force, actor_user_id=ctx.user_id, auth_context=ctx
+        )
     except AgentPublishEvaluationGateBlockedError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

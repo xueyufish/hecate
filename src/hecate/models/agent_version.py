@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import ForeignKey, Index, Integer, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -167,3 +167,90 @@ class AgentVersionDriftSchema(PydanticBase):
     agent_id: uuid.UUID
     version: int
     drifted: list[dict[str, Any]]
+
+
+class AgentPublicationModel(BaseModel):
+    """ORM model for append-only agent publication receipts (step11).
+
+    One row per successful publish: the publication-time evidence identity
+    (which candidate/baseline evaluation runs the gate actually consumed,
+    anchored by their ``agent_config_hash``), the gate configuration and
+    report snapshots, and the outcome. The record is written in the same
+    transaction as the ``agents.published_version`` pointer move;
+    each successful publish appends a receipt, including republication.
+
+    Key fields:
+
+    - **agent_id** / **version** — what was published.
+    - **agent_config_hash** — aligns with the version's ``content_hash``
+      so evidence identity survives run soft-deletion.
+    - **candidate_run_id** / **candidate_run_hash** — the gate's actual
+      candidate evaluation run and its config hash (NULL when the gate was
+      off).
+    - **baseline_run_id** / **baseline_run_hash** — the baseline run used
+      for regression comparison (NULL when no published version existed or
+      regression comparison was disabled or the gate was off).
+    - **gate_config** — the agent's ``evaluation_gate`` snapshot at
+      publish time (NULL when unconfigured).
+    - **gate_report** — the rendered gate report snapshot (a minimal
+      ``mode=off`` report when disabled; never carries "evaluation passed"
+      semantics for ``gate_off`` outcomes).
+    - **outcome** — closed enum: ``passed`` / ``warn_passed`` /
+      ``force_bypassed`` / ``gate_off``. Enforced by a database constraint
+      and the read schema.
+
+    Append-only by design: later task, gate-config or evaluation changes
+    never rewrite a receipt; rollback does not create one (the pointer did
+    not move). Publications made before this model existed have no receipt
+    and are never backfilled.
+    """
+
+    __tablename__ = "agent_publications"
+
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agents.id"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    agent_config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    candidate_run_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    candidate_run_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    baseline_run_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    gate_config: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    gate_report: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    operator_user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('passed', 'warn_passed', 'force_bypassed', 'gate_off')",
+            name="ck_agent_publications_outcome",
+        ),
+        Index("idx_agent_publications_agent", "agent_id", "created_at"),
+        Index("idx_agent_publications_workspace", "workspace_id", "agent_id"),
+    )
+
+
+class AgentPublicationReadSchema(PydanticBase):
+    """Whitelisted publication receipt for API reads."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    agent_id: uuid.UUID
+    version: int
+    agent_config_hash: str
+    candidate_run_id: uuid.UUID | None = None
+    candidate_run_hash: str | None = None
+    baseline_run_id: uuid.UUID | None = None
+    baseline_run_hash: str | None = None
+    gate_config: dict[str, Any] | None = None
+    gate_report: dict[str, Any] | None = None
+    outcome: Literal["passed", "warn_passed", "force_bypassed", "gate_off"]
+    operator_user_id: uuid.UUID | None = None
+    created_at: datetime
