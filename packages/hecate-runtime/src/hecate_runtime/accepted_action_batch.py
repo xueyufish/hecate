@@ -72,11 +72,21 @@ class AcceptedActionBatch:
         ownership: DecisionOwnership | None = None,
         context: dict[str, Any] | None = None,
         execution_context: dict[str, Any] | None = None,
+        expected_decision_digest: str | None = None,
     ) -> AcceptedActionBatchReport:
-        """Dispatch the committed actions in order until a terminal outcome."""
+        """Dispatch the committed actions in order until a terminal outcome.
+
+        ``expected_decision_digest`` pins the record an upstream phase
+        accepted (e.g. the decision commit in a composed turn): a record
+        swapped in between that acceptance and this load is a conflict
+        raised before any dispatch, not new facts. When omitted, the
+        digest is pinned from the first verified load as before.
+        """
         if not isinstance(run_ref, RunRef):
             raise DecisionValidationError("run_ref must be a RunRef")
         record = await load_verified_record(self._store, run_ref, decision_step_id)
+        if expected_decision_digest is not None and record.content_digest != expected_decision_digest:
+            raise DecisionConflictError(decision_step_id, expected_decision_digest, record.content_digest or "")
         outcomes: list[AcceptedActionOutcome] = []
         for action in record.actions:
             try:
