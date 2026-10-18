@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import TasksPage from "@/app/(dashboard)/ops-center/tasks/page";
 import TaskDetailPage from "@/app/(dashboard)/ops-center/tasks/[id]/page";
+import type { RunEventsPage } from "@/lib/run-event-types";
 import type { RunActionsResponse, RunSummary, TaskDetail, TaskListResponse } from "@/lib/task-types";
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn() }));
@@ -47,6 +48,10 @@ function taskList(goal: string, total = 21): TaskListResponse {
   return {
     items: [{ task_id: "task-1", goal, lifecycle_state: "unrecorded", created_at: null }], total,
   };
+}
+
+function emptyEvents(): RunEventsPage {
+  return { events: [], next_cursor: null, has_more: false };
 }
 
 beforeEach(() => {
@@ -108,6 +113,7 @@ describe("task detail page", () => {
       if (path === "/api/tasks/task-1") return Promise.resolve(detail());
       if (path === "/api/runs/run-1/actions") return Promise.resolve(actions("run-1", "older-action"));
       if (path === "/api/runs/run-2/actions") return Promise.resolve(actions("run-2", "latest-action"));
+      if (path.startsWith("/api/runs/") && path.endsWith("/events")) return Promise.resolve(emptyEvents());
       throw new Error(`Unexpected request: ${path}`);
     });
     render(<TaskDetailPage />);
@@ -125,16 +131,25 @@ describe("task detail page", () => {
   });
 
   it("shows no Run without requesting actions, then discovers a new Run on refresh", async () => {
-    apiMock.get
-      .mockResolvedValueOnce(detail("task-1", []))
-      .mockResolvedValueOnce(detail("task-1", [run("run-1", 1)]))
-      .mockResolvedValueOnce(actions("run-1", "first-action"));
+    let taskRequests = 0;
+    apiMock.get.mockImplementation((path: string) => {
+      if (path === "/api/tasks/task-1") {
+        taskRequests += 1;
+        return Promise.resolve(detail("task-1", taskRequests === 1 ? [] : [run("run-1", 1)]));
+      }
+      if (path === "/api/runs/run-1/actions") return Promise.resolve(actions("run-1", "first-action"));
+      if (path === "/api/runs/run-1/events") return Promise.resolve(emptyEvents());
+      throw new Error(`Unexpected request: ${path}`);
+    });
     render(<TaskDetailPage />);
     await screen.findByTestId("runs-empty");
     expect(apiMock.get).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("actions-no-run")).toBeInTheDocument();
+    expect(screen.getByTestId("events-no-run")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "刷新任务" }));
     expect(await screen.findByText("first-action")).toBeInTheDocument();
+    expect(await screen.findByTestId("run-events-empty")).toBeInTheDocument();
+    expect(apiMock.get).toHaveBeenCalledWith("/api/runs/run-1/events");
   });
 
   it("rejects a previous task response after route navigation", async () => {
@@ -174,5 +189,20 @@ describe("task detail page", () => {
     expect(screen.getByRole("link", { name: /返回任务列表/ })).toHaveAttribute("href", "/ops-center/tasks");
     await userEvent.click(screen.getByRole("button", { name: "重试" }));
     await waitFor(() => expect(screen.getByTestId("runs-empty")).toBeInTheDocument());
+  });
+
+  it("keeps the actions panel working when the events endpoint fails", async () => {
+    apiMock.get.mockImplementation((path: string) => {
+      if (path === "/api/tasks/task-1") return Promise.resolve(detail("task-1", [run("run-1", 1)]));
+      if (path === "/api/runs/run-1/actions") return Promise.resolve(actions("run-1", "isolated-action"));
+      if (path.startsWith("/api/runs/") && path.endsWith("/events")) {
+        return Promise.reject({ detail: { error: { code: "EVENTS_DOWN", message: "events unavailable" } } });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    render(<TaskDetailPage />);
+    expect(await screen.findByTestId("run-events-error")).toHaveTextContent("EVENTS_DOWN");
+    expect(await screen.findByText("isolated-action")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeEnabled();
   });
 });

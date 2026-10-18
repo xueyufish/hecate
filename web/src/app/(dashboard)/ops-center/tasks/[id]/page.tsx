@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { RunActionsPanel } from "@/components/tasks/run-actions-panel";
+import { RunEventsPanel } from "@/components/tasks/run-events-panel";
 import { LifecycleBadge } from "@/components/tasks/state-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -129,6 +130,15 @@ export default function TaskDetailPage() {
           <RunActionsPanel runId={selectedRunId} />
         ) : (
           <p data-testid="actions-no-run">暂无 Run，无动作可查</p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <h2 className="font-medium">事件</h2>
+        {selectedRunId ? (
+          <RunEventsPanel runId={selectedRunId} />
+        ) : (
+          <p data-testid="events-no-run">暂无 Run，无事件可查</p>
         )}
       </div>
 
