@@ -9,6 +9,7 @@ from typing import Any, Literal
 from hecate_runtime.accepted_decision import (
     AcceptedDecisionRecord,
     AcceptedDecisionStore,
+    DecisionConflictError,
     DecisionOwnership,
     DecisionStoreUnavailableError,
     DecisionValidationError,
@@ -58,6 +59,26 @@ def execution_id_for_action(run_ref: RunRef, decision_step_id: str, action_key: 
     )
 
 
+async def load_verified_record(
+    store: AcceptedDecisionStore, run_ref: RunRef, decision_step_id: str
+) -> AcceptedDecisionRecord:
+    """Read a committed record and verify its identity; shared by both dispatch paths.
+
+    A missing decision raises :class:`AcceptedActionLookupError`; a corrupt,
+    uncommitted or foreign-identity record raises
+    :class:`DecisionStoreUnavailableError` — store unavailability is never
+    treated as a miss.
+    """
+    if not isinstance(run_ref, RunRef):
+        raise DecisionValidationError("run_ref must be a RunRef")
+    if not isinstance(decision_step_id, str) or not decision_step_id.strip() or len(decision_step_id) > 256:
+        raise DecisionValidationError("decision_step_id must be nonblank and at most 256 characters")
+    record = await store.lookup(run_ref, decision_step_id)
+    if record is None:
+        raise AcceptedActionLookupError("no_accepted_decision", "no accepted decision for the requested step")
+    return AcceptedActionStep._verified(record, run_ref, decision_step_id)
+
+
 class AcceptedActionStep:
     """Load an original action and execute it with a bound, fenced ledger.
 
@@ -80,17 +101,22 @@ class AcceptedActionStep:
         ownership: DecisionOwnership | None = None,
         context: dict[str, Any] | None = None,
         execution_context: dict[str, Any] | None = None,
+        expected_decision_digest: str | None = None,
     ) -> AcceptedActionOutcome:
-        """Execute or recover the selected action; never query a model."""
+        """Execute or recover an action, optionally pinned to a batch's decision.
+
+        The optional digest prevents dispatch from substituting a different
+        valid record after a batch has fixed its original action order.
+        Existing single-action callers need not supply it.
+        """
         if not isinstance(run_ref, RunRef):
             raise DecisionValidationError("run_ref must be a RunRef")
         for value in (decision_step_id, action_key):
             if not isinstance(value, str) or not value.strip() or len(value) > 256:
                 raise DecisionValidationError("step and action keys must be nonblank and at most 256 characters")
-        record = await self._store.lookup(run_ref, decision_step_id)
-        if record is None:
-            raise AcceptedActionLookupError("no_accepted_decision", "no accepted decision for the requested step")
-        record = self._verified(record, run_ref, decision_step_id)
+        record = await load_verified_record(self._store, run_ref, decision_step_id)
+        if expected_decision_digest is not None and record.content_digest != expected_decision_digest:
+            raise DecisionConflictError(decision_step_id, expected_decision_digest, record.content_digest or "")
         action = next((item for item in record.actions if item.action_key == action_key), None)
         if action is None:
             raise AcceptedActionLookupError("no_such_action", "action is absent from the accepted decision")
