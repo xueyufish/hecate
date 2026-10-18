@@ -59,6 +59,55 @@ class SqlActionLedgerHook(ActionLedgerHook):
         self._failed_outcomes: set[str] = set()
         self._lock = asyncio.Lock()
 
+    async def validate_accepted_dispatch(
+        self, *, run_ref: RunRef, ownership: DecisionOwnership | None, execution_id: str
+    ) -> None:
+        """Bind accepted actions to this hook's Task, Run and actual lease."""
+        await asyncio.to_thread(self._validate_accepted_sync, run_ref, ownership, execution_id)
+
+    def _validate_accepted_sync(self, run_ref: RunRef, ownership: DecisionOwnership | None, execution_id: str) -> None:
+        from sqlalchemy import select
+
+        from .contracts.references import RefKind
+        from .storage.models import ActionIntentRow, TaskStateRow
+
+        if (
+            self._run_ref.kind != RefKind.RUN
+            or self._task_ref.kind != RefKind.TASK
+            or self._run_ref.issuer_domain != run_ref.issuer_domain
+            or self._run_ref.id != run_ref.run_id
+        ):
+            raise DecisionValidationError("action ledger is bound to another Run")
+        if (
+            ownership is None
+            or self._lease is None
+            or self._holder != ownership.holder
+            or self._lease.lease_key != ownership.lease_key
+            or self._lease.holder != ownership.holder
+            or self._lease.fencing_token != ownership.fence_token
+        ):
+            raise StaleDecisionFenceError("accepted-action", ownership.fence_token if ownership else -1, -1)
+        with self._store.session_factory() as session, session.begin():
+            SqlAcceptedDecisionStore(self._store)._assert_owner(session, run_ref, "accepted-action", ownership)
+            task = session.execute(
+                select(TaskStateRow).where(
+                    TaskStateRow.task_issuer == self._task_ref.issuer_domain,
+                    TaskStateRow.task_id == self._task_ref.id,
+                    TaskStateRow.run_issuer == run_ref.issuer_domain,
+                    TaskStateRow.run_id == run_ref.run_id,
+                )
+            ).scalar_one_or_none()
+            if task is None:
+                raise DecisionValidationError("action ledger Task does not own the requested Run")
+            row = session.get(ActionIntentRow, execution_id)
+            if row is not None and (
+                row.task_issuer != self._task_ref.issuer_domain
+                or row.task_id != self._task_ref.id
+                or row.run_issuer != run_ref.issuer_domain
+                or row.run_id != run_ref.run_id
+            ):
+                raise DecisionValidationError("recorded action belongs to another Task or Run")
+
     @property
     def has_failed_outcomes(self) -> bool:
         """Whether any outcome write failed (run stays pending reconciliation)."""

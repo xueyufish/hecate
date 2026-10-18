@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from hecate_runtime.accepted_decision import DecisionOwnership, DecisionValidationError, RunRef
 from hecate_runtime.eventstore import EventType
 from hecate_runtime.tool_side_effects import (
     RECEIPT_FAILED,
@@ -181,6 +182,16 @@ class ActionLedgerHook(ABC):
     history is gone (post-restart). Outcome-write failures must leave the
     ledger claimed (pending reconciliation), never fabricate a receipt.
     """
+
+    async def validate_accepted_dispatch(
+        self, *, run_ref: RunRef, ownership: DecisionOwnership | None, execution_id: str
+    ) -> None:
+        """Validate Run/Task binding and live ownership for accepted actions.
+
+        Legacy hooks keep their existing behavior. AcceptedActionStep requires
+        an implementation of this check and fails closed by default.
+        """
+        raise DecisionValidationError("ledger does not support fenced accepted-action dispatch")
 
     @abstractmethod
     async def resolve(self, *, session_id: str, execution_id: str) -> ToolExecutionResolution:
