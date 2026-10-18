@@ -153,6 +153,21 @@ def task_ref_of(task_id: uuid.UUID | str) -> BackendRef:
     return task_ref(PLATFORM_ISSUER, str(task_id))
 
 
+def command_receipt_summary(record: ControlCommandRecord) -> dict[str, Any]:
+    """Return only public command receipt fields, never control payloads."""
+    return {
+        "command_id": record.command_id,
+        "kind": record.kind.value,
+        "state": record.state.value,
+        "issued_at": record.issued_at,
+        "issuer": record.issuer,
+        "task_ref": record.task_ref.to_dict(),
+        "run_ref": record.run_ref.to_dict() if record.run_ref is not None else None,
+        "expires_at": record.expires_at,
+        "expected_revision": record.expected_revision,
+    }
+
+
 @dataclass(frozen=True)
 class SubmitResult:
     """What the platform returned for one submission (or its replay)."""
@@ -1265,6 +1280,41 @@ class TaskControlService:
         if record.state is CommandState.REQUESTED and _expired(record.expires_at):
             record = await asyncio.to_thread(self._recorder.transition, command_id, CommandState.EXPIRED)
         return record
+
+    async def list_task_commands(
+        self,
+        workspace_id: uuid.UUID,
+        task_id: uuid.UUID,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Read one visible task's command receipts without changing state.
+
+        Pure recorded facts: states come back verbatim (a lapsed
+        ``requested`` stays ``requested`` here — lazy expiry belongs to
+        the single-command read and reconciliation), and query failures
+        never become an empty successful response.
+        """
+        if not 1 <= limit <= 100 or offset < 0:
+            raise TaskControlValidationError("Invalid command pagination")
+        try:
+            task = await self._get_task(workspace_id, task_id)
+        except TaskControlNotFoundError as exc:
+            raise TaskControlNotFoundError(f"task {task_id} not found in workspace") from exc
+        try:
+            items, total = await asyncio.to_thread(
+                self._recorder.list_task_commands,
+                str(workspace_id),
+                task_ref(task.issuer_domain, str(task.id)),
+                limit,
+                offset,
+            )
+            return {"items": [command_receipt_summary(record) for record in items], "total": total}
+        except Exception as exc:
+            # Driver exceptions may contain URLs or SQL parameters; log only
+            # safe attribution and never publish the text.
+            logger.error("Command list query failed for task %s (%s)", task_id, type(exc).__name__)
+            raise TaskControlError(f"command list query failed for task {task_id}") from exc
 
     # ------------------------------------------------------------------
     # reconciliation

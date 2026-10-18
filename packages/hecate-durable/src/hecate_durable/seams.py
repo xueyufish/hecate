@@ -89,6 +89,26 @@ class ControlCommandRecorder(ABC):
     def get(self, command_id: str) -> ControlCommandRecord | None:
         """One command's record, or ``None`` when unknown."""
 
+    @abstractmethod
+    def list_task_commands(
+        self,
+        workspace_id: str,
+        task_ref: BackendRef,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ControlCommandRecord], int]:
+        """Read-only page of one task's command receipts, newest first.
+
+        Scopes by workspace AND the full task reference (issuer domain and
+        id) — never by task id alone. Ordered ``issued_at DESC,
+        command_id DESC``; returns ``(items, total)`` where ``total``
+        counts ALL receipts matching the filter (five states included,
+        states returned verbatim). Pure read: no state transitions, no
+        lazy expiry, no events. An empty page is a valid result.
+        Non-task references or invalid pagination (limit outside 1..100
+        or negative offset) raise ValueError in both implementations.
+        """
+
 
 class ActionLedger(ABC):
     """Persistent action intent/claim/outcome ledger with safe recovery."""

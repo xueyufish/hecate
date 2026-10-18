@@ -34,7 +34,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -59,7 +59,7 @@ from hecate_durable.contracts.durable import (
     validate_command_transition,
     validate_task_transition,
 )
-from hecate_durable.contracts.references import BackendRef, RefKind
+from hecate_durable.contracts.references import BackendRef, RefKind, require_kind
 from hecate_durable.seams import ActionLedger, ControlCommandRecorder, DurableTaskStore
 from hecate_durable.storage.eventlog import EventPage, SqlEventLog
 from hecate_durable.storage.lease import LeaseHandle, LeaseManager
@@ -649,6 +649,35 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 .all()
             )
             return [_command_of(row) for row in rows]
+
+    def list_task_commands(
+        self,
+        workspace_id: str,
+        task_ref: BackendRef,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ControlCommandRecord], int]:
+        """Read-only page of one task's receipts; filter/sort/count in SQL."""
+
+        require_kind(task_ref, RefKind.TASK)
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("Invalid command pagination")
+
+        scope = (
+            CommandRow.workspace_id == str(workspace_id),
+            CommandRow.task_issuer == task_ref.issuer_domain,
+            CommandRow.task_id == task_ref.id,
+        )
+        # Preserve the contract's ordering over the stored ISO string.
+        order = (CommandRow.issued_at.desc(), CommandRow.command_id.desc())
+        with self._session() as session:
+            total = int(session.execute(select(func.count()).select_from(CommandRow).where(*scope)).scalar_one())
+            rows = (
+                session.execute(select(CommandRow).where(*scope).order_by(*order).limit(limit).offset(offset))
+                .scalars()
+                .all()
+            )
+            return [_command_of(row) for row in rows], total
 
     # -- ActionLedger ----------------------------------------------------------
 
