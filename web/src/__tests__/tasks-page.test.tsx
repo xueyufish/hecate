@@ -54,6 +54,10 @@ function emptyEvents(): RunEventsPage {
   return { events: [], next_cursor: null, has_more: false };
 }
 
+function emptyCommands() {
+  return { items: [], total: 0 };
+}
+
 beforeEach(() => {
   apiMock.get.mockReset();
   route.id = "task-1";
@@ -139,11 +143,15 @@ describe("task detail page", () => {
       }
       if (path === "/api/runs/run-1/actions") return Promise.resolve(actions("run-1", "first-action"));
       if (path === "/api/runs/run-1/events") return Promise.resolve(emptyEvents());
+      if (path.startsWith("/api/tasks/task-1/commands")) return Promise.resolve(emptyCommands());
       throw new Error(`Unexpected request: ${path}`);
     });
     render(<TaskDetailPage />);
     await screen.findByTestId("runs-empty");
-    expect(apiMock.get).toHaveBeenCalledTimes(1);
+    // No Run exists, so no Run-scoped query may fire; the Task-scoped
+    // commands panel still queries once.
+    expect(apiMock.get.mock.calls.filter(([path]) => (path as string).includes("/runs/")))
+      .toHaveLength(0);
     expect(screen.getByTestId("actions-no-run")).toBeInTheDocument();
     expect(screen.getByTestId("events-no-run")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "刷新任务" }));
@@ -170,8 +178,12 @@ describe("task detail page", () => {
 
   it("rejects a late error from a previous task", async () => {
     const old = deferred<TaskDetail>();
-    apiMock.get.mockImplementation((path: string) =>
-      path === "/api/tasks/task-1" ? old.promise : Promise.resolve(detail("task-2", [])));
+    apiMock.get.mockImplementation((path: string) => {
+      if (path === "/api/tasks/task-1") return old.promise;
+      if (path === "/api/tasks/task-2") return Promise.resolve(detail("task-2", []));
+      if (path.startsWith("/api/tasks/task-2/commands")) return Promise.resolve(emptyCommands());
+      throw new Error(`Unexpected request: ${path}`);
+    });
     const { rerender } = render(<TaskDetailPage />);
     route.id = "task-2";
     rerender(<TaskDetailPage />);
@@ -182,8 +194,13 @@ describe("task detail page", () => {
   });
 
   it("shows a missing task error code and offers retry and list navigation", async () => {
-    apiMock.get.mockRejectedValueOnce({ detail: { error: { code: "NOT_FOUND", message: "Task not found" } } })
-      .mockResolvedValueOnce(detail("task-1", []));
+    apiMock.get
+      .mockRejectedValueOnce({ detail: { error: { code: "NOT_FOUND", message: "Task not found" } } })
+      .mockResolvedValueOnce(detail("task-1", []))
+      .mockImplementation((path: string) => {
+        if (path.startsWith("/api/tasks/task-1/commands")) return Promise.resolve(emptyCommands());
+        throw new Error(`Unexpected request: ${path}`);
+      });
     render(<TaskDetailPage />);
     expect(await screen.findByTestId("task-error")).toHaveTextContent("NOT_FOUND");
     expect(screen.getByRole("link", { name: /返回任务列表/ })).toHaveAttribute("href", "/ops-center/tasks");
@@ -198,6 +215,7 @@ describe("task detail page", () => {
       if (path.startsWith("/api/runs/") && path.endsWith("/events")) {
         return Promise.reject({ detail: { error: { code: "EVENTS_DOWN", message: "events unavailable" } } });
       }
+      if (path.startsWith("/api/tasks/task-1/commands")) return Promise.resolve(emptyCommands());
       throw new Error(`Unexpected request: ${path}`);
     });
     render(<TaskDetailPage />);
