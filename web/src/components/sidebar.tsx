@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { api } from "@/lib/api-client";
-import { Bot, Brain, ClipboardCheck, Database, LogOut, Settings, Share2, Activity, DollarSign, Gauge, Users, MessageSquare, Puzzle } from "lucide-react";
+import { Bot, Brain, ClipboardCheck, Database, ListTodo, LogOut, Settings, Share2, Activity, DollarSign, Gauge, Users, MessageSquare, Puzzle } from "lucide-react";
 
 export function Sidebar() {
   const { userEmail, logout } = useAuth();
@@ -84,6 +84,13 @@ export function Sidebar() {
         >
           <Gauge className="h-4 w-4" />
           Ops Center
+        </Link>
+        <Link
+          href="/ops-center/tasks"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <ListTodo className="h-4 w-4" />
+          Tasks
         </Link>
         <Link
           href="/ops-center/agents"
