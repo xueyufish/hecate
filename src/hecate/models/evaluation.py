@@ -171,6 +171,13 @@ class EvaluationRunModel(BaseModel):
     - **started_at** / **completed_at** — timing markers for the run
     - **workflow_id** / **workflow_version** — populated when ``answer_source``
       is ``workflow`` (7.3); ``workflow_version`` is locked at run start.
+    - **agent_version** — the committed agent version this run evaluated,
+      locked at run start when the task declared one. The run-owned
+      agent_id, agent_config_hash and agent_snapshot freeze its subject,
+      configuration and resource references independently of task edits. ``NULL``
+      means unbound: the run evaluated the live draft, or predates version
+      binding — unbound runs are never backfilled and never participate in
+      any version's publish gate.
     - **dataset_snapshot** — JSON snapshot of dataset items + content hash,
       captured at run start so regression comparison remains meaningful
       even if the dataset is edited between runs. Version-bound runs
@@ -188,6 +195,10 @@ class EvaluationRunModel(BaseModel):
     dataset_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     task_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     dataset_version_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    agent_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    agent_config_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    agent_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     evaluator_configs: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=RunStatus.PENDING.value)
     summary: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
@@ -206,6 +217,8 @@ class EvaluationRunModel(BaseModel):
     __table_args__ = (
         Index("idx_eval_runs_dataset", "dataset_id"),
         Index("idx_eval_runs_task", "task_id"),
+        Index("idx_eval_runs_agent_id", "agent_id"),
+        Index("idx_eval_runs_agent_version", "agent_version"),
         Index("idx_eval_runs_workspace", "workspace_id", "deleted"),
     )
 
@@ -263,7 +276,7 @@ class EvaluationTaskModel(BaseModel):
     - **evaluator_configs** — JSON array of registered evaluator names
     - **config** — JSON, type-specific:
       offline ``{"dataset_id", "answer_source", "threshold", "baseline_run_id",
-      "regression_threshold", "tags", "agent_id"}``;
+      "regression_threshold", "tags", "agent_id", "agent_version"}``;
       online ``{"agent_id", "sampling_rate", "max_traces_per_cycle"}``
     - **last_scanned_at** — watermark for the online trace scanner
     - **metrics** — JSON counters accumulated by the online worker
@@ -624,6 +637,9 @@ class EvaluationRunReadSchema(PydanticBase):
     id: uuid.UUID
     dataset_id: uuid.UUID
     task_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
+    agent_version: int | None = None
+    agent_config_hash: str | None = None
     evaluator_configs: list
     status: str
     summary: dict | None = None
@@ -724,6 +740,9 @@ class EvaluationTaskCreateSchema(PydanticBase):
     baseline_run_id: uuid.UUID | None = None
     regression_threshold: float | None = Field(None, gt=0.0, le=1.0)
     tags: list[str] | None = None
+    # Agent answer source fields — agent_version binds the run to a
+    # committed agent version instead of the live draft.
+    agent_version: int | None = Field(None, ge=1)
     # Workflow answer source fields (7.3)
     workflow_id: uuid.UUID | None = None
     workflow_version: int | None = Field(None, ge=1)
@@ -751,6 +770,7 @@ class EvaluationTaskUpdateSchema(PydanticBase):
     baseline_run_id: uuid.UUID | None = None
     regression_threshold: float | None = Field(None, gt=0.0, le=1.0)
     tags: list[str] | None = None
+    agent_version: int | None = Field(None, ge=1)
     workflow_id: uuid.UUID | None = None
     workflow_version: int | None = Field(None, ge=1)
     repetitions: int | None = Field(None, ge=1, le=100)

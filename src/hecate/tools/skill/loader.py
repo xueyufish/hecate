@@ -83,7 +83,8 @@ class SkillLoader:
     snapshot while governance flags (``model_invocable`` / ``auto_load``)
     keep resolving from the live row. Snapshot-resolved executions (channel
     bindings, 1.3.20) pass the resolved manifest; studio/draft paths omit
-    it and keep live resolution.
+    it and keep live resolution. ``explicit_skill_names`` freezes catalog and L2
+    membership for a version-bound execution; ``None`` keeps live bindings.
     """
 
     def __init__(
@@ -92,6 +93,7 @@ class SkillLoader:
         *,
         progressive: bool | None = None,
         ref_manifest: list[dict] | None = None,
+        explicit_skill_names: list[str] | None = None,
     ) -> None:
         self._db = db
         if progressive is None:
@@ -100,6 +102,7 @@ class SkillLoader:
             progressive = settings.SKILL_PROGRESSIVE_DISCLOSURE
         self._progressive = progressive
         self._pins_by_name = self._extract_pins(ref_manifest)
+        self._explicit_skill_names = list(explicit_skill_names) if explicit_skill_names is not None else None
         # Lazy per-instance cache for the resolved discovery policy (5.9c).
         self._discovery_policy: DiscoveryPolicy | None = None
 
@@ -134,6 +137,7 @@ class SkillLoader:
         total_budget: int = DEFAULT_TOTAL_TOKEN_BUDGET,
         catalog_budget: int = DEFAULT_CATALOG_TOKEN_BUDGET,
         session_id: UUID | None = None,
+        explicit_skill_names: list[str] | None = None,
     ) -> str:
         """Load and format skills for an agent's system prompt.
 
@@ -142,6 +146,10 @@ class SkillLoader:
             workspace_id: UUID of the workspace (for multi-tenant isolation).
             total_budget: Maximum total tokens for injected skill content.
             catalog_budget: Maximum tokens for the L1 catalog (progressive mode).
+            explicit_skill_names: Optional explicit skill names overriding the
+                agent's live ``skills`` list (version-bound evaluation — the
+                frozen snapshot is authoritative). ``None`` keeps live
+                behavior; auto-load and discovery pools stay workspace-live.
 
         Returns:
             Formatted XML string (L1 catalog, or full blocks in legacy mode);
@@ -152,7 +160,11 @@ class SkillLoader:
             logger.warning("Agent %s not found for skill loading", agent_id)
             return ""
 
-        explicit_names: list[str] = agent.skills or []
+        if explicit_skill_names is None:
+            explicit_skill_names = self._explicit_skill_names
+        explicit_names: list[str] = (
+            list(explicit_skill_names) if explicit_skill_names is not None else (agent.skills or [])
+        )
 
         # Query auto_load skills in workspace
         auto_load_skills = await self._query_auto_load_skills(workspace_id)
@@ -290,7 +302,7 @@ class SkillLoader:
         if agent is None:
             raise SkillNotAdvertisedError(f"Agent {agent_id} not found")
 
-        bound_names = agent.skills or []
+        bound_names = self._explicit_skill_names if self._explicit_skill_names is not None else (agent.skills or [])
         discovered = False
         if skill_name not in bound_names:
             discovery_policy = await self._resolve_discovery_policy(agent, workspace_id)
