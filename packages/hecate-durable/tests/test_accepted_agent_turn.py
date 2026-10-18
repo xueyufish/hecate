@@ -201,6 +201,42 @@ async def test_crash_after_a1_replays_result_then_continues(database, tmp_path) 
     assert len(backend.list_run_actions(SQL_RUN)) == 3
 
 
+@pytest.mark.parametrize("commit_mode", ["final-answer-commit", "final-answer-commit-crash"])
+async def test_final_answer_recovery_in_new_process_has_zero_model_and_tool_calls(
+    database, tmp_path, commit_mode
+) -> None:
+    """Commit a final answer in one interpreter; another recovers it storage-only."""
+    backend, _clock, url = database
+    owner = prepare_decision_run(backend, RUN)
+    config = json.dumps({"url": url, "ownership": asdict(owner)})
+    effect = tmp_path / "final-answer-effects.txt"
+
+    task_before = backend.get_task_state(SQL_TASK)
+    committed = _run_probe(config, commit_mode, effect)
+    assert committed.returncode == (9 if commit_mode.endswith("-crash") else 0), committed.stderr
+    assert backend.get_task_state(SQL_TASK) == task_before
+    assert not effect.exists()  # zero business effects
+    assert len(backend.list_run_actions(SQL_RUN)) == 0  # zero ledger claims
+    stored = await SqlAcceptedDecisionStore(backend).lookup(RUN, "step-1")
+    assert stored is not None and stored.schema_version == 2
+    if commit_mode == "final-answer-commit":
+        written = json.loads(committed.stdout)
+        assert written["is_final_answer"] is True
+        assert written["statuses"] == []
+        assert written["record"] == stored.to_dict()
+
+    recovered = _run_probe(config, "recover-final-answer", effect)
+    assert recovered.returncode == 0, recovered.stderr
+    restored = json.loads(recovered.stdout)
+    assert restored["resumed"] is True
+    assert restored["is_final_answer"] is True
+    assert restored["statuses"] == []
+    assert restored["record"] == stored.to_dict()  # same text, digest, version
+    assert backend.get_task_state(SQL_TASK) == task_before
+    assert not effect.exists()
+    assert len(backend.list_run_actions(SQL_RUN)) == 0
+
+
 async def test_record_substituted_between_phases_conflicts_before_dispatch(database) -> None:
     """A valid-but-different record swapped in after the decision hit: conflict."""
     backend, _clock, _url = database

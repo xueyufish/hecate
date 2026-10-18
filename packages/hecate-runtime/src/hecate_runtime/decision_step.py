@@ -1,7 +1,8 @@
 """One graph-independent accepted-decision step, not a complete Controller.
 
-The responder supplies accepted-visible output and action intent, never hidden
-reasoning. This component dispatches no tools or approval requests.
+The responder supplies accepted-visible output with action intent or a
+final answer, never hidden reasoning. This component dispatches no tools
+or approval requests.
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from hecate_runtime.accepted_decision import (
+    ACTION_DECISION_SCHEMA_VERSION,
+    FINAL_ANSWER_SCHEMA_VERSION,
     AcceptedAction,
     AcceptedDecisionRecord,
     AcceptedDecisionStore,
@@ -26,6 +29,8 @@ from hecate_runtime.accepted_decision import (
 )
 
 __all__ = [
+    "KIND_ACTIONS",
+    "KIND_FINAL_ANSWER",
     "AcceptedDecisionOutcome",
     "DecisionProposal",
     "DecisionResponder",
@@ -33,13 +38,30 @@ __all__ = [
     "DecisionValidationError",
 ]
 
+KIND_ACTIONS = "actions"
+KIND_FINAL_ANSWER = "final_answer"
+_PROPOSAL_SCHEMA_VERSIONS = {
+    KIND_ACTIONS: ACTION_DECISION_SCHEMA_VERSION,
+    KIND_FINAL_ANSWER: FINAL_ANSWER_SCHEMA_VERSION,
+}
+
 
 @dataclass(frozen=True)
 class DecisionProposal:
-    """Validated visible output and proposed actions, not yet accepted."""
+    """Validated visible output and proposed actions, not yet accepted.
+
+    ``kind`` discriminates an action proposal from a final-answer proposal;
+    the decision step maps it to the record's schema version, and record
+    validation enforces the matching content shape before any commit.
+    """
 
     accepted_output: dict[str, Any]
     actions: tuple[AcceptedAction, ...]
+    kind: str = KIND_ACTIONS
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, str) or self.kind not in _PROPOSAL_SCHEMA_VERSIONS:
+            raise DecisionValidationError("decision proposal kind must be 'actions' or 'final_answer'")
 
 
 class DecisionResponder(abc.ABC):
@@ -99,8 +121,17 @@ class DecisionStep:
         proposal = await self._responder.respond(run_ref, decision_step_id, json.loads(canonical_json(refs)))
         if not isinstance(proposal, DecisionProposal):
             raise DecisionValidationError("responder must return a DecisionProposal")
+        # The proposal kind selects the record version; snapshot_decision then
+        # rejects kind/content mismatches (e.g. final answer with actions).
         record = snapshot_decision(
-            AcceptedDecisionRecord(run_ref, decision_step_id, refs, proposal.accepted_output, proposal.actions)
+            AcceptedDecisionRecord(
+                run_ref,
+                decision_step_id,
+                refs,
+                proposal.accepted_output,
+                proposal.actions,
+                schema_version=_PROPOSAL_SCHEMA_VERSIONS[proposal.kind],
+            )
         )
         committed = snapshot_decision(await self._store.commit(record, ownership))
         if (

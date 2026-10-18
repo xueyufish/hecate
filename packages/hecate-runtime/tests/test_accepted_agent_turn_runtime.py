@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 from hecate_runtime.accepted_decision import (
+    FINAL_ANSWER_SCHEMA_VERSION,
     AcceptedAction,
     DecisionConflictError,
     DecisionOwnership,
@@ -25,7 +26,7 @@ from hecate_runtime.accepted_decision import (
     canonical_decision_digest,
 )
 from hecate_runtime.agent_turn import AgentTurn, AgentTurnOutcome
-from hecate_runtime.decision_step import DecisionProposal, DecisionStep
+from hecate_runtime.decision_step import KIND_FINAL_ANSWER, DecisionProposal, DecisionStep
 from hecate_runtime.eventstore import InMemoryEventStore
 from hecate_runtime.tool_call_executor import ToolCallExecutor
 from test_accepted_action_step import (
@@ -42,6 +43,10 @@ def _proposal(*tools: tuple[str, str, dict[str, Any]]) -> DecisionProposal:
         accepted_output={"answer": "do-x"},
         actions=tuple(AcceptedAction(action_key=key, tool=tool, arguments=args) for key, tool, args in tools),
     )
+
+
+def _final_answer_proposal(text: str = "no tools are needed") -> DecisionProposal:
+    return DecisionProposal(accepted_output={"text": text}, actions=(), kind=KIND_FINAL_ANSWER)
 
 
 def _turn(
@@ -280,6 +285,51 @@ async def test_outcome_carries_facts_without_completion_semantics() -> None:
     assert [o.status for o in outcome.report.outcomes] == ["succeeded", "failed"]
     assert outcome.report.unprocessed_action_keys == ("a3",)
     assert {f.name for f in dataclasses.fields(AgentTurnOutcome)} == {"record", "resumed", "report"}
+
+
+async def test_final_answer_turn_returns_text_with_zero_dispatch() -> None:
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    outcome = await _turn(store, ScriptedResponder(_final_answer_proposal()), port, ledger).run(
+        run_ref=_run_ref(), decision_step_id="step-1", input_refs={"config": "v1"}, ownership=STUB_OWNER
+    )
+    assert outcome.resumed is False
+    assert outcome.is_final_answer is True
+    assert outcome.record.schema_version == FINAL_ANSWER_SCHEMA_VERSION
+    assert outcome.record.accepted_output == {"text": "no tools are needed"}
+    assert port.calls == []  # zero business tool calls
+    assert ledger.claims == []  # zero ledger claims
+    assert outcome.report.outcomes == ()
+    assert outcome.report.unprocessed_action_keys == ()
+    # The discriminator is derived from the record, not a completion-carrying field.
+    assert {f.name for f in dataclasses.fields(AgentTurnOutcome)} == {"record", "resumed", "report"}
+
+
+async def test_final_answer_recovery_hits_lookup_with_zero_model_and_tool_calls() -> None:
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    await _commit_via_step(store, run_ref, _final_answer_proposal("done"))
+
+    responder = ScriptedResponder()
+    outcome = await _turn(store, responder, port, ledger).run(
+        run_ref=run_ref, decision_step_id="step-1", input_refs={"config": "v1"}, ownership=STUB_OWNER
+    )
+    assert outcome.resumed is True
+    assert outcome.is_final_answer is True
+    assert responder.calls == []  # zero model calls
+    assert port.calls == []  # zero tool dispatch
+    assert ledger.claims == []
+    assert outcome.record.accepted_output == {"text": "done"}
+
+
+async def test_final_answer_is_not_presented_as_task_success() -> None:
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    outcome = await _turn(store, ScriptedResponder(_final_answer_proposal("answered")), port, ledger).run(
+        run_ref=_run_ref(), decision_step_id="step-1", input_refs={"config": "v1"}
+    )
+    # Only the accepted-output facts exist; nothing in the outcome asserts
+    # task success, completion or goal attainment — hosts decide next steps.
+    assert not any(field in dataclasses.asdict(outcome) for field in ("success", "completed", "task_status"))
+    assert outcome.is_final_answer is True
 
 
 async def test_invalid_run_ref_rejected_before_any_work() -> None:

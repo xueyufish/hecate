@@ -8,10 +8,12 @@ failures that are never mistaken for "no decision", and proposal validation.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from typing import Any
 
 import pytest
 from hecate_runtime.accepted_decision import (
+    FINAL_ANSWER_SCHEMA_VERSION,
     AcceptedAction,
     AcceptedDecisionRecord,
     AcceptedDecisionStore,
@@ -19,8 +21,11 @@ from hecate_runtime.accepted_decision import (
     DecisionOwnership,
     DecisionStoreUnavailableError,
     RunRef,
+    canonical_decision_digest,
+    snapshot_decision,
 )
 from hecate_runtime.decision_step import (
+    KIND_FINAL_ANSWER,
     DecisionProposal,
     DecisionResponder,
     DecisionStep,
@@ -43,6 +48,17 @@ def _record(run_ref: RunRef, step: str = "step-1") -> AcceptedDecisionRecord:
                 action_key="a1", tool="biz_tool", arguments={"q": 1}, side_effect_class="non_idempotent_write"
             ),
         ),
+    )
+
+
+def _final_answer_record(run_ref: RunRef, step: str = "step-1") -> AcceptedDecisionRecord:
+    return AcceptedDecisionRecord(
+        run_ref=run_ref,
+        decision_step_id=step,
+        input_refs={"config": "v1"},
+        accepted_output={"text": "the final answer"},
+        actions=(),
+        schema_version=FINAL_ANSWER_SCHEMA_VERSION,
     )
 
 
@@ -83,6 +99,7 @@ class InMemoryDecisionStore(AcceptedDecisionStore):
             actions=record.actions,
             accepted_at="2026-01-01T00:00:00+00:00",
             content_digest=digest,
+            schema_version=record.schema_version,
         )
         self._records[key] = stored
         return stored
@@ -246,3 +263,89 @@ def test_new_runtime_seams_require_implementations() -> None:
 
     assert inspect.isabstract(AcceptedDecisionStore)
     assert inspect.isabstract(DecisionResponder)
+
+
+async def test_final_answer_records_round_trip_with_distinct_digests() -> None:
+    record = _final_answer_record(_run_ref())
+    assert AcceptedDecisionRecord.from_dict(record.to_dict()) == record  # detached round trip
+    assert snapshot_decision(record).actions == ()
+    # The record version participates in the digest, so kinds never collide.
+    assert canonical_decision_digest(record) != canonical_decision_digest(_record(record.run_ref))
+
+
+async def test_invalid_final_answer_records_fail_validation() -> None:
+    base = _final_answer_record(_run_ref())
+    for invalid in (
+        replace(base, accepted_output={"text": "   "}),  # blank text
+        replace(base, accepted_output={}),  # missing text
+        replace(base, accepted_output={"text": 7}),  # non-string text
+        replace(base, actions=(AcceptedAction(action_key="a1", tool="biz_tool", arguments={}),)),  # carries actions
+        replace(base, schema_version=3),  # unknown version
+        replace(base, schema_version="2"),  # non-int version
+    ):
+        with pytest.raises(DecisionValidationError):
+            snapshot_decision(invalid)
+
+
+async def test_action_decision_still_requires_nonempty_actions() -> None:
+    base = _record(_run_ref())
+    with pytest.raises(DecisionValidationError, match="nonempty action tuple"):
+        snapshot_decision(replace(base, actions=()))
+
+
+async def test_proposal_kind_selects_the_record_version() -> None:
+    store = InMemoryDecisionStore()
+    run_ref = _run_ref()
+
+    final = ScriptedResponder(
+        DecisionProposal(accepted_output={"text": "the answer"}, actions=(), kind=KIND_FINAL_ANSWER)
+    )
+    outcome = await DecisionStep(store, final).execute(
+        run_ref=run_ref, decision_step_id="s", input_refs={"config": "v1"}
+    )
+    assert outcome.record.schema_version == FINAL_ANSWER_SCHEMA_VERSION
+    assert outcome.record.accepted_output == {"text": "the answer"}
+
+    again = ScriptedResponder()  # default proposals are action decisions
+    recovered = await DecisionStep(store, again).execute(
+        run_ref=run_ref, decision_step_id="s", input_refs={"config": "v1"}
+    )
+    assert recovered.resumed is True
+    assert again.calls == []  # final-answer recovery hits the lookup
+
+
+async def test_inconsistent_proposal_kind_and_content_fail_before_commit() -> None:
+    store = InMemoryDecisionStore()
+    run_ref = _run_ref()
+
+    final_with_actions = ScriptedResponder(
+        DecisionProposal(
+            accepted_output={"text": "the answer"},
+            actions=(AcceptedAction(action_key="a1", tool="biz_tool", arguments={"q": 1}),),
+            kind=KIND_FINAL_ANSWER,
+        )
+    )
+    with pytest.raises(DecisionValidationError):
+        await DecisionStep(store, final_with_actions).execute(run_ref=run_ref, decision_step_id="s")
+    assert await store.lookup(run_ref, "s") is None  # nothing committed
+
+
+@pytest.mark.parametrize("kind", ["prose", None, [], {}])
+def test_unknown_proposal_kind_is_rejected_at_construction(kind: Any) -> None:
+    with pytest.raises(DecisionValidationError):
+        DecisionProposal(accepted_output={"text": "x"}, actions=(), kind=kind)
+
+
+def test_v1_opaque_output_and_digest_remain_compatible() -> None:
+    """Historical output fields never select final-answer semantics or alter hashing."""
+    record = AcceptedDecisionRecord(
+        RunRef("legacy", "run"),
+        "step",
+        {"config": "v1"},
+        {"kind": "final_answer", "text": "", "answer": "opaque legacy output"},
+        (AcceptedAction("action-1", "biz_tool", {"q": 1}),),
+    )
+    restored = snapshot_decision(record)
+    assert restored == record
+    assert restored.schema_version == 1
+    assert canonical_decision_digest(restored) == "ac60513cd4335c592711f6061decbd7c52e97e96128378223ffad08add8f838a"

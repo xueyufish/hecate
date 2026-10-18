@@ -13,6 +13,11 @@ Modes:
 - ``receipt-loss`` — A2's effect lands but its outcome write fails.
 - ``recover-unknown`` — another interpreter must stop at A2 without calling
   any business tool or model and must leave A3 undispatched.
+- ``final-answer-commit`` — the accepted decision is a final answer: the
+  turn commits it and dispatches zero tools, then exits cleanly.
+- ``final-answer-commit-crash`` — hard-exit after commit, before the batch loads the record.
+- ``recover-final-answer`` — another interpreter must return the accepted
+  final answer from storage with zero model calls and zero tool dispatch.
 """
 
 from __future__ import annotations
@@ -30,19 +35,22 @@ from hecate_durable.storage import SqlDurableStore
 from hecate_durable.storage.lease import LeaseHandle
 from hecate_runtime.accepted_decision import AcceptedAction, DecisionOwnership, RunRef
 from hecate_runtime.agent_turn import AgentTurn
-from hecate_runtime.decision_step import DecisionProposal, DecisionResponder
+from hecate_runtime.decision_step import KIND_FINAL_ANSWER, DecisionProposal, DecisionResponder
 from hecate_runtime.ports import StubRuntimePort
 from hecate_runtime.tool_call_executor import ToolCallExecutor
 
 _MODE = sys.argv[2]
 _EFFECT = sys.argv[3]
 _RECOVERING = _MODE.startswith("recover")
+_FINAL_ANSWER = _MODE.startswith("final-answer") or _MODE == "recover-final-answer"
 
 
 class StubBusinessPort(StubRuntimePort):
     """Record per-action durable effects; recovery forbids completed work."""
 
     async def tool_execute(self, name, args, context=None):
+        if _FINAL_ANSWER:
+            raise AssertionError("final-answer turn dispatched a tool")
         action_key = args["action_key"]
         if _MODE == "recover-unknown" or (_MODE == "recover-after-a1" and action_key == "action-1"):
             raise AssertionError("completed action re-executed during recovery")
@@ -62,6 +70,8 @@ class StubTurnResponder(DecisionResponder):
 
     async def respond(self, run_ref: RunRef, decision_step_id: str, input_refs: dict) -> DecisionProposal:
         assert not _RECOVERING, "recovery resolved from storage and must not re-ask the model"
+        if _FINAL_ANSWER:
+            return DecisionProposal(accepted_output={"text": "the final answer"}, actions=(), kind=KIND_FINAL_ANSWER)
         return DecisionProposal(
             accepted_output={"text": "accepted"},
             actions=(
@@ -106,7 +116,10 @@ async def main() -> None:
         lease=LeaseHandle(owner.lease_key, owner.holder, owner.fence_token, ""),
     )
     store: SqlAcceptedDecisionStore = (
-        StubCrashOnNextLookupStore(backend, lookups_before_exit=2 if _MODE == "commit-crash" else 3)
+        StubCrashOnNextLookupStore(
+            backend,
+            lookups_before_exit=(1 if _MODE == "final-answer-commit-crash" else 2 if _MODE == "commit-crash" else 3),
+        )
         if _MODE.endswith("-crash")
         else SqlAcceptedDecisionStore(backend)
     )
@@ -125,7 +138,10 @@ async def main() -> None:
     turn = AgentTurn(store, StubTurnResponder(), ToolCallExecutor(port=StubBusinessPort(), action_hook=hook))
     outcome = await turn.run(run_ref=run, decision_step_id="step-1", input_refs={"config": "v1"}, ownership=owner)
     assert outcome.resumed is _RECOVERING, outcome
-    if _MODE in {"receipt-loss", "recover-unknown"}:
+    if _FINAL_ANSWER:
+        assert outcome.is_final_answer is True, outcome
+        assert outcome.report.outcomes == () and outcome.report.unprocessed_action_keys == (), outcome.report
+    elif _MODE in {"receipt-loss", "recover-unknown"}:
         assert [o.status for o in outcome.report.outcomes] == ["succeeded", "stopped"], outcome.report
         assert outcome.report.unprocessed_action_keys == ("action-3",), outcome.report
     else:
@@ -135,6 +151,7 @@ async def main() -> None:
             {
                 "statuses": [o.status for o in outcome.report.outcomes],
                 "resumed": outcome.resumed,
+                "is_final_answer": outcome.is_final_answer,
                 "record": outcome.record.to_dict(),
                 **asdict(outcome.report),
             }

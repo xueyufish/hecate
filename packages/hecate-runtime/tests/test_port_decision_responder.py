@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 from hecate_runtime.accepted_decision import (
+    FINAL_ANSWER_SCHEMA_VERSION,
     AcceptedDecisionRecord,
     AcceptedDecisionStore,
     DecisionConflictError,
@@ -29,6 +30,8 @@ from hecate_runtime.accepted_decision import (
     canonical_decision_digest,
 )
 from hecate_runtime.decision_step import (
+    KIND_ACTIONS,
+    KIND_FINAL_ANSWER,
     DecisionProposal,
     DecisionStep,
     DecisionValidationError,
@@ -114,6 +117,7 @@ class StubDecisionStore(AcceptedDecisionStore):
             actions=record.actions,
             accepted_at="2026-01-01T00:00:00+00:00",
             content_digest=digest,
+            schema_version=record.schema_version,
         )
         self._records[key] = stored
         return stored
@@ -144,12 +148,22 @@ async def test_ref_mismatch_rejects_before_any_model_call() -> None:
     assert port.calls == 0
 
 
-async def test_empty_tool_snapshot_rejects_before_any_model_call() -> None:
+async def test_empty_tool_snapshot_never_produces_actions_and_rejects_tool_calls() -> None:
     port = StubStructuredPort([{"content": None, "tool_calls": [_tool_call("biz_tool", "{}")]}])
     responder = _responder(port, tools={})
     with pytest.raises(DecisionValidationError):
         await responder.respond(_run_ref(), "step-1", dict(REFS))
-    assert port.calls == 0
+    assert port.calls == 1  # the model call is allowed; the action path is what fails
+    assert port.stream_closed
+
+
+async def test_empty_tool_snapshot_allows_a_final_answer() -> None:
+    port = StubStructuredPort([{"content": "no tools needed", "tool_calls": None}])
+    proposal = await _responder(port, tools={}).respond(_run_ref(), "step-1", dict(REFS))
+    assert proposal.kind == KIND_FINAL_ANSWER
+    assert proposal.actions == ()
+    assert proposal.accepted_output == {"text": "no tools needed"}
+    assert port.calls == 1
 
 
 async def test_multiple_actions_accumulate_without_duplicates() -> None:
@@ -169,6 +183,7 @@ async def test_multiple_actions_accumulate_without_duplicates() -> None:
     port = StubStructuredPort(chunks)
     proposal = await _responder(port).respond(_run_ref(), "step-1", dict(REFS))
     assert isinstance(proposal, DecisionProposal)
+    assert proposal.kind == KIND_ACTIONS  # text alongside tool calls stays an action decision
     assert proposal.accepted_output == {"text": "checking stock"}
     assert [action.tool for action in proposal.actions] == ["web_search", "biz_tool", "biz_tool"]
     assert [action.arguments for action in proposal.actions] == [{"query": "stock"}, {"q": 1}, {"q": 2}]
@@ -187,14 +202,43 @@ async def test_defensive_tool_calls_chunks_take_the_last_accumulated_list() -> N
     assert [action.arguments for action in proposal.actions] == [{"q": 1}, {}]
 
 
-async def test_single_full_text_shape_without_tool_calls_fails_explicitly() -> None:
-    # The default RuntimePort implementation yields one full-text chunk with
-    # tool_calls=None; this slice requires actions, so it must fail, not pass.
-    with pytest.raises(DecisionValidationError):
-        await _responder(StubRuntimePort()).respond(_run_ref(), "step-1", dict(REFS))
+async def test_text_only_without_tool_calls_becomes_a_final_answer() -> None:
     chunks = [{"content": "plain answer", "tool_calls": None}]
+    proposal = await _responder(StubStructuredPort(chunks)).respond(_run_ref(), "step-1", dict(REFS))
+    assert proposal.kind == KIND_FINAL_ANSWER
+    assert proposal.actions == ()
+    assert proposal.accepted_output == {"text": "plain answer"}
+
+
+async def test_default_port_full_text_shape_yields_a_final_answer() -> None:
+    # The default RuntimePort implementation yields one full-text chunk with
+    # tool_calls=None; nonblank text becomes an accepted final-answer proposal.
+    proposal = await _responder(StubRuntimePort()).respond(_run_ref(), "step-1", dict(REFS))
+    assert proposal.kind == KIND_FINAL_ANSWER
+    assert proposal.accepted_output == {"text": "stub-response"}
+
+
+async def test_blank_text_without_tool_calls_fails_explicitly() -> None:
+    # A response with neither tool calls nor nonblank text is invalid,
+    # never an empty answer.
+    for text in ("", "   "):
+        chunks = [{"content": text, "tool_calls": None}]
+        with pytest.raises(DecisionValidationError):
+            await _responder(StubStructuredPort(chunks)).respond(_run_ref(), "step-1", dict(REFS))
+
+
+async def test_tool_calls_vanishing_from_the_final_aggregation_fail() -> None:
+    # Tool intent appeared in the stream; a text-only final aggregation must
+    # fail instead of downgrading the response to a successful answer.
+    chunks = [
+        {"content": None, "tool_calls": [_tool_call("biz_tool", '{"q": 1}')]},
+        {"content": "answer without tools", "tool_calls": []},
+    ]
+    port = StubStructuredPort(chunks)
     with pytest.raises(DecisionValidationError):
-        await _responder(StubStructuredPort(chunks)).respond(_run_ref(), "step-1", dict(REFS))
+        await _responder(port).respond(_run_ref(), "step-1", dict(REFS))
+    assert port.calls == 1
+    assert port.stream_closed
 
 
 @pytest.mark.parametrize(
@@ -278,6 +322,29 @@ async def test_full_chain_commits_and_recovery_hits_zero_model_calls() -> None:
     assert recovery_port.calls == 0  # original decision returned, model never re-asked
 
 
+async def test_full_chain_final_answer_commits_and_recovers_with_zero_model_calls() -> None:
+    store = StubDecisionStore()
+    run_ref = _run_ref()
+    chunks = [{"content": "the answer", "tool_calls": None}]
+    port = StubStructuredPort(chunks)
+    first = await DecisionStep(store, _responder(port)).execute(
+        run_ref=run_ref, decision_step_id="step-1", input_refs=dict(REFS)
+    )
+    assert first.resumed is False
+    assert first.record.schema_version == FINAL_ANSWER_SCHEMA_VERSION
+    assert first.record.accepted_output == {"text": "the answer"}
+    assert first.record.actions == ()
+    assert port.calls == 1
+
+    recovery_port = StubStructuredPort(chunks)
+    second = await DecisionStep(store, _responder(recovery_port)).execute(
+        run_ref=run_ref, decision_step_id="step-1", input_refs=dict(REFS)
+    )
+    assert second.resumed is True
+    assert second.record == first.record
+    assert recovery_port.calls == 0  # accepted final answer returned, model never re-asked
+
+
 async def test_commit_failure_does_not_trigger_a_second_model_call() -> None:
     store = StubDecisionStore(fail_commits=True)
     port = StubStructuredPort([{"content": None, "tool_calls": [_tool_call("biz_tool", "{}")]}])
@@ -331,6 +398,21 @@ async def test_no_usage_callback_is_safe() -> None:
     ]
     proposal = await _responder(StubStructuredPort(chunks)).respond(_run_ref(), "step-1", dict(REFS))
     assert proposal.actions[0].tool == "biz_tool"
+
+
+async def test_final_answer_usage_forwarded_once_and_never_enters_the_record() -> None:
+    reports: list[dict[str, Any]] = []
+    chunks = [
+        {"content": "final", "tool_calls": None},
+        {"content": None, "tool_calls": None, "usage": {"prompt_tokens": 7, "completion_tokens": 2}},
+    ]
+    proposal = await _responder(StubStructuredPort(chunks), on_usage=reports.append).respond(
+        _run_ref(), "step-1", dict(REFS)
+    )
+    assert reports == [{"prompt_tokens": 7, "completion_tokens": 2}]
+    assert proposal.kind == KIND_FINAL_ANSWER
+    assert proposal.accepted_output == {"text": "final"}
+    assert "usage" not in proposal.accepted_output
 
 
 async def test_construction_freezes_nested_inputs_and_version_references() -> None:
@@ -581,3 +663,25 @@ def test_responder_runs_in_a_fresh_process_with_graph_and_domains_blocked() -> N
         [sys.executable, "-I", "-c", probe], capture_output=True, text=True, timeout=20
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("tools", [{}, TOOL_SNAPSHOT])
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        [{"content": "answer", "tool_calls": []}],
+        [{"tool_calls": []}, {"content": "ans"}, {"content": "wer", "tool_calls": []}],
+    ],
+)
+async def test_empty_tool_call_lists_without_prior_intent_allow_final_answer(tools, chunks) -> None:
+    """An empty aggregate contains no tool intent, even with an empty snapshot."""
+    store = StubDecisionStore()
+    port = StubStructuredPort(chunks)
+    outcome = await DecisionStep(store, _responder(port, tools=tools)).execute(
+        run_ref=_run_ref(), decision_step_id="final", input_refs=dict(REFS)
+    )
+    assert outcome.record.schema_version == FINAL_ANSWER_SCHEMA_VERSION
+    assert outcome.record.accepted_output == {"text": "answer"}
+    assert outcome.record.actions == ()
+    assert port.calls == 1
+    assert port.stream_closed

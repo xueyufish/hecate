@@ -15,7 +15,14 @@ import pytest
 from _decision_helpers import decision_database, prepare_decision_run
 from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
 from hecate_durable.storage import SqlDurableStore
-from hecate_runtime.accepted_decision import AcceptedAction, AcceptedDecisionRecord, DecisionConflictError, RunRef
+from hecate_runtime.accepted_decision import (
+    FINAL_ANSWER_SCHEMA_VERSION,
+    AcceptedAction,
+    AcceptedDecisionRecord,
+    DecisionConflictError,
+    RunRef,
+    canonical_decision_digest,
+)
 from hecate_runtime.decision_step import DecisionProposal, DecisionResponder, DecisionStep
 from sqlalchemy import inspect, text
 
@@ -33,6 +40,35 @@ def _record(run, answer="a"):
     return AcceptedDecisionRecord(
         run, "step", {"config": "v1"}, {"answer": answer}, (AcceptedAction("key", "biz_tool", {"q": [1, 2]}),)
     )
+
+
+async def test_final_answer_persists_and_recovers_from_another_connection(pg):
+    backend, _, url = pg
+    run = RunRef("pg", "final-answer")
+    owner = prepare_decision_run(backend, run)
+    record = AcceptedDecisionRecord(
+        run, "step", {"config": "v1"}, {"text": "the answer"}, (), schema_version=FINAL_ANSWER_SCHEMA_VERSION
+    )
+    committed = await SqlAcceptedDecisionStore(backend).commit(record, owner)
+    assert committed.schema_version == FINAL_ANSWER_SCHEMA_VERSION
+    assert committed.actions == ()
+    assert committed.accepted_output == {"text": "the answer"}
+    assert committed.content_digest == canonical_decision_digest(record)
+
+    other_backend = SqlDurableStore(url)
+    try:
+        found = await SqlAcceptedDecisionStore(other_backend).lookup(run, "step")
+        assert found == committed  # same text, digest, version and empty action set
+        assert found.content_digest == canonical_decision_digest(found)
+        assert found.accepted_output == {"text": "the answer"}
+        with backend.engine.connect() as connection:
+            row = connection.execute(
+                text("SELECT schema_version, actions FROM durable_accepted_decision WHERE run_id = 'final-answer'")
+            ).one()
+        assert row.schema_version == FINAL_ANSWER_SCHEMA_VERSION
+        assert row.actions == []
+    finally:
+        other_backend.dispose()
 
 
 @pytest.mark.parametrize("same_content", [False, True])
