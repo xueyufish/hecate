@@ -1,4 +1,4 @@
-"""Optional runtime bridge over the durable action ledger.
+"""Optional runtime bridge over the durable action ledger and decisions.
 
 Import requires the runtime extra; the core store and wire contracts remain
 independent of any runtime implementation. The runner and platform share
@@ -11,6 +11,18 @@ import asyncio
 import logging
 from typing import Any
 
+from hecate_runtime.accepted_decision import (
+    AcceptedDecisionRecord,
+    AcceptedDecisionStore,
+    DecisionConflictError,
+    DecisionOwnership,
+    DecisionStoreUnavailableError,
+    DecisionValidationError,
+    RunRef,
+    StaleDecisionFenceError,
+    canonical_decision_digest,
+    snapshot_decision,
+)
 from hecate_runtime.action_ledger import (
     ActionClaimVerdict,
     ActionLedgerHook,
@@ -211,3 +223,228 @@ def _stringify(payload: Any) -> str:
     if isinstance(payload, str):
         return payload
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+class SqlAcceptedDecisionStore(AcceptedDecisionStore):
+    """Immutable accepted decisions over the existing durable transaction/outbox."""
+
+    def __init__(self, store: SqlDurableStore) -> None:
+        self._store = store
+
+    async def lookup(self, run_ref: RunRef, decision_step_id: str) -> AcceptedDecisionRecord | None:
+        try:
+            return await asyncio.to_thread(self._lookup_sync, run_ref, decision_step_id)
+        except Exception as exc:
+            raise DecisionStoreUnavailableError("decision lookup failed or persisted content is invalid") from exc
+
+    async def commit(
+        self, record: AcceptedDecisionRecord, ownership: DecisionOwnership | None = None
+    ) -> AcceptedDecisionRecord:
+        # Snapshot before yielding to the worker thread so later caller mutation
+        # cannot change the payload after its digest was calculated.
+        record = snapshot_decision(record)
+        try:
+            return await asyncio.to_thread(self._commit_sync, record, ownership)
+        except (DecisionConflictError, StaleDecisionFenceError, DecisionValidationError):
+            raise
+        except Exception as exc:
+            raise DecisionStoreUnavailableError("decision commit failed") from exc
+
+    def validate_ownership(self, run_ref: RunRef, ownership: DecisionOwnership | None) -> None:
+        """Use the same authoritative lease validator for the contract double."""
+        with self._store.session_factory() as session, session.begin():
+            self._assert_owner(session, run_ref, "ownership-check", ownership)
+
+    def _assert_owner(self, session, run_ref: RunRef, step: str, ownership: DecisionOwnership | None) -> None:
+        from sqlalchemy import select
+
+        from .storage.lease import LeaseHandle, StaleFenceError, task_dispatch_lease_key
+        from .storage.models import TaskStateRow
+
+        task = session.execute(
+            select(TaskStateRow).where(
+                TaskStateRow.run_issuer == run_ref.issuer_domain,
+                TaskStateRow.run_id == run_ref.run_id,
+            )
+        ).scalar_one_or_none()
+        if task is None:
+            raise DecisionValidationError("decision Run must have a durable Task association")
+
+        if (
+            ownership is None
+            or ownership.lease_key != task_dispatch_lease_key(task.task_issuer, task.task_id)
+            or not isinstance(ownership.holder, str)
+            or not ownership.holder.strip()
+            or type(ownership.fence_token) is not int
+            or ownership.fence_token < 1
+        ):
+            raise StaleDecisionFenceError(step, ownership.fence_token if ownership else -1, -1)
+        try:
+            # LeaseManager locks the authoritative row and checks holder, exact
+            # generation and DB expiry. The decision row is never a lease authority.
+            self._store.leases.assert_valid(
+                session, LeaseHandle(ownership.lease_key, ownership.holder, ownership.fence_token, "")
+            )
+        except StaleFenceError as exc:
+            raise StaleDecisionFenceError(step, exc.presented_token, exc.current_token) from exc
+
+    def _lookup_sync(self, run_ref: RunRef, decision_step_id: str) -> AcceptedDecisionRecord | None:
+        from sqlalchemy import select
+
+        from .storage.models import AcceptedDecisionRow
+
+        with self._store.session_factory() as session:
+            row = session.execute(
+                select(AcceptedDecisionRow).where(
+                    AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                    AcceptedDecisionRow.run_id == run_ref.run_id,
+                    AcceptedDecisionRow.decision_step_id == decision_step_id,
+                )
+            ).scalar_one_or_none()
+            return None if row is None else self._row_to_record(row)
+
+    def _commit_sync(
+        self, record: AcceptedDecisionRecord, ownership: DecisionOwnership | None
+    ) -> AcceptedDecisionRecord:
+        import uuid
+        from datetime import UTC, datetime
+
+        from sqlalchemy import select
+        from sqlalchemy.exc import IntegrityError
+
+        from .contracts.references import RefKind
+        from .storage.models import AcceptedDecisionRow, TaskStateRow
+
+        digest = canonical_decision_digest(record)
+        run_ref = record.run_ref
+        for attempt in range(3):
+            try:
+                with self._store.session_factory() as session, session.begin():
+                    self._assert_owner(session, run_ref, record.decision_step_id, ownership)
+                    existing = session.execute(
+                        select(AcceptedDecisionRow).where(
+                            AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                            AcceptedDecisionRow.run_id == run_ref.run_id,
+                            AcceptedDecisionRow.decision_step_id == record.decision_step_id,
+                        )
+                    ).scalar_one_or_none()
+                    if existing is not None:
+                        stored = self._row_to_record(existing)
+                        if stored.content_digest != digest:
+                            raise DecisionConflictError(record.decision_step_id, stored.content_digest or "", digest)
+                        return stored
+
+                    # Derive the task from durable authority, never fabricate a task
+                    # reference or accept an unrelated caller-supplied association.
+                    task = session.execute(
+                        select(TaskStateRow).where(
+                            TaskStateRow.run_issuer == run_ref.issuer_domain,
+                            TaskStateRow.run_id == run_ref.run_id,
+                        )
+                    ).scalar_one_or_none()
+                    if task is None:
+                        raise DecisionValidationError("decision Run must have a durable Task association")
+                    if ownership is None:
+                        raise StaleDecisionFenceError(record.decision_step_id, -1, -1)
+                    row = AcceptedDecisionRow(
+                        id=uuid.uuid4().hex,
+                        issuer_domain=run_ref.issuer_domain,
+                        run_id=run_ref.run_id,
+                        decision_step_id=record.decision_step_id,
+                        schema_version=record.schema_version,
+                        input_refs=record.input_refs,
+                        accepted_output=record.accepted_output,
+                        actions=[action.to_dict() for action in record.actions],
+                        content_digest=digest,
+                        fence_holder=ownership.holder,
+                        fence_token=ownership.fence_token,
+                        accepted_at=datetime.now(UTC).isoformat(),
+                    )
+                    session.add(row)
+                    session.flush()
+                    self._store.events.emit(
+                        session,
+                        task_ref=BackendRef(RefKind.TASK, task.task_issuer, task.task_id),
+                        run_ref=BackendRef(RefKind.RUN, run_ref.issuer_domain, run_ref.run_id),
+                        event_type="agent_decision_accepted",
+                        payload={
+                            "decision_step_id": record.decision_step_id,
+                            "content_digest": digest,
+                            "schema_version": record.schema_version,
+                            "action_keys": [action.action_key for action in record.actions],
+                        },
+                    )
+                    return self._row_to_record(row)
+            except IntegrityError:
+                # A racing insert is arbitrated in a fresh transaction, including
+                # a fresh ownership check. Non-identity constraints must not become
+                # false idempotent success; exhausted retries fail as storage errors.
+                if attempt == 2:
+                    raise
+        raise RuntimeError("decision commit did not converge")  # pragma: no cover
+
+    @staticmethod
+    def _row_to_record(row: Any) -> AcceptedDecisionRecord:
+        record = AcceptedDecisionRecord.from_dict(
+            {
+                "schema_version": row.schema_version,
+                "run_ref": {"issuer_domain": row.issuer_domain, "run_id": row.run_id},
+                "decision_step_id": row.decision_step_id,
+                "input_refs": row.input_refs,
+                "accepted_output": row.accepted_output,
+                "actions": row.actions,
+                "accepted_at": row.accepted_at,
+                "content_digest": row.content_digest,
+            }
+        )
+        if not record.accepted_at or record.content_digest != canonical_decision_digest(record):
+            raise DecisionStoreUnavailableError("persisted accepted decision is corrupt")
+        return record
+
+
+class InMemoryAcceptedDecisionStore(AcceptedDecisionStore):
+    """Detached process-local double, with host-injected authoritative fencing.
+
+    The validator is a synchronous host capability, not another lease registry.
+    An absent validator rejects writes; this double grants no restart guarantee.
+    """
+
+    def __init__(self, *, validate_ownership=None, unavailable: bool = False, fail_commits: bool = False) -> None:
+        import threading
+
+        self._records: dict[tuple[str, str, str], AcceptedDecisionRecord] = {}
+        self._validate_ownership = validate_ownership
+        self._unavailable = unavailable
+        self._fail_commits = fail_commits
+        self._lock = threading.RLock()
+
+    async def lookup(self, run_ref: RunRef, decision_step_id: str) -> AcceptedDecisionRecord | None:
+        with self._lock:
+            if self._unavailable:
+                raise DecisionStoreUnavailableError("decision store unavailable")
+            record = self._records.get((run_ref.issuer_domain, run_ref.run_id, decision_step_id))
+            return None if record is None else snapshot_decision(record)
+
+    async def commit(
+        self, record: AcceptedDecisionRecord, ownership: DecisionOwnership | None = None
+    ) -> AcceptedDecisionRecord:
+        from dataclasses import replace
+        from datetime import UTC, datetime
+
+        record = snapshot_decision(record)
+        with self._lock:
+            if self._unavailable or self._fail_commits:
+                raise DecisionStoreUnavailableError("decision store unavailable")
+            if self._validate_ownership is None:
+                raise StaleDecisionFenceError(record.decision_step_id, -1, -1)
+            self._validate_ownership(record.run_ref, ownership)
+            digest = canonical_decision_digest(record)
+            key = (record.run_ref.issuer_domain, record.run_ref.run_id, record.decision_step_id)
+            existing = self._records.get(key)
+            if existing is not None:
+                if existing.content_digest != digest:
+                    raise DecisionConflictError(record.decision_step_id, existing.content_digest or "", digest)
+                return snapshot_decision(existing)
+            stored = replace(record, accepted_at=datetime.now(UTC).isoformat(), content_digest=digest)
+            self._records[key] = stored
+            return snapshot_decision(stored)

@@ -26,6 +26,11 @@ from sqlalchemy.orm import Session
 from hecate_durable.storage.models import LeaseRow
 
 
+def task_dispatch_lease_key(issuer_domain: str, task_id: str) -> str:
+    """Existing worker dispatch scope; preserve its deployed key format."""
+    return f"dispatch:{issuer_domain}:{task_id}"
+
+
 class StaleFenceError(Exception):
     """A write carried a fencing token older than the resource's current one."""
 

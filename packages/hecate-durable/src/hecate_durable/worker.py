@@ -48,7 +48,7 @@ from hecate_durable.contracts.durable import (
     TaskStateRecord,
 )
 from hecate_durable.contracts.references import BackendRef
-from hecate_durable.storage.lease import LeaseHandle, LeaseManager, StaleFenceError
+from hecate_durable.storage.lease import LeaseHandle, LeaseManager, StaleFenceError, task_dispatch_lease_key
 from hecate_durable.storage.models import EventRow, OutboxCursorRow, OutboxReceiptRow
 
 logger = logging.getLogger(__name__)
@@ -240,7 +240,7 @@ class DurableWorker:
     # -- internals ------------------------------------------------------------
 
     def _lease_key(self, task_ref: BackendRef) -> str:
-        return f"dispatch:{task_ref.issuer_domain}:{task_ref.id}"
+        return task_dispatch_lease_key(task_ref.issuer_domain, task_ref.id)
 
     def _claim_holder(self) -> str:
         return f"{self._worker_id}:{uuid.uuid4().hex}"
