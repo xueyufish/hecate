@@ -36,9 +36,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.auth_context import AuthContext
 from hecate.core.canonical_hash import canonical_hash
 from hecate.models.agent import AgentModel
-from hecate.models.agent_version import AgentVersionModel
+from hecate.models.agent_version import AgentPublicationModel, AgentPublicationReadSchema, AgentVersionModel
 from hecate.models.evaluation import EvaluationRunModel
 
 logger = logging.getLogger(__name__)
@@ -552,13 +553,15 @@ class AgentVersionService:
         *,
         force: bool = False,
         actor_user_id: uuid.UUID | None = None,
+        auth_context: AuthContext | None = None,
     ) -> dict[str, Any]:
         """Publish a committed version: move the ``published_version`` pointer.
 
         With ``evaluation_gate`` in ``mode=require``, a failing enabled
         signal raises :class:`AgentPublishEvaluationGateBlockedError`
         unless ``force`` bypasses it (bypass recorded in the audit log).
-        Publish never mutates the snapshot.
+        Publish never mutates the snapshot. API callers must supply their
+        auth context; omitted contexts are reserved for trusted internal calls.
 
         Raises:
             ValueError: If agent or version not found.
@@ -566,13 +569,25 @@ class AgentVersionService:
                 rejection.
         """
         agent = await self._get_agent(agent_id)
+        if (
+            auth_context is not None
+            and not auth_context.is_system_scope
+            and (auth_context.workspace_id is None or agent.workspace_id != auth_context.workspace_id)
+        ):
+            raise ValueError(f"Agent {agent_id} not found")
         record = await self._get_version(agent.id, version)
         if record is None:
             raise ValueError(f"Version {version} not found for agent {agent_id}")
 
         gate_result = None
         gate_blocking = False
-        gate_config = self._resolve_gate_config(agent.evaluation_gate)
+        candidate_id = None
+        candidate_hash = None
+        baseline_id = None
+        baseline_hash = None
+        # Freeze the input before evaluation awaits can observe later edits.
+        gate_config_snapshot = copy.deepcopy(agent.evaluation_gate)
+        gate_config = self._resolve_gate_config(gate_config_snapshot)
         if gate_config.mode != "off":
             # step11: the gate consumes only runs bound to the version being
             # published; unbound or other-version runs never qualify, and a
@@ -580,9 +595,13 @@ class AgentVersionService:
             candidate_run = await self._latest_completed_run(agent.id, version)
             baseline_run = (
                 await self._latest_completed_run(agent.id, agent.published_version)
-                if agent.published_version is not None
+                if gate_config.block_on_regression and agent.published_version is not None
                 else None
             )
+            candidate_id = candidate_run.id if candidate_run else None
+            candidate_hash = candidate_run.agent_config_hash if candidate_run else None
+            baseline_id = baseline_run.id if baseline_run else None
+            baseline_hash = baseline_run.agent_config_hash if baseline_run else None
             gate_result = await self._evaluate_gate(gate_config, candidate_run, baseline_run)
             gate_blocking = gate_result.blocking
             if gate_blocking and not force:
@@ -603,6 +622,38 @@ class AgentVersionService:
                 raise ValueError("force publish requires an actor for the bypass audit")
             await self._record_gate_bypass(agent, version, actor_user_id, gate_result)
 
+        # step11: write the publication receipt in the same transaction as
+        # successful publish, including publishing the current version again.
+        # Identities and gate configuration were frozen from the decision inputs
+        # before evaluation; later edits must not reinterpret a past publish.
+        if gate_config.mode == "off":
+            outcome = "gate_off"
+        elif bypassed:
+            outcome = "force_bypassed"
+        elif gate_config.mode == "warn":
+            outcome = "warn_passed"
+        else:
+            outcome = "passed"
+        report_snapshot = (
+            self._gate_report(gate_result, bypassed=bypassed) if gate_result is not None else {"mode": "off"}
+        )
+        self.db.add(
+            AgentPublicationModel(
+                agent_id=agent.id,
+                version=version,
+                agent_config_hash=record.content_hash,
+                candidate_run_id=candidate_id,
+                candidate_run_hash=candidate_hash,
+                baseline_run_id=baseline_id,
+                baseline_run_hash=baseline_hash,
+                gate_config=gate_config_snapshot,
+                gate_report=copy.deepcopy(report_snapshot),
+                outcome=outcome,
+                operator_user_id=actor_user_id,
+                workspace_id=agent.workspace_id,
+            )
+        )
+
         agent.published_version = version
         await self.db.flush()
 
@@ -611,6 +662,43 @@ class AgentVersionService:
         if gate_result is not None:
             detail["evaluation_report"] = self._gate_report(gate_result, bypassed=bypassed)
         return detail
+
+    async def list_publications(
+        self,
+        agent_id: uuid.UUID,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        is_system_scope: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List append-only publication receipts for an agent, newest first.
+
+        Pure snapshot reads — the gate is never recomputed. Missing workspace
+        identity fails closed unless the caller is explicitly system-scoped.
+        """
+        if not is_system_scope and workspace_id is None:
+            raise ValueError(f"Agent {agent_id} not found")
+        agent = await self._get_agent(agent_id)
+        if not is_system_scope and agent.workspace_id != workspace_id:
+            raise ValueError(f"Agent {agent_id} not found")
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError("Invalid publication pagination")
+        base = (
+            select(AgentPublicationModel)
+            .where(
+                AgentPublicationModel.agent_id == agent.id,
+                AgentPublicationModel.workspace_id == agent.workspace_id,
+                ~AgentPublicationModel.deleted,
+            )
+            .order_by(AgentPublicationModel.created_at.desc(), AgentPublicationModel.id.desc())
+        )
+        total_result = await self.db.execute(select(func.count()).select_from(base.subquery()))
+        total = int(total_result.scalar_one())
+        result = await self.db.execute(base.limit(limit).offset(offset))
+        rows = result.scalars().all()
+        items = [AgentPublicationReadSchema.model_validate(row) for row in rows]
+        return {"items": items, "total": total}
 
     async def rollback_to_version(
         self,
