@@ -10,6 +10,7 @@ from _decision_helpers import decision_database, prepare_decision_run
 from hecate_durable.runtime_hook import InMemoryAcceptedDecisionStore, SqlAcceptedDecisionStore
 from hecate_durable.storage.models import AcceptedDecisionRow, EventRow
 from hecate_runtime.accepted_decision import (
+    FINAL_ANSWER_SCHEMA_VERSION,
     AcceptedAction,
     AcceptedDecisionRecord,
     DecisionConflictError,
@@ -46,6 +47,17 @@ def _record(run_ref: RunRef, step: str = "step", answer: str = "do-x") -> Accept
         {"config": "v1"},
         {"answer": answer},
         (AcceptedAction("action-1", "biz_tool", {"nested": {"q": 1}}, "non_idempotent_write"),),
+    )
+
+
+def _final_answer_record(run_ref: RunRef, step: str = "step", text: str = "the final answer") -> AcceptedDecisionRecord:
+    return AcceptedDecisionRecord(
+        run_ref,
+        step,
+        {"config": "v1"},
+        {"text": text},
+        (),
+        schema_version=FINAL_ANSWER_SCHEMA_VERSION,
     )
 
 
@@ -92,7 +104,8 @@ async def test_conflicting_content_does_not_replace_original(case, field):
 
 
 @pytest.mark.parametrize("fault", ["missing", "unknown", "holder", "higher", "lower", "scope"])
-async def test_invalid_real_ownership_rejected_before_first_write(case, fault):
+@pytest.mark.parametrize("record_factory", [_record, _final_answer_record], ids=["actions", "final-answer"])
+async def test_invalid_real_ownership_rejected_before_first_write(case, fault, record_factory):
     store, backend, _, run, owner, _ = case
     forged = owner
     if fault == "missing":
@@ -108,23 +121,24 @@ async def test_invalid_real_ownership_rejected_before_first_write(case, fault):
     else:
         forged = prepare_decision_run(backend, RunRef("other", run.run_id), "other-worker")
     with pytest.raises(StaleDecisionFenceError):
-        await store.commit(_record(run), forged)
+        await store.commit(record_factory(run), forged)
     assert await store.lookup(run, "step") is None
 
 
-async def test_expiry_and_takeover_fence_new_steps_and_idempotent_commits(case):
+@pytest.mark.parametrize("record_factory", [_record, _final_answer_record], ids=["actions", "final-answer"])
+async def test_expiry_and_takeover_fence_new_steps_and_idempotent_commits(case, record_factory):
     store, backend, clock, run, owner, _ = case
-    first = await store.commit(_record(run), owner)
+    first = await store.commit(record_factory(run), owner)
     clock.advance()
-    for record in (_record(run), _record(run, step="new")):
+    for record in (record_factory(run), record_factory(run, step="new")):
         with pytest.raises(StaleDecisionFenceError):
             await store.commit(record, owner)
     new_owner = prepare_decision_run(backend, run, "new-worker")
-    for record in (_record(run), _record(run, step="new")):
+    for record in (record_factory(run), record_factory(run, step="new")):
         with pytest.raises(StaleDecisionFenceError):
             await store.commit(record, owner)
-    assert await store.commit(_record(run), new_owner) == first
-    assert (await store.commit(_record(run, step="new"), new_owner)).decision_step_id == "new"
+    assert await store.commit(record_factory(run), new_owner) == first
+    assert (await store.commit(record_factory(run, step="new"), new_owner)).decision_step_id == "new"
 
 
 async def test_nested_mutation_cannot_rewrite_accepted_fact(case):
@@ -182,7 +196,8 @@ async def test_same_run_id_in_another_issuer_is_isolated(case):
     assert (await store.lookup(other, "step")).accepted_output == {"answer": "other"}
 
 
-async def test_outbox_failure_rolls_back_acceptance(case, monkeypatch):
+@pytest.mark.parametrize("record_factory", [_record, _final_answer_record], ids=["actions", "final-answer"])
+async def test_outbox_failure_rolls_back_acceptance(case, monkeypatch, record_factory):
     store, backend, _, run, owner, _ = case
     if not isinstance(store, SqlAcceptedDecisionStore):
         store._fail_commits = True
@@ -195,14 +210,15 @@ async def test_outbox_failure_rolls_back_acceptance(case, monkeypatch):
         original = backend.events.emit
         monkeypatch.setattr(backend.events, "emit", fail_after_event)
     with pytest.raises(DecisionStoreUnavailableError):
-        await store.commit(_record(run), owner)
+        await store.commit(record_factory(run), owner)
     assert await store.lookup(run, "step") is None
     assert _accepted_events(backend) == []
 
 
-async def test_corrupt_storage_fails_closed(case):
+@pytest.mark.parametrize("record_factory", [_record, _final_answer_record], ids=["actions", "final-answer"])
+async def test_corrupt_storage_fails_closed(case, record_factory):
     store, backend, _, run, owner, _ = case
-    await store.commit(_record(run), owner)
+    await store.commit(record_factory(run), owner)
     if not isinstance(store, SqlAcceptedDecisionStore):
         store._unavailable = True
     else:
@@ -226,3 +242,80 @@ async def test_storage_failure_never_becomes_a_miss(case, monkeypatch):
         await store.lookup(run, "step")
     with pytest.raises(DecisionStoreUnavailableError):
         await store.commit(_record(run), owner)
+
+
+async def test_final_answer_roundtrip_preserves_version_text_and_empty_actions(case):
+    store, backend, _, run, owner, _ = case
+    first = await store.commit(_final_answer_record(run), owner)
+    again = await store.commit(_final_answer_record(run), owner)
+    assert first == again == await store.lookup(run, "step")
+    assert first.schema_version == FINAL_ANSWER_SCHEMA_VERSION
+    assert first.actions == ()
+    assert first.accepted_output == {"text": "the final answer"}
+    assert first.content_digest == canonical_decision_digest(first)
+    if isinstance(store, SqlAcceptedDecisionStore):
+        events = _accepted_events(backend)
+        assert len(events) == 1
+        assert events[0]["payload"]["schema_version"] == FINAL_ANSWER_SCHEMA_VERSION
+        assert events[0]["payload"]["action_keys"] == []  # a final answer dispatches nothing
+
+
+async def test_final_answer_content_conflicts_with_the_action_decision(case):
+    store, _, _, run, owner, _ = case
+    original = await store.commit(_record(run), owner)
+    with pytest.raises(DecisionConflictError):  # different version and content, same identity
+        await store.commit(_final_answer_record(run), owner)
+    found = await store.lookup(run, "step")
+    assert found == original
+    assert found.schema_version == 1  # the accepted action decision is untouched
+
+
+async def test_invalid_final_answer_payloads_never_commit(case):
+    store, _, _, run, owner, _ = case
+    for record in (
+        replace(_final_answer_record(run), accepted_output={"text": "   "}),  # blank text
+        replace(_final_answer_record(run), accepted_output={}),  # missing text
+        replace(_final_answer_record(run), accepted_output={"text": 3}),  # non-string text
+        replace(_final_answer_record(run), actions=(AcceptedAction("action-1", "biz_tool", {}),)),  # carries actions
+        replace(_final_answer_record(run), schema_version=99),  # unknown version
+    ):
+        with pytest.raises(DecisionValidationError):
+            await store.commit(record, owner)
+        assert await store.lookup(run, "step") is None
+
+
+async def test_final_answer_rejects_changed_text_without_replacing_original(case):
+    store, _, _, run, owner, _ = case
+    original = await store.commit(_final_answer_record(run), owner)
+    with pytest.raises(DecisionConflictError):
+        await store.commit(_final_answer_record(run, text="different answer"), owner)
+    assert await store.lookup(run, "step") == original
+
+
+@pytest.mark.parametrize("fault", ["text", "version", "digest"])
+async def test_corrupt_final_answer_never_requeries_the_model(case, fault):
+    from hecate_runtime.decision_step import DecisionResponder, DecisionStep
+
+    class StubForbiddenResponder(DecisionResponder):
+        """Fail if damaged persisted facts are treated as a cache miss."""
+
+        async def respond(self, run_ref, decision_step_id, input_refs):
+            """Reject any model attempt after loading a damaged final answer."""
+            raise AssertionError("corrupt final answer triggered a model call")
+
+    store, backend, _, run, owner, _ = case
+    original = await store.commit(_final_answer_record(run), owner)
+    changes = {
+        "text": {"accepted_output": {"text": " "}},
+        "version": {"schema_version": 99},
+        "digest": {"content_digest": "broken"},
+    }[fault]
+    if isinstance(store, SqlAcceptedDecisionStore):
+        with backend.session_factory() as session, session.begin():
+            session.execute(update(AcceptedDecisionRow).values(**changes))
+    else:
+        store._records[(run.issuer_domain, run.run_id, "step")] = replace(original, **changes)
+    with pytest.raises((DecisionStoreUnavailableError, DecisionValidationError)):
+        await DecisionStep(store, StubForbiddenResponder()).execute(
+            run_ref=run, decision_step_id="step", input_refs={"config": "v1"}, ownership=owner
+        )

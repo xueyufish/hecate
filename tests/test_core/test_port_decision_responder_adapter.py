@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from hecate_runtime.accepted_decision import DecisionValidationError, RunRef
+from hecate_runtime.decision_step import KIND_FINAL_ANSWER
 from hecate_runtime.port_decision_responder import PortDecisionResponder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -96,5 +97,47 @@ async def test_production_stream_is_converted_and_accounted_once(
     assert service.calls[0]["temperature"] == 0.2
     assert service.calls[0]["max_tokens"] == 123
     # Conversion failure does not erase the cost of a completed model attempt.
+    assert len(quota.records) == 1
+    assert quota.records[0]["amount"] == pytest.approx(20 * 0.00001)
+
+
+@pytest.mark.parametrize("with_tools", [False, True])
+async def test_production_text_answer_is_converted_and_accounted_once(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch, with_tools: bool
+) -> None:
+    """The real adapter's text/terminal-usage stream supports the final-answer exit."""
+
+    class StubTextLLMService:
+        """Emit a complete text response with provider-reported usage."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat_stream(self, **kwargs: Any) -> AsyncGenerator[dict[str, Any], None]:
+            """Yield text deltas and one terminal usage report."""
+            self.calls += 1
+            yield {"content": "Final "}
+            yield {"content": "answer"}
+            yield {"usage": {"prompt_tokens": 13, "completion_tokens": 7, "total_tokens": 20}}
+
+    quota = StubQuotaService()
+    monkeypatch.setattr(runtime_port_adapter, "_quota_service_factory", lambda db, workspace_id: quota)
+    service = StubTextLLMService()
+    port = runtime_port_adapter._ProductionRuntimePort(db=db_session, llm_service=service, workspace_id=uuid.uuid4())
+    definitions = {"biz_tool": {"type": "function", "function": {"name": "biz_tool"}}} if with_tools else {}
+    usage_reports: list[dict[str, Any]] = []
+    proposal = await PortDecisionResponder(
+        port,
+        messages=[{"role": "user", "content": "Answer directly"}],
+        config={"model": "test-model"},
+        tool_definitions=definitions,
+        expected_refs={"input": "v1"},
+        on_usage=usage_reports.append,
+    ).respond(RunRef("test", "r"), "step", {"input": "v1"})
+    assert proposal.kind == KIND_FINAL_ANSWER
+    assert proposal.accepted_output == {"text": "Final answer"}
+    assert proposal.actions == ()
+    assert service.calls == 1
+    assert usage_reports == [{"prompt_tokens": 13, "completion_tokens": 7, "total_tokens": 20}]
     assert len(quota.records) == 1
     assert quota.records[0]["amount"] == pytest.approx(20 * 0.00001)

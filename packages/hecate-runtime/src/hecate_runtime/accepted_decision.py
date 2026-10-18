@@ -20,6 +20,11 @@ class DecisionValidationError(ValueError):
     """A decision or its identity is invalid and cannot become accepted."""
 
 
+ACTION_DECISION_SCHEMA_VERSION = 1
+FINAL_ANSWER_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = (ACTION_DECISION_SCHEMA_VERSION, FINAL_ANSWER_SCHEMA_VERSION)
+
+
 class DecisionConflictError(ValueError):
     """Different content or input versions were presented for an accepted step."""
 
@@ -130,7 +135,14 @@ class AcceptedAction:
 
 @dataclass(frozen=True)
 class AcceptedDecisionRecord:
-    """Versioned accepted output and its ordered, restorable action set."""
+    """Versioned accepted output and its ordered, restorable action set.
+
+    ``schema_version`` discriminates the record kind: version 1 is an action
+    decision with a nonempty action set; version 2 is a final-answer decision
+    whose action set is empty and whose accepted output carries the nonblank
+    answer text. The version participates in the content digest, so records
+    of different kinds never collide on the same identity.
+    """
 
     run_ref: RunRef
     decision_step_id: str
@@ -174,29 +186,41 @@ class AcceptedDecisionRecord:
 
 
 def validate_decision(record: AcceptedDecisionRecord) -> None:
-    """Validate both direct store writes and model proposals before acceptance."""
+    """Validate both direct store writes and model proposals before acceptance.
+
+    The record version selects the shape contract: action decisions keep the
+    original nonempty-action rules; final-answer decisions carry no actions
+    and must hold nonblank accepted text. Unknown versions fail closed.
+    """
     if not isinstance(record.run_ref, RunRef):
         raise DecisionValidationError("run_ref must be a RunRef")
     _identity(record.decision_step_id, "decision_step_id")
-    if type(record.schema_version) is not int or record.schema_version != 1:
+    if type(record.schema_version) is not int or record.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise DecisionValidationError("unsupported accepted-decision schema version")
     if not isinstance(record.input_refs, dict) or not isinstance(record.accepted_output, dict):
         raise DecisionValidationError("input_refs and accepted_output must be JSON objects")
-    if not isinstance(record.actions, tuple) or not record.actions:
-        raise DecisionValidationError("this decision slice requires a nonempty action tuple")
-    keys = set()
-    for action in record.actions:
-        if not isinstance(action, AcceptedAction):
-            raise DecisionValidationError("actions must be AcceptedAction records")
-        _identity(action.action_key, "action_key")
-        _identity(action.tool, "tool")
-        if action.action_key in keys:
-            raise DecisionValidationError("duplicate action key")
-        keys.add(action.action_key)
-        if not isinstance(action.arguments, dict):
-            raise DecisionValidationError("action arguments must be a JSON object")
-        if action.side_effect_class not in {item.value for item in SideEffectClass}:
-            raise DecisionValidationError("unknown side-effect classification")
+    if record.schema_version == FINAL_ANSWER_SCHEMA_VERSION:
+        if not isinstance(record.actions, tuple) or record.actions:
+            raise DecisionValidationError("a final-answer decision must not carry actions")
+        text = record.accepted_output.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise DecisionValidationError("a final-answer decision requires nonblank accepted text")
+    else:
+        if not isinstance(record.actions, tuple) or not record.actions:
+            raise DecisionValidationError("this decision slice requires a nonempty action tuple")
+        keys = set()
+        for action in record.actions:
+            if not isinstance(action, AcceptedAction):
+                raise DecisionValidationError("actions must be AcceptedAction records")
+            _identity(action.action_key, "action_key")
+            _identity(action.tool, "tool")
+            if action.action_key in keys:
+                raise DecisionValidationError("duplicate action key")
+            keys.add(action.action_key)
+            if not isinstance(action.arguments, dict):
+                raise DecisionValidationError("action arguments must be a JSON object")
+            if action.side_effect_class not in {item.value for item in SideEffectClass}:
+                raise DecisionValidationError("unknown side-effect classification")
     canonical_decision_digest(record)
 
 

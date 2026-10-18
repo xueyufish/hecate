@@ -3,12 +3,15 @@
 AgentTurn is pure composition over the accepted-decision stack. One call
 processes exactly one ``(run_ref, decision_step_id)`` pair in a fixed
 order — find-or-accept the decision first, then serially dispatch the
-committed actions. The record digest returned by the decision phase pins
-the action phase: a record swapped in between acceptance and dispatch is
-a conflict, never new facts. Recovery re-enters through the same call;
-the decision lookup hits first, so a turn that died after commit resumes
-with zero model calls. The turn speaks only for itself: its outcome
-never advances a Task, triggers replanning or decides completion.
+committed actions, or return the accepted text when the decision is a
+final answer (empty action set, zero dispatch). The record digest returned
+by the decision phase pins the action phase: a record swapped in between
+acceptance and dispatch is a conflict, never new facts. Recovery re-enters
+through the same call; the decision lookup hits first, so a turn that died
+after commit resumes with zero model calls. The turn speaks only for
+itself: its outcome never advances a Task, triggers replanning or decides
+completion — a final answer is an accepted model output, not a completion
+fact.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from typing import Any
 from hecate_runtime.accepted_action_batch import AcceptedActionBatch, AcceptedActionBatchReport
 from hecate_runtime.accepted_action_step import AcceptedActionStep
 from hecate_runtime.accepted_decision import (
+    FINAL_ANSWER_SCHEMA_VERSION,
     AcceptedDecisionRecord,
     AcceptedDecisionStore,
     DecisionOwnership,
@@ -45,6 +49,16 @@ class AgentTurnOutcome:
     record: AcceptedDecisionRecord
     resumed: bool
     report: AcceptedActionBatchReport
+
+    @property
+    def is_final_answer(self) -> bool:
+        """Whether the committed decision is an accepted final answer.
+
+        Derived from the record version so the discriminator cannot drift
+        from the committed facts. A final answer is an accepted model
+        output with zero dispatch — never a task completion decision.
+        """
+        return self.record.schema_version == FINAL_ANSWER_SCHEMA_VERSION
 
 
 class AgentTurn:

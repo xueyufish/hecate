@@ -2,7 +2,10 @@
 
 Hosts bind prepared inputs and version references before invoking this adapter.
 DecisionStep owns acceptance and recovery; RuntimePort owns model accounting.
-This component neither dispatches tools nor retries model calls.
+This component neither dispatches tools nor retries model calls. A response
+without tool calls becomes a final-answer proposal when its aggregated text
+is nonblank; tool calls that appear in the stream but vanish from the final
+aggregation are an error, never a downgraded answer.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ from contextlib import aclosing
 from typing import Any
 
 from hecate_runtime.accepted_decision import AcceptedAction, DecisionValidationError, RunRef, canonical_json
-from hecate_runtime.decision_step import DecisionProposal, DecisionResponder
+from hecate_runtime.decision_step import KIND_ACTIONS, KIND_FINAL_ANSWER, DecisionProposal, DecisionResponder
 from hecate_runtime.ports import RuntimePort
 from hecate_runtime.tool_side_effects import classify
 
@@ -77,11 +80,10 @@ class PortDecisionResponder(DecisionResponder):
             raise DecisionValidationError("decision_step_id must be nonblank and at most 256 characters")
         if not isinstance(input_refs, dict) or canonical_json(input_refs) != self._expected_refs_json:
             raise DecisionValidationError("input refs do not match the frozen invocation references")
-        if not self._tool_names:
-            raise DecisionValidationError("tool definition snapshot is empty; an action decision cannot be proposed")
 
         text_parts: list[str] = []
         final_tool_calls: list[dict[str, Any]] | None = None
+        saw_tool_calls = False
         usage: dict[str, Any] | None = None
         # Fresh copies keep provider mutations from changing future proposals.
         async with aclosing(
@@ -104,15 +106,28 @@ class PortDecisionResponder(DecisionResponder):
                 if chunk_tool_calls is not None:
                     # Snapshot before advancing the stream: ports may reuse buffers.
                     final_tool_calls = self._tool_call_snapshot(chunk_tool_calls)
+                    saw_tool_calls = saw_tool_calls or bool(final_tool_calls)
 
-        if not final_tool_calls:
-            raise DecisionValidationError("structured response carried no tool calls; this slice requires actions")
-        actions = tuple(
-            self._action(run_ref, decision_step_id, position, entry) for position, entry in enumerate(final_tool_calls)
-        )
+        if final_tool_calls:
+            actions = tuple(
+                self._action(run_ref, decision_step_id, position, entry)
+                for position, entry in enumerate(final_tool_calls)
+            )
+            proposal = DecisionProposal(
+                accepted_output={"text": "".join(text_parts)}, actions=actions, kind=KIND_ACTIONS
+            )
+        else:
+            if saw_tool_calls:
+                raise DecisionValidationError(
+                    "tool calls appeared in the stream but vanished from the final aggregation"
+                )
+            text = "".join(text_parts)
+            if not text.strip():
+                raise DecisionValidationError("structured response carried neither tool calls nor nonblank text")
+            proposal = DecisionProposal(accepted_output={"text": text}, actions=(), kind=KIND_FINAL_ANSWER)
         if usage is not None and self._on_usage is not None:
             self._on_usage(usage)
-        return DecisionProposal(accepted_output={"text": "".join(text_parts)}, actions=actions)
+        return proposal
 
     @staticmethod
     def _tool_map(tools: Any) -> dict[str, dict[str, Any]]:
