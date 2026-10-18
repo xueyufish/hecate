@@ -86,7 +86,7 @@ async def test_denied_call_is_not_resurrected_by_later_allow_rule():
     assert tracker.is_denied("tc-monotonic")
 
     # Swap the ruleset to ALLOW-only. The tracker MUST still refuse.
-    worker._tool_rules = allow_rules
+    worker._executor._tool_rules = allow_rules
     second = await worker.execute(node_id="n", node_config={}, channel_snapshot=snapshot, execution_context=exec_ctx)
     msg = second.channel_updates["messages"][0]
     assert msg["is_error"] is True
@@ -124,7 +124,7 @@ async def test_denied_call_is_not_resurrected_by_callback_approval():
     assert tracker.is_denied("tc-revive")
 
     # Now swap to ASK + an always-approve callback — still refused.
-    worker._tool_rules = ask_rules
+    worker._executor._tool_rules = ask_rules
     second = await worker.execute(node_id="n", node_config={}, channel_snapshot=snapshot, execution_context=exec_ctx)
     assert second.channel_updates["messages"][0]["is_error"] is True
     assert port.calls == []
@@ -155,7 +155,7 @@ async def test_different_tool_call_ids_are_independent():
     assert res_a.channel_updates["messages"][0]["is_error"] is True
 
     # B is independent.
-    worker._tool_rules = allow_b
+    worker._executor._tool_rules = allow_b
     b = _payload("tc-b", "read_file", {"path": "x"})
     res_b = await worker.execute(
         node_id="n", node_config={}, channel_snapshot=b, execution_context={"session_id": uuid.uuid4(), "superstep": 0}
