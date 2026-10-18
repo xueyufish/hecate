@@ -7,6 +7,7 @@ import { Agent } from "@/lib/api-types";
 import { AgentConfigurator, AgentFormData } from "@/components/agent/agent-configurator";
 import { ChannelManager } from "@/components/agent/channel-manager";
 import { VersionPanel } from "@/components/agent/version-panel";
+import { PublicationHistoryPanel } from "@/components/agent/publication-history-panel";
 import { AlertTriangle, Download } from "lucide-react";
 
 export default function AgentDetailPage() {
@@ -133,6 +134,7 @@ export default function AgentDetailPage() {
       />
 
       <VersionPanel agentId={agentId} />
+      <PublicationHistoryPanel agentId={agentId} />
       <ChannelManager agentId={agentId} />
     </div>
   );
