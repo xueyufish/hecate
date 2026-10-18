@@ -8,6 +8,7 @@ Task lifecycle surface over :class:`TaskControlService`:
   dispatch) and the client follows progress via the event views.
 - ``GET /api/tasks`` / ``GET /api/tasks/{id}`` — workspace-scoped queries
   with the lifecycle projection.
+- ``GET /api/runs/{run_id}/actions`` — scoped action-ledger summaries.
 - ``GET /api/runs/{run_id}/events`` — cursor-paginated event reads;
   ``GET /api/runs/{run_id}/events/stream`` — the SSE subscribe view on
   the same stream (resume by cursor after a disconnect).
@@ -345,6 +346,15 @@ async def get_run(run_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[
     """Run detail with the platform-side projection."""
     try:
         return await service.get_run_detail(_workspace_id(ctx), run_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+
+
+@runs_router.get("/{run_id}/actions")
+async def list_run_actions(run_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
+    """Whitelisted action-ledger records for one run (read-only, any attempt)."""
+    try:
+        return await service.list_run_actions(_workspace_id(ctx), run_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
 

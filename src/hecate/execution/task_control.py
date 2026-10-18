@@ -523,6 +523,67 @@ class TaskControlService:
             raise TaskControlNotFoundError(str(exc)) from exc
         return self._run_summary(run)
 
+    async def list_run_actions(self, workspace_id: uuid.UUID, run_id: uuid.UUID) -> dict[str, Any]:
+        """Read one authorized Run's local action ledger without changing state.
+
+        Both the Run and its parent Task must remain visible in the workspace.
+        Platform ledger rows use the platform Run reference, independently of
+        the engine session/backend reference. An unsupported store is labeled;
+        query failures never become an empty successful response.
+        """
+        try:
+            run = await self._registry.get_run(run_id, workspace_id)
+            await self._registry.get_task(run.task_id, workspace_id)
+        except TaskNotFoundError as exc:
+            raise TaskControlNotFoundError(f"run {run_id} not found in workspace") from exc
+        query = getattr(self._store, "list_run_actions", None)
+        if not callable(query):
+            return {
+                "run_id": str(run.id),
+                "task_id": str(run.task_id),
+                "actions": [],
+                "ledger_source": self._ledger_source,
+                "supported": False,
+            }
+        try:
+            rows = await asyncio.to_thread(query, run_row_ref(run))
+            actions = [self._run_action_summary(row) for row in rows]
+        except Exception as exc:
+            # Driver exceptions may contain URLs, SQL parameters or result
+            # payloads; log only safe attribution and never publish the text.
+            logger.error("Action ledger query failed for run %s (%s)", run_id, type(exc).__name__)
+            raise TaskControlError(f"action ledger query failed for run {run_id}") from exc
+        return {
+            "run_id": str(run.id),
+            "task_id": str(run.task_id),
+            "actions": actions,
+            "ledger_source": self._ledger_source,
+            "supported": True,
+        }
+
+    @staticmethod
+    def _run_action_summary(row: dict[str, Any]) -> dict[str, Any]:
+        """Whitelist projection of one ledger action row.
+
+        Field-by-field construction on purpose: raw arguments, full result
+        payloads, session ids and claim tokens never enter the response, and
+        future ledger columns stay out by default.
+        """
+        intent = row.get("intent") or {}
+        outcome = row.get("last_outcome") or {}
+        return {
+            "action_key": row.get("action_key"),
+            "execution_id": row.get("execution_id"),
+            "tool_call_id": row.get("tool_call_id"),
+            "tool_name": intent.get("action_name"),
+            "arguments_digest": intent.get("arguments_digest"),
+            "side_effect_class": intent.get("side_effect_class"),
+            "state": row.get("state"),
+            "outcome": outcome.get("outcome"),
+            "result_digest": outcome.get("result_digest"),
+            "pending_reconciliation": row.get("pending_reconciliation"),
+        }
+
     async def read_run_events(
         self,
         workspace_id: uuid.UUID,
