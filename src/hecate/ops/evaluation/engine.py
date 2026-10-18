@@ -14,6 +14,7 @@ Use :func:`get_evaluator_class` for the public lookup.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -25,9 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.plugin.manifest import PluginManifest
 from hecate.core.plugin.registry import PluginRegistry
 from hecate.models.evaluation import (
+    EvaluationDatasetModel,
     EvaluationItemModel,
     EvaluationRunModel,
     EvaluationScoreModel,
+    EvaluationTaskModel,
     RunStatus,
 )
 from hecate.ops.evaluation.evaluator import Evaluator
@@ -90,6 +93,7 @@ class EvaluationEngine:
         intent_package: dict | None = None,
         agent_definition: Any = None,
         rollout_capture: list[dict] | None = None,
+        agent_version: int | None = None,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
@@ -113,6 +117,14 @@ class EvaluationEngine:
             agent_id: The agent under test, required when ``answer_source``
                 is ``AGENT`` — one ``RuntimePort.agent_execute`` call per
                 item lacking a stored answer.
+            agent_version: Committed agent version to bind the run to
+                (step11). When set with ``answer_source=AGENT`` the run row
+                pins the version at start and answers are generated from the
+                frozen snapshot (via the versioning service's execution
+                definition); resolution failure or a cross-workspace task
+                fails the run explicitly instead of falling back to the
+                live draft. ``None`` evaluates the live draft (unchanged
+                legacy behavior).
             run: Pre-created run row to reuse (task-triggered runs carry
                 ``task_id``); a fresh row is created when omitted.
             summary_config: Optional task-run aggregation config —
@@ -149,6 +161,14 @@ class EvaluationEngine:
             Exception: Re-raises any unhandled error after marking the run as
                 failed in the database.
         """
+        if agent_version is not None and answer_source != AnswerSource.AGENT:
+            raise ValueError("agent_version requires answer_source=agent")
+        if run is not None and run.completed_at is not None:
+            raise ValueError("a completed evaluation run cannot be rebound or rerun")
+        if run is not None and run.agent_version is not None and agent_version is None:
+            raise ValueError("a bound evaluation run requires its original agent_version")
+        if run is not None and run.dataset_id != dataset_id:
+            raise ValueError("evaluation run dataset does not match the requested dataset")
         if answer_source == AnswerSource.AGENT and agent_id is None:
             msg = "answer_source='agent' requires agent_id"
             raise ValueError(msg)
@@ -169,6 +189,10 @@ class EvaluationEngine:
                 status=RunStatus.RUNNING.value,
                 evaluator_configs=[e.name for e in evaluators],
             )
+            if answer_source == AnswerSource.AGENT and agent_version is not None:
+                dataset = await self.db.get(EvaluationDatasetModel, dataset_id)
+                if dataset is not None:
+                    run.workspace_id = dataset.workspace_id
             self.db.add(run)
             await self.db.flush()
 
@@ -187,6 +211,12 @@ class EvaluationEngine:
             # evaluation run — item executions attach runs/associations to
             # it instead of minting a task per item. Best-effort (fail-open).
             workflow_correlation_task_id = await self._ensure_workflow_task(dataset_id, workflow_id)
+
+        # step11: bind the run to a committed agent version BEFORE any answer
+        # generation — the pinned identity on the run row is what the publish
+        # gate matches, and answers must come from the frozen snapshot.
+        if answer_source == AnswerSource.AGENT and agent_version is not None:
+            agent_definition = await self._bind_agent_version(run, agent_id, agent_version)
 
         run.started_at = datetime.now(UTC)
         await self.db.flush()
@@ -210,6 +240,9 @@ class EvaluationEngine:
                 if tags:
                     wanted = set(tags)
                     items = [it for it in items if any(t in wanted for t in (it.tags or []))]
+
+            if run.agent_version is not None and not items:
+                raise ValueError("version-bound evaluation requires at least one item")
 
             item_scores: dict[str, list[Score]] = {}
             all_metric_values: dict[str, list[float]] = {}
@@ -320,6 +353,95 @@ class EvaluationEngine:
         except Exception:
             run.status = RunStatus.FAILED.value
             run.completed_at = datetime.now(UTC)
+            await self.db.flush()
+            raise
+
+    async def _bind_agent_version(
+        self,
+        run: EvaluationRunModel,
+        agent_id: uuid.UUID,
+        agent_version: int,
+    ) -> Any:
+        """Freeze the subject/configuration on the run and validate its tenant boundary."""
+        from hecate.studio.agents.versioning import (
+            AgentVersionService,
+            ResolvedAgentConfig,
+            build_execution_definition,
+            canonical_hash,
+        )
+
+        try:
+            from hecate.models.agent import AgentModel
+
+            agent = await self.db.get(AgentModel, agent_id)
+            if agent is None or agent.deleted:
+                raise ValueError("agent under evaluation does not exist")
+            resolved = await AgentVersionService(self.db).resolve(agent_id, agent_version)
+            dataset = await self.db.get(EvaluationDatasetModel, run.dataset_id)
+            task = await self.db.get(EvaluationTaskModel, run.task_id) if run.task_id else None
+            if (
+                dataset is None
+                or dataset.deleted
+                or agent.workspace_id != resolved.workspace_id
+                or run.workspace_id != resolved.workspace_id
+                or dataset.workspace_id != resolved.workspace_id
+                or (
+                    run.task_id is not None
+                    and (task is None or task.deleted or task.workspace_id != resolved.workspace_id)
+                )
+            ):
+                raise ValueError("agent_version_cross_workspace")
+            config_hash = canonical_hash(resolved.config)
+            if any(
+                value is not None
+                for value in (run.agent_id, run.agent_version, run.agent_config_hash, run.agent_snapshot)
+            ):
+                if (run.agent_id, run.agent_version, run.agent_config_hash) != (agent_id, agent_version, config_hash):
+                    raise ValueError("evaluation_run_binding_conflict")
+                frozen = run.agent_snapshot
+                if frozen is None or canonical_hash(frozen.get("config", {})) != config_hash:
+                    raise ValueError("evaluation_run_binding_incomplete")
+            else:
+                frozen = copy.deepcopy(
+                    {
+                        "config": resolved.config,
+                        "pinned_refs": resolved.pinned_refs,
+                        "ref_manifest": resolved.ref_manifest,
+                        "workflow_version": resolved.workflow_version,
+                    }
+                )
+                run.agent_id = agent_id
+                run.agent_version = agent_version
+                run.agent_config_hash = config_hash
+                run.agent_snapshot = frozen
+            await self.db.flush()
+            return build_execution_definition(
+                ResolvedAgentConfig(
+                    agent_id=agent_id,
+                    workspace_id=resolved.workspace_id,
+                    source="version",
+                    version=agent_version,
+                    config=copy.deepcopy(frozen["config"]),
+                    workflow_version=frozen.get("workflow_version"),
+                    pinned_refs=copy.deepcopy(frozen.get("pinned_refs", [])),
+                    ref_manifest=copy.deepcopy(frozen.get("ref_manifest", [])),
+                )
+            )
+        except ValueError as exc:
+            run.status = RunStatus.FAILED.value
+            run.completed_at = datetime.now(UTC)
+            reason = str(exc)
+            run.summary = {
+                "error": reason
+                if reason
+                in {
+                    "agent_version_cross_workspace",
+                    "evaluation_run_binding_conflict",
+                    "evaluation_run_binding_incomplete",
+                }
+                else "agent_version_unresolvable",
+                "detail": reason,
+            }
             await self.db.flush()
             raise
 
@@ -479,13 +601,15 @@ class EvaluationEngine:
                 return content
             return await self._generate_answer_via_pipeline(item.query, item.context or [])
 
-        generated = item.generated_answer or ""
+        generated = "" if run.agent_version is not None else (item.generated_answer or "")
         if not generated and answer_source is not AnswerSource.MANUAL:
             if semaphore is not None:
                 async with semaphore:
                     try:
                         generated = await _gen()
                     except Exception as e:
+                        if run.agent_version is not None:
+                            raise
                         logger.error(
                             "Answer source %s failed on item %s: %s",
                             answer_source.value,
@@ -506,6 +630,8 @@ class EvaluationEngine:
                 try:
                     generated = await _gen()
                 except Exception as e:
+                    if run.agent_version is not None:
+                        raise
                     logger.error(
                         "Answer source %s failed on item %s: %s",
                         answer_source.value,

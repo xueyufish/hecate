@@ -344,6 +344,7 @@ class WorkflowExecutionService:
                 skills_block = await loader.format_skills(
                     agent_id=agent_uuid,
                     workspace_id=agent_workspace_id,
+                    explicit_skill_names=list(cfg.get("skills") or []) if agent_version is not None else None,
                 )
                 system_prompt = f"{persona}\n\n{skills_block}" if skills_block else persona
 
