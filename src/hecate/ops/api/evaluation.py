@@ -45,7 +45,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import (
+    WorkspaceRole,
+    WorkspaceRoleRequiredError,
+    ensure_workspace_role,
+    get_auth_context,
+)
 from hecate.models.evaluation import (
     EvaluationDatasetCreateSchema,
     EvaluationDatasetModel,
@@ -428,6 +433,44 @@ async def create_run(
     }
 
 
+def _run_not_found() -> HTTPException:
+    """Uniform 404 for a run that is missing, soft-deleted, or cross-workspace."""
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": {"code": "NOT_FOUND", "message": "Run not found", "details": None}},
+    )
+
+
+def _forbidden(exc: WorkspaceRoleRequiredError) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"error": {"code": "FORBIDDEN", "message": exc.message, "details": None}},
+    )
+
+
+async def _get_visible_run_or_404(
+    run_id: uuid.UUID,
+    db: AsyncSession,
+    ctx: AuthContext,
+) -> EvaluationRunModel:
+    """Resolve run ownership before callers enforce the workspace role.
+
+    Missing, soft-deleted, and cross-workspace runs surface as the same
+    not-found. Keeping role checks in callers lets comparison validate
+    both inputs' ownership before deciding whether to return 403.
+    """
+    result = await db.execute(
+        select(EvaluationRunModel).where(
+            EvaluationRunModel.id == run_id,
+            ~EvaluationRunModel.deleted,
+        )
+    )
+    run = result.scalar_one_or_none()
+    if run is None or (not ctx.is_system_scope and run.workspace_id != ctx.workspace_id):
+        raise _run_not_found()
+    return run
+
+
 @router.get("/runs")
 async def list_runs(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -437,8 +480,19 @@ async def list_runs(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """List evaluation runs with optional dataset/task filters."""
+    """List evaluation runs with optional dataset/task filters.
+
+    Scoped to the caller's workspace; system-scope identities read across
+    workspaces. Filter values referencing other workspaces only narrow the
+    result to empty — they never widen visibility.
+    """
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     base_query = select(EvaluationRunModel).where(~EvaluationRunModel.deleted)
+    if not ctx.is_system_scope:
+        base_query = base_query.where(EvaluationRunModel.workspace_id == ctx.workspace_id)
     if dataset_id:
         base_query = base_query.where(EvaluationRunModel.dataset_id == dataset_id)
     if task_id:
@@ -465,18 +519,11 @@ async def get_run(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get an evaluation run with summary statistics."""
-    result = await db.execute(
-        select(EvaluationRunModel).where(
-            EvaluationRunModel.id == run_id,
-            ~EvaluationRunModel.deleted,
-        )
-    )
-    run = result.scalar_one_or_none()
-    if run is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": {"code": "NOT_FOUND", "message": "Run not found", "details": None}},
-        )
+    try:
+        run = await _get_visible_run_or_404(run_id, db, ctx)
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
     # Get score summary
     scores_stmt = select(EvaluationScoreModel).where(EvaluationScoreModel.run_id == run_id)
@@ -506,6 +553,11 @@ async def get_run_scores(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     """Get all scores for a specific evaluation run."""
+    try:
+        await _get_visible_run_or_404(run_id, db, ctx)
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     base_query = select(EvaluationScoreModel).where(EvaluationScoreModel.run_id == run_id)
 
     count_stmt = select(func.count()).select_from(base_query.subquery())
@@ -566,26 +618,20 @@ async def compare_runs(
     ``regression_threshold`` (defaulting to the existing 7.2c default
     of 5%).
 
-    Returns ``422`` when the two runs reference different datasets or
-    disjoint evaluator sets — a misleading diff is worse than no diff.
+    Returns a uniform ``404`` when either run is missing, soft-deleted, or
+    outside the caller's workspace (system scope excepted); the body does
+    not reveal which condition or run applied. Returns ``422`` when the
+    two runs reference different datasets or disjoint evaluator sets — a
+    misleading diff is worse than no diff.
     """
-    from hecate.models.evaluation import EvaluationScoreModel
-
     threshold = body.regression_threshold if body.regression_threshold is not None else 0.05
 
-    baseline = await db.get(EvaluationRunModel, body.baseline_run_id)
-    candidate = await db.get(EvaluationRunModel, body.candidate_run_id)
-    if baseline is None or candidate is None:
-        missing = body.baseline_run_id if baseline is None else body.candidate_run_id
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"run {missing} not found",
-        )
-    if baseline.workspace_id != ctx.workspace_id or candidate.workspace_id != ctx.workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="run not found",
-        )
+    try:
+        baseline = await _get_visible_run_or_404(body.baseline_run_id, db, ctx)
+        candidate = await _get_visible_run_or_404(body.candidate_run_id, db, ctx)
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     if baseline.dataset_id != candidate.dataset_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
