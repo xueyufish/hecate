@@ -24,8 +24,10 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
+from hecate_runtime.accepted_decision import DecisionOwnership, DecisionValidationError, RunRef, canonical_json
 from hecate_runtime.action_ledger import (  # noqa: F401 - compatibility re-exports
     ActionClaimVerdict,
     ActionLedgerHook,
@@ -148,6 +150,21 @@ def _merge_resolutions(
             return ledger
         return event if event.result_digest is not None else ledger
     return event if _SEVERITY[event.state] >= _SEVERITY[ledger.state] else ledger
+
+
+@dataclass(frozen=True)
+class AcceptedToolCallOutcome:
+    """Semantic outcome from control flow, without parsing tool message text."""
+
+    status: Literal["succeeded", "failed", "withheld"]
+    result: dict[str, Any]
+
+
+@dataclass
+class _AcceptedCall:
+    run_ref: RunRef
+    ownership: DecisionOwnership
+    status: Literal["succeeded", "failed", "withheld"] = "withheld"
 
 
 class ToolCallExecutor:
@@ -483,6 +500,7 @@ class ToolCallExecutor:
         arguments_digest: str,
         side_effect_class: SideEffectClass,
         messages: list[dict],
+        accepted: _AcceptedCall | None = None,
     ) -> dict[str, Any] | None:
         """Persist intent + atomically claim via the ledger hook.
 
@@ -495,6 +513,10 @@ class ToolCallExecutor:
         if hook is None:  # pragma: no cover - caller guards on hook presence
             return None
         try:
+            if accepted is not None:
+                await hook.validate_accepted_dispatch(
+                    run_ref=accepted.run_ref, ownership=accepted.ownership, execution_id=execution_id
+                )
             verdict = await hook.record_claim(
                 session_id=str(session_key),
                 execution_id=execution_id,
@@ -505,6 +527,8 @@ class ToolCallExecutor:
                 side_effect_class=side_effect_class.value,
             )
         except Exception:
+            if accepted is not None:
+                raise
             logger.warning("Action ledger claim failed — fail closed", exc_info=True)
             if side_effect_class is SideEffectClass.READONLY:
                 return None
@@ -550,6 +574,7 @@ class ToolCallExecutor:
         status: str,
         result: Any = None,
         error: str | None = None,
+        strict: bool = False,
     ) -> None:
         """Mirror the real outcome to the ledger; never undo the effect.
 
@@ -569,7 +594,11 @@ class ToolCallExecutor:
                 result=result,
                 error=error,
             )
-        except Exception:
+        except Exception as exc:
+            if strict:
+                raise ExecutionStoppedError(
+                    "reconciliation_required", "action outcome was not durably recorded", execution_id
+                ) from exc
             logger.warning(
                 "Action ledger outcome write failed for %s — stays claimed, pending reconciliation",
                 execution_id,
@@ -577,11 +606,43 @@ class ToolCallExecutor:
             )
 
     async def execute_call(
+        self, tool_call: dict, context: dict, execution_context: dict | None = None, node_id: str = ""
+    ) -> dict[str, Any]:
+        """Execute one legacy tool call with unchanged governance/recovery semantics."""
+        return await self._execute_call(tool_call, context, execution_context, node_id)
+
+    async def execute_accepted_call(
+        self,
+        tool_call: dict,
+        context: dict,
+        execution_context: dict,
+        *,
+        run_ref: RunRef,
+        ownership: DecisionOwnership | None,
+        node_id: str = "",
+    ) -> AcceptedToolCallOutcome:
+        """Require a Run-bound fenced ledger, then reuse the shared tool pipeline."""
+        if self._action_hook is None or not isinstance(ownership, DecisionOwnership):
+            raise DecisionValidationError("accepted actions require ownership and a fenced action ledger")
+        accepted = _AcceptedCall(run_ref, ownership)
+        try:
+            result = await self._execute_call(tool_call, context, execution_context, node_id, accepted=accepted)
+        except ExecutionStoppedError:
+            raise
+        except Exception as exc:
+            if accepted.status != "withheld":
+                raise ExecutionStoppedError("reconciliation_required", "action receipt could not be confirmed") from exc
+            raise
+        return AcceptedToolCallOutcome(accepted.status, result)
+
+    async def _execute_call(
         self,
         tool_call: dict,
         context: dict,
         execution_context: dict | None = None,
         node_id: str = "",
+        *,
+        accepted: _AcceptedCall | None = None,
     ) -> dict[str, Any]:
         """Execute a single tool call with pre/post hooks.
 
@@ -619,8 +680,13 @@ class ToolCallExecutor:
         # unavailable for that call).
         session_key = (execution_context or {}).get("session_id")
         execution_id = stable_execution_id(session_key, tc_id)
+        accepted_arguments = canonical_json(arguments) if accepted is not None else None
         side_effect_class = classify(name)
-        messages = context.get("messages", []) if context else []
+        if accepted is not None:
+            await self._action_hook.validate_accepted_dispatch(
+                run_ref=accepted.run_ref, ownership=accepted.ownership, execution_id=execution_id
+            )
+        messages = [] if accepted is not None else (context.get("messages", []) if context else [])
 
         # Recovery pre-filter (read-only, no claim): terminal states resolve
         # before access checks so a replay never re-triggers approval or
@@ -637,6 +703,8 @@ class ToolCallExecutor:
             tool_name=name,
         )
         if recovery is not None:
+            if accepted is not None and not recovery.get("is_error"):
+                accepted.status = "succeeded"
             return recovery
 
         approval_ref = None
@@ -769,6 +837,8 @@ class ToolCallExecutor:
                     "is_error": True,
                 }
 
+        if accepted is not None and canonical_json(arguments) != accepted_arguments:
+            raise DecisionValidationError("middleware changed the accepted action arguments")
         # Execute tool
         span_ctx = await self._port.create_span(
             name=f"tool:{name}",
@@ -788,8 +858,11 @@ class ToolCallExecutor:
                 arguments_digest=arguments_digest,
                 side_effect_class=side_effect_class,
                 messages=messages,
+                accepted=accepted,
             )
             if hook_decision is not None:
+                if accepted is not None and not hook_decision.get("is_error"):
+                    accepted.status = "succeeded"
                 if span_ctx:
                     await self._port.end_span(span_ctx.span_id, output_data={"withheld": "ledger"})
                 return hook_decision
@@ -827,9 +900,17 @@ class ToolCallExecutor:
                     )
                 )
             if recovery is not None:
+                if accepted is not None and not recovery.get("is_error"):
+                    accepted.status = "succeeded"
                 if span_ctx:
                     await self._port.end_span(span_ctx.span_id, output_data={"withheld": "recovery"})
                 return recovery
+        if accepted is not None:
+            await self._action_hook.validate_accepted_dispatch(
+                run_ref=accepted.run_ref, ownership=accepted.ownership, execution_id=execution_id
+            )
+        if accepted is not None and canonical_json(arguments) != accepted_arguments:
+            raise DecisionValidationError("accepted action arguments changed before dispatch")
         try:
             tool_start = time.monotonic()
             # Thread agent/workspace attribution into tool context so
@@ -848,6 +929,8 @@ class ToolCallExecutor:
                 tool_context.setdefault("environment", execution_context.get("environment"))
                 if execution_context.get("session_id") is not None:
                     tool_context.setdefault("session_id", str(execution_context.get("session_id")))
+            if accepted is not None:
+                accepted.status = "failed"
             if use_sandbox:
                 from hecate_runtime.environment_volumes import resolve_environment_volumes
 
@@ -907,6 +990,7 @@ class ToolCallExecutor:
                     arguments_digest=arguments_digest,
                     status=status,
                     error=str(e)[:500],
+                    strict=accepted is not None,
                 )
             if status == RECEIPT_UNKNOWN:
                 raise ExecutionStoppedError("needs_review", str(e), action_ref=execution_id) from e
@@ -924,6 +1008,8 @@ class ToolCallExecutor:
                 "content": str(e),
                 "is_error": True,
             }
+        if accepted is not None:
+            accepted.status = "succeeded"
         # Memory tools flag weak/empty retrieval results; the escalation hint
         # processor consumes this marker at the next context assembly
         # (agent-memory-tools, retrieval escalation gating).
@@ -966,6 +1052,7 @@ class ToolCallExecutor:
                 arguments_digest=arguments_digest,
                 status=RECEIPT_SUCCEEDED,
                 result=result,
+                strict=accepted is not None,
             )
 
         if span_ctx:
