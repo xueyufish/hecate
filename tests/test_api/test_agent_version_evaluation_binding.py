@@ -16,6 +16,7 @@ Covers the binding contract end to end at the service level:
 
 from __future__ import annotations
 
+import copy
 import uuid
 from datetime import UTC, datetime
 
@@ -35,6 +36,7 @@ from hecate.models.evaluation import (
 )
 from hecate.models.skill import SkillModel
 from hecate.ops.evaluation.engine import EvaluationEngine
+from hecate.ops.evaluation.format_evaluators import ExactMatchEvaluator
 from hecate.studio.agents.versioning import (
     AgentVersionExecutionDefinition,
     AgentVersionService,
@@ -90,7 +92,7 @@ async def _seed_bound_run(
     task = EvaluationTaskModel(
         task_type="offline",
         name=f"task-{uuid.uuid4().hex[:8]}",
-        evaluator_configs=["stub"],
+        evaluator_configs=["exact_match"],
         config={"dataset_id": str(dataset.id), "answer_source": "agent", "agent_id": str(agent.id)},
         workspace_id=effective_task_ws,
     )
@@ -110,6 +112,20 @@ async def _seed_bound_run(
         completed_at=datetime.now(UTC),
         summary={"threshold": threshold},
         workspace_id=run_workspace if run_workspace is not None else agent.workspace_id,
+        # Bound runs freeze a complete single-metric scope so the positive
+        # paths keep exercising version matching; scope-less historical runs
+        # are covered separately by the with_scope=False coverage tests.
+        evaluation_scope=(
+            {
+                "schema_version": 1,
+                "item_ids": [str(item.id)],
+                "required_metrics": ["exact_match"],
+                "exempted_item_ids": [],
+                "dataset_snapshot_hash": None,
+            }
+            if resolved is not None
+            else None
+        ),
     )
     db.add(run)
     await db.flush()
@@ -119,7 +135,7 @@ async def _seed_bound_run(
             EvaluationScoreModel(
                 run_id=run.id,
                 item_id=item.id,
-                metric_name="stub",
+                metric_name="exact_match",
                 value=value,
                 source="deterministic",
                 workspace_id=run.workspace_id,
@@ -246,10 +262,10 @@ async def test_cross_workspace_run_excluded(client, db_session: AsyncSession) ->
 # --- Engine: binding at run start ---
 
 
-class _StubEvaluator:
+class _StubEvaluator(ExactMatchEvaluator):
     @property
     def name(self) -> str:
-        return "stub"
+        return "exact_match"
 
     @property
     def description(self) -> str:
@@ -258,7 +274,7 @@ class _StubEvaluator:
     async def evaluate(self, input):  # noqa: A002 — ABC signature
         from hecate.ops.evaluation.types import EvalOutput, Score
 
-        return EvalOutput(scores=[Score(metric_name="stub", value=0.5, source="deterministic")])
+        return EvalOutput(scores=[Score(metric_name="exact_match", value=0.5, source="deterministic")])
 
 
 async def _seed_dataset_with_answer(db: AsyncSession, agent: AgentModel):
@@ -284,7 +300,7 @@ async def test_engine_binds_version_and_completes(client, db_session: AsyncSessi
     task = EvaluationTaskModel(
         task_type="offline",
         name="bind-task",
-        evaluator_configs=["stub"],
+        evaluator_configs=["exact_match"],
         config={"dataset_id": str(dataset.id), "answer_source": "agent", "agent_id": str(agent.id)},
         workspace_id=agent.workspace_id,
     )
@@ -321,6 +337,13 @@ async def test_engine_binds_version_and_completes(client, db_session: AsyncSessi
     assert run.agent_version == version
     assert run.agent_id == agent.id
     assert run.agent_config_hash == canonical_hash(run.agent_snapshot["config"])
+    assert run.evaluation_scope == {
+        "schema_version": 1,
+        "item_ids": [str(_item.id)],
+        "required_metrics": ["exact_match"],
+        "exempted_item_ids": [],
+        "dataset_snapshot_hash": None,
+    }
     assert len(calls) == 1  # Stored dataset answers cannot count as executing the bound version.
     with pytest.raises(ValueError, match="completed evaluation run"):
         await engine.run([_StubEvaluator()], dataset.id, answer_source="agent", agent_id=agent.id, run=run)
@@ -332,7 +355,7 @@ async def test_engine_unknown_version_fails_run_explicitly(client, db_session: A
     task = EvaluationTaskModel(
         task_type="offline",
         name="bind-task",
-        evaluator_configs=["stub"],
+        evaluator_configs=["exact_match"],
         config={"dataset_id": str(dataset.id), "answer_source": "agent", "agent_id": str(agent.id)},
         workspace_id=agent.workspace_id,
     )
@@ -357,6 +380,7 @@ async def test_engine_unknown_version_fails_run_explicitly(client, db_session: A
         )
     assert run.status == RunStatus.FAILED.value
     assert run.summary["error"] == "agent_version_unresolvable"
+    assert run.evaluation_scope is None  # failed binding freezes nothing
 
 
 async def test_engine_cross_workspace_task_fails_run(client, db_session: AsyncSession) -> None:
@@ -367,7 +391,7 @@ async def test_engine_cross_workspace_task_fails_run(client, db_session: AsyncSe
     task = EvaluationTaskModel(
         task_type="offline",
         name="foreign-task",
-        evaluator_configs=["stub"],
+        evaluator_configs=["exact_match"],
         config={"dataset_id": str(dataset.id), "answer_source": "agent", "agent_id": str(agent.id)},
         workspace_id=foreign_workspace,
     )
@@ -548,7 +572,7 @@ async def test_task_update_preserves_changes_and_clears_version(client, db_sessi
     run = await _seed_bound_run(db_session, agent, 1, values=[0.9])
     task = await db_session.get(EvaluationTaskModel, run.task_id)
     monkeypatch.setattr("hecate.ops.evaluation.tasks.service.get_evaluator_class", lambda name: _StubEvaluator)
-    task.evaluator_configs = ["stub"]
+    task.evaluator_configs = ["exact_match"]
     task.config = {**task.config, "agent_version": 1}
     await db_session.flush()
     service = EvaluationTaskService(db_session)
@@ -833,6 +857,7 @@ async def test_bound_run_drift_gate_uses_current_dataset(client, db_session: Asy
     items, content_hash = build_snapshot([item])
     if state != "missing_snapshot":
         run.dataset_snapshot = {"items": items, "hash": content_hash}
+        run.evaluation_scope = {**run.evaluation_scope, "dataset_snapshot_hash": content_hash}
     if state == "changed":
         item.query = "changed after evaluation"
     agent.evaluation_gate = {"mode": "require", "block_on_drift": True}
@@ -852,7 +877,7 @@ async def test_offline_runner_passes_version_and_freezes_binding(client, db_sess
     task = EvaluationTaskModel(
         task_type="offline",
         name="runner binding",
-        evaluator_configs=["stub"],
+        evaluator_configs=["exact_match"],
         workspace_id=agent.workspace_id,
         config={
             "dataset_id": str(dataset.id),
@@ -948,3 +973,721 @@ async def test_version_registry_loads_frozen_l2_skill_after_draft_unbinds_it(cli
     assert "changed L2 instructions" not in str(result)
     with pytest.raises(ValueError, match="not advertised"):
         await registry.execute("load_skill", {"skill_name": extra.name}, context)
+
+
+# --- Evidence coverage completeness (step11: frozen scope × required metrics) ---
+
+
+async def _seed_scoped_run(
+    db: AsyncSession,
+    agent: AgentModel,
+    version: int,
+    *,
+    n_items: int = 2,
+    required_metrics: list[str],
+    scores: list[tuple[int, str, float]],
+    known_bad_indexes: list[int] | None = None,
+    threshold: float = _DEFAULT_THRESHOLD,
+    with_scope: bool = True,
+    known_bad_reason: str | None = "known-bad sample",
+) -> tuple[EvaluationRunModel, list[EvaluationItemModel]]:
+    """Bound completed run with a frozen evaluation scope and score rows.
+
+    ``scores`` entries are ``(item_index, metric_name, value)`` over the
+    created items; ``known_bad_indexes`` marks items known-bad (exempted in
+    the frozen scope). ``with_scope=False`` seeds a pre-freezing historical
+    run (bound but without ``evaluation_scope``).
+    """
+    known_bad_indexes = known_bad_indexes or []
+    dataset = EvaluationDatasetModel(name=f"ds-{uuid.uuid4().hex[:8]}", workspace_id=agent.workspace_id)
+    db.add(dataset)
+    await db.flush()
+    items: list[EvaluationItemModel] = []
+    for index in range(n_items):
+        item = EvaluationItemModel(
+            dataset_id=dataset.id,
+            query=f"q{index}",
+            generated_answer="stored",
+            known_bad=index in known_bad_indexes,
+            known_bad_reason=known_bad_reason if index in known_bad_indexes else None,
+            workspace_id=agent.workspace_id,
+        )
+        db.add(item)
+        items.append(item)
+    await db.flush()
+
+    task = EvaluationTaskModel(
+        task_type="offline",
+        name=f"task-{uuid.uuid4().hex[:8]}",
+        evaluator_configs=required_metrics,
+        config={"dataset_id": str(dataset.id), "answer_source": "agent", "agent_id": str(agent.id)},
+        workspace_id=agent.workspace_id,
+    )
+    db.add(task)
+    await db.flush()
+
+    resolved = await AgentVersionService(db).resolve(agent.id, version)
+    run = EvaluationRunModel(
+        agent_id=agent.id,
+        agent_config_hash=canonical_hash(resolved.config),
+        agent_snapshot={"config": resolved.config, "ref_manifest": resolved.ref_manifest},
+        dataset_id=dataset.id,
+        task_id=task.id,
+        agent_version=version,
+        status=RunStatus.COMPLETED.value,
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+        summary={"threshold": threshold},
+        workspace_id=agent.workspace_id,
+        evaluation_scope=(
+            {
+                "schema_version": 1,
+                "item_ids": [str(item.id) for item in items],
+                "required_metrics": list(dict.fromkeys(required_metrics)),
+                "exempted_item_ids": sorted(str(items[i].id) for i in known_bad_indexes),
+                "dataset_snapshot_hash": None,
+            }
+            if with_scope
+            else None
+        ),
+    )
+    db.add(run)
+    await db.flush()
+
+    for item_index, metric_name, value in scores:
+        db.add(
+            EvaluationScoreModel(
+                run_id=run.id,
+                item_id=items[item_index].id,
+                metric_name=metric_name,
+                value=value,
+                source="deterministic",
+                workspace_id=agent.workspace_id,
+            )
+        )
+    await db.flush()
+    return run, items
+
+
+async def _set_require_gate(client, agent_id: str) -> None:
+    resp = await client.put(
+        f"/api/agents/{agent_id}",
+        json={"evaluation_gate": {"mode": "require", "require_run": True, "min_pass_rate": 0.8}},
+    )
+    assert resp.status_code == 200
+
+
+def _coverage_signal(report: dict) -> dict:
+    return next(s for s in report["signals"] if s["name"] == "evidence_coverage")
+
+
+async def test_complete_coverage_admits_publish_and_exempts_known_bad(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    # 3 items: indexes 0/1 required, index 2 known-bad exempted (no scores).
+    run, _items = await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        n_items=3,
+        required_metrics=["exact_match", "is_json"],
+        scores=[
+            (0, "exact_match", _PASSING_VALUE),
+            (0, "is_json", _PASSING_VALUE),
+            (1, "exact_match", _PASSING_VALUE),
+            (1, "is_json", _PASSING_VALUE),
+        ],
+        known_bad_indexes=[2],
+    )
+    assert run.evaluation_scope["exempted_item_ids"] == [str(_items[2].id)]
+
+    await _set_require_gate(client, str(agent.id))
+    admitted = await _publish(client, str(agent.id), 2)
+    assert admitted.status_code == 200, admitted.text
+    report = admitted.json()["evaluation_report"]
+    assert _coverage_signal(report)["passed"] is True
+
+
+async def test_missing_one_metric_rejects_with_location(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match", "is_json"],
+        # Item 1 lacks format_ok entirely.
+        scores=[
+            (0, "exact_match", _PASSING_VALUE),
+            (0, "is_json", _PASSING_VALUE),
+            (1, "exact_match", _PASSING_VALUE),
+        ],
+    )
+
+    await _set_require_gate(client, str(agent.id))
+    blocked = await _publish(client, str(agent.id), 2)
+    assert blocked.status_code == 409, blocked.text
+    report = blocked.json()["detail"]["error"]["details"]["evaluation_report"]
+    coverage = _coverage_signal(report)
+    assert coverage["passed"] is False
+    assert coverage["detail"]["missing_count"] == 1
+    assert coverage["detail"]["missing_samples"][0]["metric_name"] == "is_json"
+
+
+async def test_error_score_counts_as_missing_not_quality(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match", "is_json"],
+        scores=[
+            (0, "exact_match", -1.0),  # evaluator failure
+            (0, "is_json", _PASSING_VALUE),
+            (1, "exact_match", _PASSING_VALUE),
+            (1, "is_json", _PASSING_VALUE),
+        ],
+    )
+
+    await _set_require_gate(client, str(agent.id))
+    blocked = await _publish(client, str(agent.id), 2)
+    assert blocked.status_code == 409, blocked.text
+    report = blocked.json()["detail"]["error"]["details"]["evaluation_report"]
+    coverage = _coverage_signal(report)
+    assert coverage["passed"] is False
+    assert coverage["detail"]["missing_count"] == 1
+
+
+async def test_low_score_is_quality_failure_with_full_coverage(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match", "is_json"],
+        scores=[
+            (0, "exact_match", 0.2),  # valid but low: quality failure
+            (0, "is_json", _PASSING_VALUE),
+            (1, "exact_match", _PASSING_VALUE),
+            (1, "is_json", _PASSING_VALUE),
+        ],
+    )
+
+    await _set_require_gate(client, str(agent.id))
+    blocked = await _publish(client, str(agent.id), 2)
+    assert blocked.status_code == 409, blocked.text
+    report = blocked.json()["detail"]["error"]["details"]["evaluation_report"]
+    coverage = _coverage_signal(report)
+    assert coverage["passed"] is True  # evidence is complete
+    quality = next(s for s in report["signals"] if s["name"] == "min_pass_rate")
+    assert quality["passed"] is False
+
+
+async def test_duplicate_scores_do_not_mask_gap(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match", "is_json"],
+        scores=[
+            (0, "exact_match", _PASSING_VALUE),
+            (0, "is_json", _PASSING_VALUE),
+            (1, "exact_match", _PASSING_VALUE),
+            (1, "exact_match", 0.5),
+            (1, "exact_match", 0.7),  # repeats cannot stand in for format_ok
+        ],
+    )
+
+    await _set_require_gate(client, str(agent.id))
+    blocked = await _publish(client, str(agent.id), 2)
+    assert blocked.status_code == 409, blocked.text
+    coverage = _coverage_signal(blocked.json()["detail"]["error"]["details"]["evaluation_report"])
+    assert coverage["passed"] is False
+    assert coverage["detail"]["missing_samples"][0]["metric_name"] == "is_json"
+
+
+async def test_task_edit_does_not_move_frozen_scope(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    run, _items = await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match", "is_json"],
+        scores=[(0, "exact_match", _PASSING_VALUE)],  # incomplete on purpose
+    )
+    frozen_scope = dict(run.evaluation_scope)
+
+    # Reassign JSON so the changed task config is actually persisted.
+    task = await db_session.get(EvaluationTaskModel, run.task_id)
+    task.config = {**task.config, "tags": ["later"]}
+    _items[0].query = "changed dataset query"
+    await db_session.flush()
+
+    await _set_require_gate(client, str(agent.id))
+    blocked = await _publish(client, str(agent.id), 2)
+    assert blocked.status_code == 409, blocked.text
+    await db_session.refresh(run)
+    assert run.evaluation_scope == frozen_scope
+    coverage = _coverage_signal(blocked.json()["detail"]["error"]["details"]["evaluation_report"])
+    assert coverage["detail"]["missing_count"] == 3  # item0 format_ok + item1 both
+
+
+async def test_historical_run_without_scope_unverifiable(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match"],
+        scores=[(0, "exact_match", _PASSING_VALUE)],
+        with_scope=False,  # bound before scope freezing
+    )
+
+    await _set_require_gate(client, str(agent.id))
+    blocked = await _publish(client, str(agent.id), 2)
+    assert blocked.status_code == 409, blocked.text
+    coverage = _coverage_signal(blocked.json()["detail"]["error"]["details"]["evaluation_report"])
+    assert coverage["passed"] is False
+    assert coverage["detail"]["reason"] == "missing_evaluation_scope"
+
+    # warn reports the unverifiable coverage but publishes.
+    await client.put(
+        f"/api/agents/{agent.id}",
+        json={"evaluation_gate": {"mode": "warn", "require_run": True, "min_pass_rate": 0.8}},
+    )
+    warned = await _publish(client, str(agent.id), 2)
+    assert warned.status_code == 200, warned.text
+    assert _coverage_signal(warned.json()["evaluation_report"])["passed"] is False
+
+
+async def test_force_bypasses_incomplete_with_audit(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match", "is_json"],
+        scores=[(0, "exact_match", _PASSING_VALUE)],
+    )
+
+    await _set_require_gate(client, str(agent.id))
+    forced = await _publish(client, str(agent.id), 2, force=True)
+    assert forced.status_code == 200, forced.text
+    report = forced.json()["evaluation_report"]
+    assert report["bypassed_by_force"] is True
+    assert _coverage_signal(report)["passed"] is False
+    audit_rows = await db_session.execute(
+        AuditLogModel.__table__.select().where(AuditLogModel.workspace_id == agent.workspace_id)
+    )
+    assert audit_rows.mappings().all(), "force bypass must persist an audit record"
+
+
+async def test_engine_live_run_has_no_scope(client, db_session: AsyncSession) -> None:
+    agent = await _seed_agent(client, db_session)
+    dataset, _item = await _seed_dataset_with_answer(db_session, agent)
+    run = EvaluationRunModel(
+        dataset_id=dataset.id,
+        status=RunStatus.RUNNING.value,
+        workspace_id=agent.workspace_id,
+    )
+    db_session.add(run)
+    await db_session.flush()
+
+    engine = EvaluationEngine(db_session)
+    await engine.run([_StubEvaluator()], dataset.id, answer_source="agent", agent_id=agent.id, run=run)
+    assert run.status == RunStatus.COMPLETED.value
+    assert run.agent_version is None
+    assert run.evaluation_scope is None
+
+
+@pytest.mark.parametrize("invalid", ["human", "llm_judge", "deleted", "foreign_workspace", "out_of_range"])
+async def test_untrusted_score_cannot_complete_deterministic_evidence(client, db_session, invalid) -> None:
+    from sqlalchemy import select
+
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    run, items = await _seed_scoped_run(
+        db_session,
+        agent,
+        1,
+        n_items=1,
+        required_metrics=["exact_match", "is_json"],
+        scores=[(0, "exact_match", 0.9), (0, "is_json", 0.9)],
+    )
+    score = (
+        await db_session.execute(
+            select(EvaluationScoreModel).where(
+                EvaluationScoreModel.run_id == run.id, EvaluationScoreModel.metric_name == "is_json"
+            )
+        )
+    ).scalar_one()
+    if invalid in {"human", "llm_judge"}:
+        score.source = invalid
+    elif invalid == "deleted":
+        score.deleted = True
+    elif invalid == "foreign_workspace":
+        score.workspace_id = uuid.uuid4()
+    else:
+        score.value = 2.0
+    await db_session.flush()
+    await _set_require_gate(client, str(agent.id))
+    response = await _publish(client, agent.id, 1)
+    assert response.status_code == 409, response.text
+    signal = _coverage_signal(response.json()["detail"]["error"]["details"]["evaluation_report"])
+    assert signal["detail"]["missing_count"] == 1
+    assert signal["detail"]["missing_samples"] == [{"item_id": str(items[0].id), "metric_name": "is_json"}]
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    [
+        "empty_object",
+        "missing_items",
+        "empty_items",
+        "empty_metrics",
+        "invalid_uuid",
+        "string_metrics",
+        "unknown_metric",
+        "all_exempt",
+        "duplicate_items",
+        "foreign_exemption",
+        "unknown_schema",
+        "bad_hash",
+    ],
+)
+async def test_unverifiable_scope_fails_closed(client, db_session, malformation) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    run, items = await _seed_scoped_run(
+        db_session, agent, 1, n_items=1, required_metrics=["exact_match"], scores=[(0, "exact_match", 0.9)]
+    )
+    scope = copy.deepcopy(run.evaluation_scope)
+    if malformation == "empty_object":
+        scope = {}
+    elif malformation == "missing_items":
+        del scope["item_ids"]
+    elif malformation == "empty_items":
+        scope["item_ids"] = []
+    elif malformation == "empty_metrics":
+        scope["required_metrics"] = []
+    elif malformation == "invalid_uuid":
+        scope["item_ids"] = ["invalid"]
+    elif malformation == "string_metrics":
+        scope["required_metrics"] = "exact_match"
+    elif malformation == "unknown_metric":
+        scope["required_metrics"] = ["custom-metric"]
+    elif malformation == "all_exempt":
+        scope["exempted_item_ids"] = scope["item_ids"]
+    elif malformation == "duplicate_items":
+        scope["item_ids"] *= 2
+    elif malformation == "foreign_exemption":
+        scope["exempted_item_ids"] = [str(uuid.uuid4())]
+    elif malformation == "unknown_schema":
+        scope["schema_version"] = 99
+    else:
+        scope["dataset_snapshot_hash"] = "not-a-hash"
+    run.evaluation_scope = scope
+    agent.evaluation_gate = {"mode": "require", "require_run": True}
+    await db_session.flush()
+    response = await _publish(client, agent.id, 1)
+    assert response.status_code == 409, response.text
+    coverage = _coverage_signal(response.json()["detail"]["error"]["details"]["evaluation_report"])
+    assert coverage["passed"] is False
+    assert agent.published_version is None
+
+
+async def test_exempt_scores_do_not_change_scoped_quality(client, db_session) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        1,
+        required_metrics=["exact_match"],
+        scores=[(0, "exact_match", 0.9), (1, "exact_match", 0.0)],
+        known_bad_indexes=[1],
+    )
+    await _set_require_gate(client, str(agent.id))
+    response = await _publish(client, agent.id, 1)
+    assert response.status_code == 200, response.text
+    report = response.json()["evaluation_report"]
+    assert report["deterministic_pass_rate"] == 1.0
+    assert report["deterministic_metric_averages"] == {"exact_match": 0.9}
+
+
+@pytest.mark.parametrize("outside", ["item", "metric"])
+async def test_unscoped_scores_cannot_change_quality_verdict(client, db_session, outside) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    run, items = await _seed_scoped_run(
+        db_session,
+        agent,
+        1,
+        n_items=1,
+        required_metrics=["exact_match"],
+        scores=[(0, "exact_match", 0.0 if outside == "item" else 0.9)],
+    )
+    for _ in range(9 if outside == "item" else 1):
+        db_session.add(
+            EvaluationScoreModel(
+                run_id=run.id,
+                item_id=uuid.uuid4() if outside == "item" else items[0].id,
+                metric_name="exact_match" if outside == "item" else "is_json",
+                value=1.0 if outside == "item" else 0.0,
+                source="deterministic",
+                workspace_id=run.workspace_id,
+            )
+        )
+    await db_session.flush()
+    await _set_require_gate(client, str(agent.id))
+    response = await _publish(client, agent.id, 1)
+    assert response.status_code == (409 if outside == "item" else 200), response.text
+    report = (
+        response.json()["evaluation_report"]
+        if outside == "metric"
+        else response.json()["detail"]["error"]["details"]["evaluation_report"]
+    )
+    assert _coverage_signal(report)["passed"] is True
+    assert report["deterministic_pass_rate"] == (0.0 if outside == "item" else 1.0)
+
+
+@pytest.mark.parametrize("baseline_problem", ["missing_scope", "missing_score", "metrics_changed"])
+async def test_incomplete_or_incomparable_baseline_cannot_pass_regression(client, db_session, baseline_problem) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _commit_version(db_session, agent)
+    metrics = ["is_json"] if baseline_problem == "metrics_changed" else ["exact_match"]
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        1,
+        required_metrics=metrics,
+        scores=[(0, metrics[0], 0.9)] + ([] if baseline_problem == "missing_score" else [(1, metrics[0], 0.9)]),
+        with_scope=baseline_problem != "missing_scope",
+    )
+    await _seed_scoped_run(
+        db_session,
+        agent,
+        2,
+        required_metrics=["exact_match"],
+        scores=[(0, "exact_match", 0.95), (1, "exact_match", 0.95)],
+    )
+    agent.published_version = 1
+    agent.evaluation_gate = {"mode": "require", "block_on_regression": True}
+    await db_session.flush()
+    response = await _publish(client, agent.id, 2)
+    assert response.status_code == 409, response.text
+    report = response.json()["detail"]["error"]["details"]["evaluation_report"]
+    regression = next(signal for signal in report["signals"] if signal["name"] == "block_on_regression")
+    assert regression["detail"]["reason"] == (
+        "incompatible_evaluation_metrics" if baseline_problem == "metrics_changed" else "incomplete_baseline_evidence"
+    )
+    assert agent.published_version == 1
+
+
+async def test_scope_freezes_tags_exemptions_and_only_deterministic_metrics(client, db_session, monkeypatch) -> None:
+    from hecate.ops.evaluation.types import EvalOutput, Score
+
+    agent = await _seed_agent(client, db_session)
+    version = await _commit_version(db_session, agent)
+    dataset, first = await _seed_dataset_with_answer(db_session, agent)
+    first.tags = ["smoke"]
+    second = EvaluationItemModel(
+        dataset_id=dataset.id, query="second", tags=["smoke"], known_bad=False, workspace_id=agent.workspace_id
+    )
+    skipped = EvaluationItemModel(dataset_id=dataset.id, query="skip", tags=["other"], workspace_id=agent.workspace_id)
+    db_session.add_all([second, skipped])
+    await db_session.flush()
+    run = EvaluationRunModel(
+        dataset_id=dataset.id,
+        status="running",
+        workspace_id=agent.workspace_id,
+        dataset_snapshot={
+            "hash": "a" * 64,
+            "items": [
+                {"id": str(first.id)},
+                {"id": str(second.id), "known_bad": True},
+                {"id": str(skipped.id), "known_bad": True},
+            ],
+        },
+    )
+    db_session.add(run)
+    await db_session.flush()
+    calls = []
+
+    class StubJudge:
+        name = "correctness"
+
+        async def evaluate(self, input):
+            return EvalOutput(scores=[Score(metric_name="correctness", value=-1.0, source="llm_judge")])
+
+    async def generate(query, agent_id, agent_definition=None, rollout_capture=None):
+        assert set(run.evaluation_scope["item_ids"]) == {str(first.id), str(second.id)}
+        assert run.evaluation_scope["required_metrics"] == ["exact_match"]
+        assert run.evaluation_scope["exempted_item_ids"] == [str(second.id)]
+        calls.append(query)
+        return "fresh"
+
+    engine = EvaluationEngine(db_session)
+    monkeypatch.setattr(engine, "_generate_answer_via_agent", generate)
+    await engine.run(
+        [_StubEvaluator(), StubJudge()],
+        dataset.id,
+        answer_source="agent",
+        agent_id=agent.id,
+        agent_version=version,
+        run=run,
+        tags=["smoke"],
+        summary_config={"threshold": 0.4},
+    )
+    assert len(calls) == 2
+    agent.evaluation_gate = {"mode": "require", "min_pass_rate": 0.8}
+    await db_session.flush()
+    response = await _publish(client, agent.id, version)
+    assert response.status_code == 200, response.text  # Judge errors remain informational.
+
+
+@pytest.mark.parametrize("change", ["tags", "evaluators"])
+async def test_retry_cannot_replace_frozen_evaluation_scope(client, db_session, monkeypatch, change) -> None:
+    from hecate.ops.evaluation.format_evaluators import IsJsonEvaluator
+
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    run, items = await _seed_scoped_run(db_session, agent, 1, required_metrics=["exact_match"], scores=[])
+    original = dict(run.evaluation_scope)
+    run.completed_at = None
+    run.status = "running"
+    items[0].tags = ["smoke"]
+    await db_session.flush()
+
+    async def unexpected_generation(*args, **kwargs):
+        pytest.fail("scope conflict must be rejected before model execution")
+
+    engine = EvaluationEngine(db_session)
+    monkeypatch.setattr(engine, "_generate_answer_via_agent", unexpected_generation)
+    with pytest.raises(ValueError, match="evaluation_scope_conflict"):
+        await engine.run(
+            [IsJsonEvaluator()] if change == "evaluators" else [ExactMatchEvaluator()],
+            run.dataset_id,
+            answer_source="agent",
+            agent_id=agent.id,
+            agent_version=1,
+            run=run,
+            tags=["smoke"] if change == "tags" else None,
+        )
+    assert run.evaluation_scope == original
+    assert run.status == "failed"
+
+
+async def test_run_read_exposes_scope_without_raw_agent_snapshot(client, db_session) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    run, _items = await _seed_scoped_run(
+        db_session, agent, 1, n_items=1, required_metrics=["exact_match"], scores=[(0, "exact_match", 0.9)]
+    )
+    response = await client.get(f"/api/evaluation/runs/{run.id}")
+    assert response.status_code == 200, response.text
+    assert response.json()["evaluation_scope"] == run.evaluation_scope
+    assert "agent_snapshot" not in response.json()
+
+
+@pytest.mark.parametrize("failure", ["exception", "empty_output"])
+async def test_real_engine_partial_evaluator_output_blocks_publish(client, db_session, monkeypatch, failure) -> None:
+    from hecate.ops.evaluation.types import EvalOutput, Score
+
+    agent = await _seed_agent(client, db_session)
+    version = await _commit_version(db_session, agent)
+    dataset, item = await _seed_dataset_with_answer(db_session, agent)
+    item.query = "missing"
+    for index in range(9):
+        db_session.add(EvaluationItemModel(dataset_id=dataset.id, query=str(index), workspace_id=agent.workspace_id))
+    await db_session.flush()
+
+    class PartialEvaluator(ExactMatchEvaluator):
+        async def evaluate(self, input):
+            if input.query == "missing":
+                if failure == "exception":
+                    raise RuntimeError("evaluation unavailable")
+                return EvalOutput(scores=[])
+            return EvalOutput(scores=[Score(metric_name=self.name, value=1.0, source="deterministic")])
+
+    async def generate(*args, **kwargs):
+        return "fresh answer"
+
+    engine = EvaluationEngine(db_session)
+    monkeypatch.setattr(engine, "_generate_answer_via_agent", generate)
+    result = await engine.run(
+        [PartialEvaluator()],
+        dataset.id,
+        answer_source="agent",
+        agent_id=agent.id,
+        agent_version=version,
+        summary_config={"threshold": 0.8},
+    )
+    run = await db_session.get(EvaluationRunModel, result.run_id)
+    assert run.status == "completed"  # Evaluator failures stay isolated; publication checks evidence separately.
+    await _set_require_gate(client, str(agent.id))
+    response = await _publish(client, agent.id, version)
+    assert response.status_code == 409, response.text
+    report = response.json()["detail"]["error"]["details"]["evaluation_report"]
+    assert _coverage_signal(report)["detail"]["missing_count"] == 1
+    assert _coverage_signal(report)["detail"]["missing_samples"] == [
+        {"item_id": str(item.id), "metric_name": "exact_match"}
+    ]
+    assert report["passed"] is False
+
+
+async def test_coverage_counts_all_missing_pairs_but_bounds_report(client, db_session) -> None:
+    agent = await _seed_agent(client, db_session)
+    await _commit_version(db_session, agent)
+    await _seed_scoped_run(db_session, agent, 1, n_items=30, required_metrics=["exact_match", "is_json"], scores=[])
+    await _set_require_gate(client, str(agent.id))
+    response = await _publish(client, agent.id, 1)
+    assert response.status_code == 409, response.text
+    detail = _coverage_signal(response.json()["detail"]["error"]["details"]["evaluation_report"])["detail"]
+    assert detail["missing_count"] == 60
+    assert len(detail["missing_samples"]) == 20
+
+
+async def test_custom_evaluator_cannot_claim_builtin_gate_support_by_name(client, db_session, monkeypatch) -> None:
+    from hecate.ops.evaluation.types import EvalOutput, Score
+
+    agent = await _seed_agent(client, db_session)
+    version = await _commit_version(db_session, agent)
+    dataset, _item = await _seed_dataset_with_answer(db_session, agent)
+
+    class UnregisteredEvaluator:
+        name = "exact_match"
+
+        async def evaluate(self, input):
+            return EvalOutput(scores=[Score(metric_name=self.name, value=1.0, source="deterministic")])
+
+    async def generate(*args, **kwargs):
+        return "fresh answer"
+
+    engine = EvaluationEngine(db_session)
+    monkeypatch.setattr(engine, "_generate_answer_via_agent", generate)
+    await engine.run(
+        [UnregisteredEvaluator()], dataset.id, answer_source="agent", agent_id=agent.id, agent_version=version
+    )
+    agent.evaluation_gate = {"mode": "require", "require_run": True}
+    await db_session.flush()
+    response = await _publish(client, agent.id, version)
+    assert response.status_code == 409, response.text
+    detail = _coverage_signal(response.json()["detail"]["error"]["details"]["evaluation_report"])["detail"]
+    assert detail["reason"] == "no_required_deterministic_metrics"
