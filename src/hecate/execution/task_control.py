@@ -1413,6 +1413,16 @@ class TaskControlService:
         except TaskNotFoundError as exc:
             raise TaskControlNotFoundError(str(exc)) from exc
 
+    async def assert_task_visible(self, *, workspace_id: uuid.UUID, task_id: uuid.UUID) -> None:
+        """Raise the command-issuance not-found error for an invisible task.
+
+        REST write gates call this before any role decision so access
+        checks never touch command storage or the replay path; missing,
+        foreign and soft-deleted tasks stay indistinguishable (registry
+        semantics).
+        """
+        await self._get_task(workspace_id, task_id)
+
     async def _default_deployment(self, agent_id: uuid.UUID, workspace_id: uuid.UUID) -> AgentDeploymentModel | None:
         row = await self._db.execute(
             select(AgentDeploymentModel).where(

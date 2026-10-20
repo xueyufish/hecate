@@ -40,7 +40,12 @@ from hecate.contracts.execution.durable import ControlCommandKind
 from hecate.core.auth_context import AuthContext
 from hecate.core.composition.durable_platform import get_durable_suite
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import (
+    WorkspaceRole,
+    WorkspaceRoleRequiredError,
+    ensure_workspace_role,
+    get_auth_context,
+)
 
 if TYPE_CHECKING:
     # Execution-domain types are annotation-only here; runtime imports stay
@@ -326,9 +331,22 @@ async def _issue(
             "a non-empty command payload requires payload_schema_ref",
             status.HTTP_422_UNPROCESSABLE_ENTITY,
         )
+    workspace_id = _workspace_id(ctx)
+    # Write gate before any command storage access or idempotent replay:
+    # visibility first (foreign, missing and soft-deleted tasks are
+    # indistinguishable), then the server-side EDITOR role floor. Request
+    # bodies carry no role — the identity comes from the AuthContext only.
+    try:
+        await service.assert_task_visible(workspace_id=workspace_id, task_id=task_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
     try:
         issued = await service.issue_command(
-            workspace_id=_workspace_id(ctx),
+            workspace_id=workspace_id,
             task_id=task_id,
             kind=kind,
             command_id=body.command_id,
