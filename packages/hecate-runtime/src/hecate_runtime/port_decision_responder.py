@@ -72,6 +72,35 @@ class PortDecisionResponder(DecisionResponder):
         self._port = port
         self._on_usage = on_usage
 
+    @classmethod
+    def for_turn_messages(
+        cls,
+        port: RuntimePort,
+        *,
+        messages: list[dict[str, Any]],
+        config: dict[str, Any],
+        tool_definitions: dict[str, Any],
+        expected_refs: dict[str, Any],
+        on_usage: Callable[[dict[str, Any]], None] | None = None,
+    ) -> PortDecisionResponder:
+        """Build a responder whose frozen snapshot continues a projected turn.
+
+        Explicit continuation entry for messages projected from a
+        completed action turn (see ``turn_projection``): the caller owns
+        composing any host-side inputs into ``messages`` before
+        constructing. Freezing, reference validation and the tool
+        snapshot checks are identical to ``__init__``; no loop,
+        continuation storage or wake-up is introduced.
+        """
+        return cls(
+            port,
+            messages=messages,
+            config=config,
+            tool_definitions=tool_definitions,
+            expected_refs=expected_refs,
+            on_usage=on_usage,
+        )
+
     async def respond(self, run_ref: RunRef, decision_step_id: str, input_refs: dict[str, Any]) -> DecisionProposal:
         """Convert one complete response; invalid or interrupted streams fail."""
         if not isinstance(run_ref, RunRef):
