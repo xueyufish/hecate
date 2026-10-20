@@ -9,8 +9,9 @@ Read-only aggregation over the existing evaluation tables:
   agent / task / session / source
 - ``GET /api/evaluation/reports/sessions`` — session-level rollup
 
-All aggregations are scoped to the caller's workspace and computed on
-demand (see ``ops.evaluation.reports.service`` for the conventions).
+Aggregations are computed on demand in one workspace. Distributions
+resolve the selected resource's workspace for explicit system callers
+(see ``ops.evaluation.reports.service`` for the conventions).
 """
 
 from __future__ import annotations
@@ -20,11 +21,19 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import (
+    WorkspaceRole,
+    WorkspaceRoleRequiredError,
+    ensure_workspace_role,
+    get_auth_context,
+)
+from hecate.models.evaluation import EvaluationTaskModel
+from hecate.ops.api.evaluation import _forbidden, _get_visible_run_or_404
 from hecate.ops.evaluation.reports.service import (
     EvaluationReportNotFoundError,
     EvaluationReportService,
@@ -85,8 +94,33 @@ async def distributions_report(
     metric_name: str | None = None,
 ) -> dict:
     """Per-metric score histograms for one run (offline) or one task (online)."""
+    if run_id is not None and task_id is not None:
+        raise _invalid_request("only one of run_id or task_id may be provided")
+    if run_id is None and task_id is None:
+        raise _invalid_request("exactly one of run_id or task_id is required")
+
+    if not ctx.is_system_scope and ctx.workspace_id is None:
+        raise _report_scope_not_found()
+
+    if run_id is not None:
+        try:
+            run = await _get_visible_run_or_404(run_id, db, ctx)
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+            raise _report_scope_not_found() from exc
+        resource_workspace_id = run.workspace_id
+    else:
+        resource_workspace_id = (await _get_visible_task_or_404(task_id, db, ctx)).workspace_id
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
+
     svc = EvaluationReportService(db)
-    report = await _run(svc.distributions(ctx.workspace_id, run_id=run_id, task_id=task_id, metric_name=metric_name))
+    report = await _run(
+        svc.distributions(resource_workspace_id, run_id=run_id, task_id=task_id, metric_name=metric_name)
+    )
     return report.model_dump(mode="json")
 
 
@@ -148,7 +182,42 @@ async def _run(coroutine):  # noqa: ANN201 — return type mirrors the awaited s
             detail={"error": {"code": "INVALID_REQUEST", "message": str(exc), "details": None}},
         ) from exc
     except EvaluationReportNotFoundError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": {"code": "NOT_FOUND", "message": f"Report scope {exc} not found", "details": None}},
-        ) from exc
+        raise _report_scope_not_found() from exc
+
+
+def _invalid_request(message: str) -> HTTPException:
+    """Keep the parameter contract's 400 envelope and message verbatim."""
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail={"error": {"code": "INVALID_REQUEST", "message": message, "details": None}},
+    )
+
+
+def _report_scope_not_found() -> HTTPException:
+    """Identifier-free 404 shared by every invisible distributions scope."""
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": {"code": "NOT_FOUND", "message": "Report scope not found", "details": None}},
+    )
+
+
+async def _get_visible_task_or_404(
+    task_id: uuid.UUID,
+    db: AsyncSession,
+    ctx: AuthContext,
+) -> EvaluationTaskModel:
+    """Resolve task ownership before callers enforce the workspace role.
+
+    Missing, soft-deleted, and cross-workspace tasks surface as the same
+    identifier-free not-found, mirroring the run resolver in evaluation.py.
+    """
+    result = await db.execute(
+        select(EvaluationTaskModel).where(
+            EvaluationTaskModel.id == task_id,
+            ~EvaluationTaskModel.deleted,
+        )
+    )
+    task = result.scalar_one_or_none()
+    if task is None or (not ctx.is_system_scope and task.workspace_id != ctx.workspace_id):
+        raise _report_scope_not_found()
+    return task
