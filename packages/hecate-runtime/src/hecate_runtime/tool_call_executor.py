@@ -401,13 +401,21 @@ class ToolCallExecutor:
         merged = _merge_resolutions(resolution, hook_resolution)
         if merged is not None:
             recorded_content = merged.result_content
+            # Ledger content is the PRE-governance first-run result and must
+            # re-run output governance before reaching the model. Channel-log
+            # content is already the first-run governed message and passes
+            # through untouched — and when the context already carries this
+            # call's tool message, recovery_decision returns that governed
+            # copy instead of the ledger content, so it must not be marked.
+            has_channel_message = any(
+                isinstance(m, dict) and m.get("role") == "tool" and m.get("tool_call_id") == tc_id for m in messages
+            )
+            from_ledger = recorded_content is not None and not has_channel_message
             if (
                 recorded_content is None
                 and merged.state is ToolExecutionState.SUCCEEDED
                 and self._event_store is not None
-                and not any(
-                    isinstance(m, dict) and m.get("role") == "tool" and m.get("tool_call_id") == tc_id for m in messages
-                )
+                and not has_channel_message
             ):
                 # The channel lost the receipt (cross-turn restore or a
                 # reconnect); the session log's messages-channel writes still
@@ -424,7 +432,10 @@ class ToolCallExecutor:
                 recorded_content=recorded_content,
             )
             if decision is not None:
-                return self._checked_recovery_result(decision, execution_id)
+                result = self._checked_recovery_result(decision, execution_id)
+                if result is not None and from_ledger and self._is_governed_backfill(result):
+                    result = {**result, "_replay_govern": True}
+                return result
         if claim and execution_context is not None and arguments is not None and self._event_store is not None:
             await self._append_tool_call(
                 execution_context=execution_context,
@@ -551,7 +562,13 @@ class ToolCallExecutor:
             messages=messages,
             recorded_content=resolution.result_content,
         )
-        return self._checked_recovery_result(decision, execution_id)
+        result = self._checked_recovery_result(decision, execution_id)
+        has_channel_message = any(
+            isinstance(m, dict) and m.get("role") == "tool" and m.get("tool_call_id") == tc_id for m in messages
+        )
+        if result is not None and not has_channel_message and self._is_governed_backfill(result):
+            result = {**result, "_replay_govern": True}
+        return result
 
     @staticmethod
     def _checked_recovery_result(decision: dict[str, Any] | None, execution_id: str) -> dict[str, Any] | None:
@@ -562,6 +579,124 @@ class ToolCallExecutor:
             if content.startswith("[reconciliation required]"):
                 raise ExecutionStoppedError("reconciliation_required", content, execution_id)
         return decision
+
+    @staticmethod
+    def _is_governed_backfill(recovery: dict[str, Any]) -> bool:
+        """True for a succeeded ledger backfill that must re-run governance.
+
+        Exactly the shape ``recovery_decision`` builds for succeeded-with-
+        content: a tool message without ``is_error``. Withheld placeholders
+        and failure notices carry ``is_error``; review/reconciliation
+        markers never return as dicts — they raise before reaching callers.
+        """
+        return (
+            isinstance(recovery, dict)
+            and recovery.get("role") == "tool"
+            and not recovery.get("is_error")
+            and isinstance(recovery.get("content"), str)
+        )
+
+    async def _govern_replayed_result(
+        self,
+        *,
+        name: str,
+        tc_id: str,
+        execution_id: str,
+        content: str,
+        base_context: dict | None,
+    ) -> dict[str, Any]:
+        """Re-apply first-run PostTool governance to a replayed receipt.
+
+        The ledger mirrors the PRE-governance result on first execution, so
+        returning its content as-is would re-expose text the first run
+        blocked or sanitized. Ledger-marked backfills funnel here and replay
+        the first-execution pipeline: the ``TOOL_RESULT`` middleware chain
+        first, the legacy ``PostToolHook`` as fallback. Unlike the first
+        run, a BLOCK does not touch denial bookkeeping — the action is
+        already settled in the ledger and recovery must not re-trigger
+        denial/approval state. Governance failures propagate; raw content is
+        never returned as a fallback.
+        """
+        from hecate_runtime.middleware import Phase
+
+        context = dict(base_context or {})
+        context["tool_call_id"] = tc_id
+        context["invocation_id"] = execution_id
+        post_chain = self._middleware_chains.get(Phase.TOOL_RESULT)
+        if post_chain is not None:
+
+            async def _passthrough_replay(data):
+                return data
+
+            post_chain.set_handler(_passthrough_replay)
+            post_decision, _post_result = await post_chain.run({"name": name, "result": content, "context": context})
+            if post_decision.action == GuardrailAction.BLOCK:
+                logger.info(
+                    "PostTool chain governed replayed tool '%s': stage=%s reason=%s",
+                    name,
+                    post_decision.stage_id,
+                    post_decision.reason,
+                )
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": f"Result sanitized: {post_decision.reason}",
+                }
+            if (
+                post_decision.action == GuardrailAction.SANITIZE
+                and post_decision.modified_data
+                and "result" in post_decision.modified_data
+            ):
+                content = post_decision.modified_data["result"]
+        elif ToolMatcher.match(name, self._post_hook.matcher):
+            post_result = await self._post_hook.on_post_tool_call(
+                name=name,
+                result=content,
+                context=context,
+            )
+            if post_result.action == GuardrailAction.BLOCK:
+                logger.info("PostToolHook governed replayed tool '%s': %s", name, post_result.reason)
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": f"Result sanitized: {post_result.reason}",
+                }
+            if post_result.action == GuardrailAction.SANITIZE:
+                if post_result.modified_data and "result" in post_result.modified_data:
+                    content = post_result.modified_data["result"]
+                else:
+                    logger.warning("SANITIZE without modified_data for tool '%s'", name)
+        return {
+            "role": "tool",
+            "tool_call_id": tc_id,
+            "content": str(content),
+        }
+
+    async def _maybe_govern_recovery(
+        self,
+        recovery: dict[str, Any],
+        *,
+        name: str,
+        tc_id: str,
+        execution_id: str,
+        base_context: dict | None,
+    ) -> dict[str, Any]:
+        """Govern the ledger-marked backfill; pass every other shape through.
+
+        The ``_replay_govern`` marker is set only where the recovery content
+        provably came from the durable ledger — channel-log content is
+        already the first-run governed message and must not be governed a
+        second time.
+        """
+        if not isinstance(recovery, dict) or not recovery.pop("_replay_govern", False):
+            return recovery
+        return await self._govern_replayed_result(
+            name=name,
+            tc_id=tc_id,
+            execution_id=execution_id,
+            content=recovery["content"],
+            base_context=base_context,
+        )
 
     async def _mirror_outcome(
         self,
@@ -705,6 +840,9 @@ class ToolCallExecutor:
         if recovery is not None:
             if accepted is not None and not recovery.get("is_error"):
                 accepted.status = "succeeded"
+            recovery = await self._maybe_govern_recovery(
+                recovery, name=name, tc_id=tc_id, execution_id=execution_id, base_context=context
+            )
             return recovery
 
         approval_ref = None
@@ -863,6 +1001,9 @@ class ToolCallExecutor:
             if hook_decision is not None:
                 if accepted is not None and not hook_decision.get("is_error"):
                     accepted.status = "succeeded"
+                hook_decision = await self._maybe_govern_recovery(
+                    hook_decision, name=name, tc_id=tc_id, execution_id=execution_id, base_context=context
+                )
                 if span_ctx:
                     await self._port.end_span(span_ctx.span_id, output_data={"withheld": "ledger"})
                 return hook_decision
@@ -902,6 +1043,9 @@ class ToolCallExecutor:
             if recovery is not None:
                 if accepted is not None and not recovery.get("is_error"):
                     accepted.status = "succeeded"
+                recovery = await self._maybe_govern_recovery(
+                    recovery, name=name, tc_id=tc_id, execution_id=execution_id, base_context=context
+                )
                 if span_ctx:
                     await self._port.end_span(span_ctx.span_id, output_data={"withheld": "recovery"})
                 return recovery
