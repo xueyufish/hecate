@@ -17,9 +17,9 @@ from hecate.models.session import SessionModel
 from hecate.models.trace import TraceModel
 
 _WS_SUFFIX = "aa"
-# Anchor to the current hour (see test_reports_reconciliation): a fixed
-# seed date ages out of the default 30-day report window.
-_NOW = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+# Keep the entire seeded sequence in the past, including human scores
+# offset by 100 seconds, while staying inside the default report window.
+_NOW = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
 
 _QUEUE_PAYLOAD = {
     "name": "weekly-review",

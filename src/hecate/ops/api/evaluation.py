@@ -163,6 +163,37 @@ async def _get_dataset_or_404(
     return ds
 
 
+def _dataset_not_found() -> HTTPException:
+    """Uniform 404 for a dataset that is missing, soft-deleted, or cross-workspace."""
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found", "details": None}},
+    )
+
+
+async def _get_dataset_for_read(
+    ctx: AuthContext,
+    dataset_id: uuid.UUID,
+    db: AsyncSession,
+) -> EvaluationDatasetModel:
+    """Resolve dataset ownership before callers enforce the workspace role.
+
+    Missing, soft-deleted, and cross-workspace datasets surface as the
+    same not-found. Mirrors the run read boundary: role checks stay in
+    callers so existence is never disclosed through a role denial.
+    """
+    result = await db.execute(
+        select(EvaluationDatasetModel).where(
+            EvaluationDatasetModel.id == dataset_id,
+            ~EvaluationDatasetModel.deleted,
+        )
+    )
+    ds = result.scalar_one_or_none()
+    if ds is None or (not ctx.is_system_scope and ds.workspace_id != ctx.workspace_id):
+        raise _dataset_not_found()
+    return ds
+
+
 async def _get_item_or_404(
     dataset_id: uuid.UUID,
     item_id: uuid.UUID,
@@ -214,9 +245,19 @@ async def list_datasets(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """List evaluation datasets with pagination."""
+    """List evaluation datasets with pagination.
+
+    Scoped to the caller's workspace; system-scope identities read across
+    workspaces. A non-system identity without an active workspace is
+    denied rather than degrading to a global query.
+    """
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
-    items, total = await svc.list_datasets(page=page, page_size=page_size)
+    workspace_filter = None if ctx.is_system_scope else ctx.workspace_id
+    items, total = await svc.list_datasets(page=page, page_size=page_size, workspace_id=workspace_filter)
     return {
         "items": [EvaluationDatasetReadSchema.model_validate(ds).model_dump(by_alias=True) for ds in items],
         "total": total,
@@ -230,7 +271,11 @@ async def get_dataset(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a single evaluation dataset."""
-    ds = await _get_dataset_or_404(dataset_id, db)
+    ds = await _get_dataset_for_read(ctx, dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     return EvaluationDatasetReadSchema.model_validate(ds).model_dump(by_alias=True)
 
 
@@ -303,9 +348,13 @@ async def list_items(
     supplied, only items matching that exemption state are returned
     (7.3c).
     """
-    await _get_dataset_or_404(dataset_id, db)
+    ds = await _get_dataset_for_read(ctx, dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
-    items, total = await svc.list_items(dataset_id, page=page, page_size=page_size, tags=tags, known_bad=known_bad)
+    items, total = await svc.list_items(ds.id, page=page, page_size=page_size, tags=tags, known_bad=known_bad)
     return {
         "items": [EvaluationItemReadSchema.model_validate(item).model_dump(by_alias=True) for item in items],
         "total": total,
