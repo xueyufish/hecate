@@ -24,11 +24,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import (
+    WorkspaceRole,
+    WorkspaceRoleRequiredError,
+    ensure_workspace_role,
+    get_auth_context,
+)
 from hecate.models.evaluation import (
     EvaluationDatasetVersionCreateSchema,
     EvaluationDatasetVersionReadSchema,
 )
+from hecate.ops.api.evaluation import _dataset_not_found, _forbidden, _get_dataset_for_read
 from hecate.ops.evaluation.dataset_version_service import (
     DatasetNotFoundError,
     DatasetVersionNameConflictError,
@@ -73,9 +79,20 @@ async def list_dataset_versions(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> dict:
-    """List the dataset's named versions, newest first (items excluded)."""
+    """List the dataset's named versions, newest first (items excluded).
+
+    Scoped behind the dataset read boundary: an invisible parent dataset
+    404s before any role decision, and only explicit system scope reads
+    across workspaces.
+    """
+    await _get_dataset_for_read(ctx, dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetVersionService(db)
-    versions, total = await svc.list_versions(dataset_id, workspace_id=ctx.workspace_id, page=page, page_size=page_size)
+    workspace_filter = None if ctx.is_system_scope else ctx.workspace_id
+    versions, total = await svc.list_versions(dataset_id, workspace_id=workspace_filter, page=page, page_size=page_size)
     return {
         "items": [_version_to_dict(v, include_items=False) for v in versions],
         "total": total,
@@ -91,7 +108,11 @@ async def get_dataset_version(
 ) -> dict:
     """Read one named version including its frozen items."""
     svc = EvaluationDatasetVersionService(db)
-    version = await _get_version_or_404(svc, dataset_id, version_id, ctx.workspace_id)
+    version = await _get_version_for_read(svc, ctx, dataset_id, version_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     return _version_to_dict(version)
 
 
@@ -136,9 +157,14 @@ async def diff_dataset_version(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     against: Annotated[str, Query(description="Other version id, or 'live'")] = "live",
 ) -> dict:
-    """Diff one version against another version or the live dataset."""
+    """Diff one version against another version or the live dataset.
+
+    Both sides resolve behind the dataset read boundary: an invisible
+    source or target version is the same constant 404, never a 500, and
+    not-found responses never echo resource identifiers.
+    """
     svc = EvaluationDatasetVersionService(db)
-    await _get_version_or_404(svc, dataset_id, version_id, ctx.workspace_id)
+    await _get_version_for_read(svc, ctx, dataset_id, version_id, db)
     against_id: uuid.UUID | None
     if against == "live":
         against_id = None
@@ -147,10 +173,18 @@ async def diff_dataset_version(
             against_id = uuid.UUID(against)
         except ValueError as exc:
             raise _validation_error("against must be a version id or 'live'") from exc
+        await _get_version_for_read(svc, ctx, dataset_id, against_id, db)
     try:
-        return await svc.diff(dataset_id, version_id, against_id, workspace_id=ctx.workspace_id)
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
+    workspace_filter = None if ctx.is_system_scope else ctx.workspace_id
+    try:
+        return await svc.diff(dataset_id, version_id, against_id, workspace_id=workspace_filter)
     except DatasetNotFoundError as exc:
-        raise _not_found(str(exc)) from exc
+        raise _dataset_not_found() from exc
+    except DatasetVersionNotFoundError as exc:
+        raise _version_not_found() from exc
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +204,39 @@ async def _get_version_or_404(
         raise _not_found(str(exc)) from exc
     if version.dataset_id != dataset_id:
         raise _not_found(f"Dataset version {version_id} not found")
+    return version
+
+
+def _version_not_found() -> HTTPException:
+    """Return an identifier-free 404 for every invisible or mismatched version."""
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail={"error": {"code": "NOT_FOUND", "message": "Dataset version not found", "details": None}},
+    )
+
+
+async def _get_version_for_read(
+    svc: EvaluationDatasetVersionService,
+    ctx: AuthContext,
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession,
+):
+    """Resolve the parent dataset and version binding before role checks.
+
+    The parent dataset gate mirrors the dataset read boundary; version
+    level failures (missing, soft-deleted, cross-workspace, or bound to
+    another dataset) share one constant 404 that never echoes IDs. Role
+    checks stay in callers so ownership is decided first.
+    """
+    await _get_dataset_for_read(ctx, dataset_id, db)
+    workspace_filter = None if ctx.is_system_scope else ctx.workspace_id
+    try:
+        version = await svc.get_version(version_id, workspace_id=workspace_filter)
+    except DatasetVersionNotFoundError as exc:
+        raise _version_not_found() from exc
+    if version.dataset_id != dataset_id:
+        raise _version_not_found()
     return version
 
 
