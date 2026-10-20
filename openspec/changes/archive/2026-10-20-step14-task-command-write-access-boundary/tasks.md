@@ -15,10 +15,14 @@
 
 ## 3. 回归与共享检查
 
-- [ ] 3.1 关联回归:`pytest tests/test_api/ -q` 中 task 命令查询/回执/workflow-callback/task 提交相关既有测试全绿(以 grep 定位实际文件);如既有测试以 viewer 身份下发命令,按新契约改为 editor 并逐条记录,不允许批量放宽。
-- [ ] 3.2 共享检查:`bash scripts/dev.sh check all` 通过;`openspec validate step14-task-command-write-access-boundary --strict` 通过;`python scripts/feature_inventory.py check` 无新增漂移。
+- [x] 3.1 关联回归:`pytest tests/test_api/ -q` 中 task 命令查询/回执/workflow-callback/task 提交相关既有测试全绿(以 grep 定位实际文件);如既有测试以 viewer 身份下发命令,按新契约改为 editor 并逐条记录,不允许批量放宽。
+- [x] 3.2 共享检查:`bash scripts/dev.sh check all` 通过;`openspec validate step14-task-command-write-access-boundary --strict` 通过;`python scripts/feature_inventory.py check` 无新增漂移。
 
 ## 4. 收尾
 
 - [x] 4.1 在 `verification.md` 记录基点(origin/main `4f97d289`)、实际测试命令与结果、delta 场景与测试的对应关系、跳过范围及原因;确认降权重放与零副作用断言齐备。
 - [x] 4.2 勾选完成项,自查 diff 仅触及 `tasks.py`(必要时 `task_control.py` 小幅调整)、新增测试文件与本 change artifacts;确认未触及 workflow-callback 语义、Task 提交、读取端点角色门槛、评测模块、前端、Runtime 与共享 skill 文件。
+
+## 审查补记
+
+审查期间，外部进程将本 change 归档、同步主规范、rebase 到 `origin/main` `d2e91a23` 并创建提交 `3b0fee0e`；审查修正的主体测试已被该提交包含。确认 GLM 停止后，补充 REQUESTED 回放用例及最终验证记录。归档后的严格校验采用归档内容的临时隔离副本与已同步主规范；任务完成校验针对当前归档。实际命令、结果与跳过项见 `verification.md`。本次审查没有执行 commit、push 或 archive。

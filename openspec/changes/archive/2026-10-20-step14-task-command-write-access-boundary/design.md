@@ -43,8 +43,9 @@
 | 场景 | 行为 |
 |---|---|
 | editor/admin 正常下发 | 与现状一致(门槛放行) |
-| viewer/无角色/缺 workspace 下发 | 从"成功记录命令"变为 403——即本 change 目的 |
-| 跨 workspace/软删除/不存在 | 从"部分可记录"变为统一 404 |
+| viewer/无角色下发 | 从可记录命令变为 403——即本 change 目的 |
+| 缺 workspace 下发 | 不变，维持 403 `NO_WORKSPACE` |
+| 跨 workspace/软删除/不存在 | 维持既有统一 404；可见性判定提前到角色门之前 |
 | 降权后旧 command_id 重放 | 从"幂等重放成功"变为 403 |
 | system scope | 不变(维持 403 NO_WORKSPACE) |
 | 可信内部调用(非 REST) | 不变(服务签名兼容) |

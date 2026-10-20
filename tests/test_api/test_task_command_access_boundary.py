@@ -376,14 +376,15 @@ async def test_system_scope_keeps_existing_rejection(env):
 # ---------------------------------------------------------------------------
 
 
-async def test_downgraded_user_cannot_replay_old_command_id(env):
+@pytest.mark.parametrize("kind, state", [("cancel", "requested"), ("pause", "rejected")])
+async def test_downgraded_user_cannot_replay_old_command_id(env, kind, state):
     """Role gate precedes idempotent replay; the receipt stays untouched."""
     editor = replace(env["admin_ctx"], role=WorkspaceRole.EDITOR)
     _as(env, editor)
-    body = _issue_body("cmd-downgrade", kind="pause")
+    body = _issue_body("cmd-downgrade", kind=kind)
     first = await _commands(env, env["task"].id, body=body)
     assert first.status_code == 201, first.text
-    assert first.json()["state"] == "rejected"
+    assert first.json()["state"] == state
     receipt_before = _snapshot(env, env["task"].id)
     calls_before = list(env["calls"])
 
