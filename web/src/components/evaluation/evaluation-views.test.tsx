@@ -208,8 +208,8 @@ describe("CompareView", () => {
 
     // Both selects mount all run options (hidden until opened), so queries
     // must be scoped to one select's wrapper div.
-    const baselineSelect = screen.getByText("Baseline run").closest<HTMLElement>("div.relative")!;
-    const candidateSelect = screen.getByText("Candidate run").closest<HTMLElement>("div.relative")!;
+    const baselineSelect = (await screen.findByText("Baseline run")).closest<HTMLElement>("div.relative")!;
+    const candidateSelect = (await screen.findByText("Candidate run")).closest<HTMLElement>("div.relative")!;
     await user.click(within(baselineSelect).getByText("Baseline run"));
     await user.click(
       within(baselineSelect).getByRole("option", { name: new RegExp(BASELINE.slice(0, 8)) })
