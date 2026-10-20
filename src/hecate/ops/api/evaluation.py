@@ -216,6 +216,24 @@ async def _get_item_or_404(
     return item
 
 
+async def _get_item_for_write(
+    ctx: AuthContext,
+    dataset_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession,
+) -> EvaluationItemModel:
+    """Resolve the parent dataset and item binding before role checks.
+
+    The parent dataset gate mirrors the dataset read boundary; item
+    failures (missing, soft-deleted, or bound to another dataset) share
+    one constant 404 that never echoes IDs. Role checks stay in callers
+    so ownership is decided first. Write authorization anchors to the
+    parent dataset's workspace, never the item row's historical field.
+    """
+    await _get_dataset_for_read(ctx, dataset_id, db)
+    return await _get_item_or_404(dataset_id, item_id, db)
+
+
 # ---------------------------------------------------------------------------
 # Dataset endpoints
 # ---------------------------------------------------------------------------
@@ -322,8 +340,16 @@ async def add_items(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Add items to an evaluation dataset."""
-    await _get_dataset_or_404(dataset_id, db)
+    """Add items to an evaluation dataset.
+
+    Items are added behind the dataset write boundary with an editor
+    role floor; new items inherit the parent dataset's workspace.
+    """
+    await _get_dataset_for_read(ctx, dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
     raw_items = [item.model_dump() for item in items]
     count = await svc.add_items(dataset_id, raw_items)
@@ -375,7 +401,11 @@ async def update_item(
     filled server-side from the authenticated user. Clearing the mark
     resets reason, provenance, and the reserved expiry field.
     """
-    await _get_item_or_404(dataset_id, item_id, db)
+    await _get_item_for_write(ctx, dataset_id, item_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
     try:
         item = await svc.update_item(
@@ -410,7 +440,11 @@ async def delete_item(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete an item from an evaluation dataset."""
-    await _get_dataset_or_404(dataset_id, db)
+    await _get_item_for_write(ctx, dataset_id, item_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
     await svc.delete_item(item_id)
 

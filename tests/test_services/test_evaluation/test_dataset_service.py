@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 
+from hecate.models.evaluation import EvaluationItemModel
 from hecate.ops.evaluation.dataset_service import EvaluationDatasetService
 
 
@@ -87,6 +88,29 @@ class TestDeleteDataset:
 
 
 class TestAddItems:
+    async def test_items_inherit_parent_workspace(self, svc: EvaluationDatasetService) -> None:
+        """Every caller inherits parent ownership without rewriting legacy items."""
+        workspace_id = uuid.uuid4()
+        ds = await svc.create_dataset(name="scoped-items", workspace_id=workspace_id)
+        legacy = EvaluationItemModel(dataset_id=ds.id, query="legacy")
+        svc.db.add(legacy)
+        await svc.db.flush()
+        count = await svc.add_items(
+            ds.id,
+            [
+                {"query": "fresh", "workspace_id": uuid.uuid4(), "tags": ["smoke"]},
+                {"query": "   "},
+            ],
+        )
+        assert count == 1
+        items, total = await svc.list_items(ds.id)
+        assert total == 2
+        fresh = next(item for item in items if item.query == "fresh")
+        assert fresh.workspace_id == workspace_id
+        assert fresh.tags == ["smoke"]
+        await svc.db.refresh(legacy)
+        assert legacy.workspace_id == uuid.UUID(int=0)
+
     async def test_add_valid_items(self, svc: EvaluationDatasetService) -> None:
         ds = await svc.create_dataset(name="items-test")
         count = await svc.add_items(

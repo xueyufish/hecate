@@ -207,7 +207,8 @@ class EvaluationDatasetService:
 
         Each item dict must contain a non-empty ``query`` key. The
         optional ``tags`` key (list[str]) is persisted to the dedicated
-        ``tags`` JSONB column added in 7.2b.
+        ``tags`` JSONB column added in 7.2b. New items inherit the parent
+        dataset workspace regardless of the caller or item payload.
 
         Args:
             dataset_id: UUID of the target dataset.
@@ -220,7 +221,7 @@ class EvaluationDatasetService:
         Raises:
             ValueError: If the dataset is not found.
         """
-        await self.get_dataset(dataset_id)
+        dataset = await self.get_dataset(dataset_id)
         count = 0
         for item_data in items:
             query = item_data.get("query", "")
@@ -235,6 +236,7 @@ class EvaluationDatasetService:
                 context=item_data.get("context"),
                 metadata_=item_data.get("metadata", {}),
                 tags=tags,
+                workspace_id=dataset.workspace_id,
             )
             self.db.add(item)
             count += 1
