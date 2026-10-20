@@ -188,17 +188,21 @@ class EvaluationTaskService:
 
     async def list_tasks(
         self,
-        workspace_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
         task_type: str | None = None,
         status: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[EvaluationTaskModel], int]:
-        """List workspace tasks, newest first, with optional type/status filters."""
-        conditions: list = [
-            EvaluationTaskModel.workspace_id == workspace_id,
-            ~EvaluationTaskModel.deleted,
-        ]
+        """List tasks, newest first, with optional type/status filters.
+
+        ``workspace_id=None`` lists across workspaces; the read boundary's
+        API layer reserves it for explicit system-scope identities and
+        never lets a workspace-less non-system identity reach this method.
+        """
+        conditions: list = [~EvaluationTaskModel.deleted]
+        if workspace_id is not None:
+            conditions.append(EvaluationTaskModel.workspace_id == workspace_id)
         if task_type:
             conditions.append(EvaluationTaskModel.task_type == task_type)
         if status:
@@ -388,10 +392,11 @@ class EvaluationTaskService:
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[EvaluationRunModel], int]:
-        """List a task's runs, newest first. The task must be workspace-owned."""
-        await self._get_task_or_raise(task_id, workspace_id)
+        """List runs bound to the task and its workspace, newest first."""
+        task = await self._get_task_or_raise(task_id, workspace_id)
         base_query = select(EvaluationRunModel).where(
             EvaluationRunModel.task_id == task_id,
+            EvaluationRunModel.workspace_id == task.workspace_id,
             ~EvaluationRunModel.deleted,
         )
         count_stmt = select(func.count()).select_from(base_query.subquery())

@@ -26,11 +26,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import (
+    WorkspaceRole,
+    WorkspaceRoleRequiredError,
+    ensure_workspace_role,
+    get_auth_context,
+)
 from hecate.models.evaluation import (
     EvaluationRunModel,
     EvaluationRunReadSchema,
@@ -41,6 +47,7 @@ from hecate.models.evaluation import (
     EvaluationTaskUpdateSchema,
     TaskType,
 )
+from hecate.ops.api.evaluation import _forbidden
 from hecate.ops.evaluation.tasks.runner import (
     CostGuardrailExceededError,
     OfflineTaskRunner,
@@ -86,10 +93,18 @@ async def list_tasks(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """List the workspace's evaluation tasks, newest first."""
+    """List evaluation tasks, newest first.
+
+    Scoped behind the task read boundary: a viewer role floor applies,
+    and only explicit system scope reads across workspaces.
+    """
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationTaskService(db)
     tasks, total = await svc.list_tasks(
-        workspace_id=ctx.workspace_id,
+        workspace_id=None if ctx.is_system_scope else ctx.workspace_id,
         task_type=task_type,
         status=task_status,
         page=page,
@@ -105,10 +120,11 @@ async def get_task(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a single evaluation task."""
-    svc = EvaluationTaskService(db)
-    task = await svc.get_task(task_id, workspace_id=ctx.workspace_id)
-    if task is None:
-        raise _not_found()
+    task = await _get_task_for_read(ctx, task_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     return _task_to_dict(task)
 
 
@@ -209,10 +225,24 @@ async def list_task_runs(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """List a task's runs, newest first, with summaries when computed."""
+    """List a task's runs, newest first, with summaries when computed.
+
+    Runs are constrained to the task's real workspace behind the task
+    read boundary; only explicit system scope reads across workspaces.
+    """
     svc = EvaluationTaskService(db)
+    task = await _get_task_for_read(ctx, task_id, db)
     try:
-        runs, total = await svc.list_task_runs(task_id, workspace_id=ctx.workspace_id, page=page, page_size=page_size)
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
+    try:
+        runs, total = await svc.list_task_runs(
+            task_id,
+            workspace_id=task.workspace_id,
+            page=page,
+            page_size=page_size,
+        )
     except EvaluationTaskNotFoundError as exc:
         raise _not_found() from exc
     return {
@@ -448,6 +478,26 @@ def _not_found() -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"error": {"code": "NOT_FOUND", "message": "Evaluation task not found", "details": None}},
     )
+
+
+async def _get_task_for_read(
+    ctx: AuthContext,
+    task_id: uuid.UUID,
+    db: AsyncSession,
+) -> EvaluationTaskModel:
+    """Resolve task visibility before callers enforce the workspace role."""
+    if not ctx.is_system_scope and ctx.workspace_id is None:
+        raise _not_found()
+    result = await db.execute(
+        select(EvaluationTaskModel).where(
+            EvaluationTaskModel.id == task_id,
+            ~EvaluationTaskModel.deleted,
+        )
+    )
+    task = result.scalar_one_or_none()
+    if task is None or (not ctx.is_system_scope and task.workspace_id != ctx.workspace_id):
+        raise _not_found()
+    return task
 
 
 def _validation_error(message: str) -> HTTPException:
