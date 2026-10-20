@@ -56,16 +56,17 @@ async def create_dataset_version(
 ) -> dict:
     """Freeze the dataset's current live items as a named version."""
     svc = EvaluationDatasetVersionService(db)
+    ds = await _authorize_dataset_write(ctx, dataset_id, db)
     try:
         version = await svc.create_version(
             dataset_id,
             name=data.name,
             description=data.description,
-            workspace_id=ctx.workspace_id,
+            workspace_id=ds.workspace_id,
             created_by=ctx.user_id,
         )
     except DatasetNotFoundError as exc:
-        raise _not_found(str(exc)) from exc
+        raise _dataset_not_found() from exc
     except DatasetVersionNameConflictError as exc:
         raise _conflict(str(exc)) from exc
     return _version_to_dict(version)
@@ -125,8 +126,11 @@ async def delete_dataset_version(
 ) -> None:
     """Soft-delete a named version; its name stays reserved."""
     svc = EvaluationDatasetVersionService(db)
-    await _get_version_or_404(svc, dataset_id, version_id, ctx.workspace_id)
-    await svc.delete_version(version_id, workspace_id=ctx.workspace_id)
+    ds, _ = await _get_version_for_write(svc, ctx, dataset_id, version_id, db)
+    try:
+        await svc.delete_version(version_id, workspace_id=ds.workspace_id)
+    except DatasetVersionNotFoundError as exc:
+        raise _version_not_found() from exc
 
 
 @router.post("/datasets/{dataset_id}/versions/{version_id}/checkout")
@@ -142,11 +146,13 @@ async def checkout_dataset_version(
     first if it must be kept.
     """
     svc = EvaluationDatasetVersionService(db)
-    await _get_version_or_404(svc, dataset_id, version_id, ctx.workspace_id)
+    ds, _ = await _get_version_for_write(svc, ctx, dataset_id, version_id, db)
     try:
-        return await svc.checkout(dataset_id, version_id, workspace_id=ctx.workspace_id)
+        return await svc.checkout(dataset_id, version_id, workspace_id=ds.workspace_id)
     except DatasetNotFoundError as exc:
-        raise _not_found(str(exc)) from exc
+        raise _dataset_not_found() from exc
+    except DatasetVersionNotFoundError as exc:
+        raise _version_not_found() from exc
 
 
 @router.get("/datasets/{dataset_id}/versions/{version_id}/diff")
@@ -192,19 +198,48 @@ async def diff_dataset_version(
 # ---------------------------------------------------------------------------
 
 
-async def _get_version_or_404(
+async def _authorize_dataset_write(
+    ctx: AuthContext,
+    dataset_id: uuid.UUID,
+    db: AsyncSession,
+):
+    """Resolve the parent dataset through the read boundary, then require
+    editor. Ownership is decided before role so a cross-workspace caller
+    receives the constant not-found, and the returned dataset carries the
+    real workspace attribution for the write (never a zero-UUID fallback).
+    """
+    ds = await _get_dataset_for_read(ctx, dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
+    return ds
+
+
+async def _get_version_for_write(
     svc: EvaluationDatasetVersionService,
+    ctx: AuthContext,
     dataset_id: uuid.UUID,
     version_id: uuid.UUID,
-    workspace_id: uuid.UUID | None,
+    db: AsyncSession,
 ):
+    """Resolve parent and version ownership before requiring the write role.
+
+    Even system writes bind the version to the parent's actual workspace;
+    inconsistent legacy attribution must fail before any mutation.
+    """
+    ds = await _get_dataset_for_read(ctx, dataset_id, db)
     try:
-        version = await svc.get_version(version_id, workspace_id=workspace_id)
+        version = await svc.get_version(version_id, workspace_id=ds.workspace_id)
     except DatasetVersionNotFoundError as exc:
-        raise _not_found(str(exc)) from exc
+        raise _version_not_found() from exc
     if version.dataset_id != dataset_id:
-        raise _not_found(f"Dataset version {version_id} not found")
-    return version
+        raise _version_not_found()
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
+    return ds, version
 
 
 def _version_not_found() -> HTTPException:
@@ -245,13 +280,6 @@ def _version_to_dict(version, include_items: bool = True) -> dict:
     if not include_items:
         data.pop("items", None)
     return data
-
-
-def _not_found(message: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail={"error": {"code": "NOT_FOUND", "message": message, "details": None}},
-    )
 
 
 def _conflict(message: str) -> HTTPException:
