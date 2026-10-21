@@ -239,13 +239,32 @@ async def _get_item_for_write(
 # ---------------------------------------------------------------------------
 
 
+def _no_workspace() -> HTTPException:
+    """Uniform 403 for a create request without an active workspace."""
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={"error": {"code": "NO_WORKSPACE", "message": "An active workspace is required", "details": None}},
+    )
+
+
 @router.post("/datasets", status_code=status.HTTP_201_CREATED)
 async def create_dataset(
     data: EvaluationDatasetCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Create a new evaluation dataset."""
+    """Create a new evaluation dataset.
+
+    Creation requires an explicit active workspace for every identity,
+    including system scope: the created dataset belongs to that
+    workspace, and there is no workspace-selection parameter.
+    """
+    if ctx.workspace_id is None:
+        raise _no_workspace()
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
     ds = await svc.create_dataset(
         name=data.name,
@@ -305,7 +324,11 @@ async def update_dataset(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Update an evaluation dataset."""
-    await _get_dataset_or_404(dataset_id, db)
+    await _get_dataset_for_read(ctx, dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
     ds = await svc.update_dataset(
         dataset_id,
@@ -322,8 +345,12 @@ async def delete_dataset(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
-    """Delete an evaluation dataset (soft delete)."""
-    await _get_dataset_or_404(dataset_id, db)
+    """Delete an evaluation dataset (soft delete, cascading to all items)."""
+    await _get_dataset_for_read(ctx, dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationDatasetService(db)
     await svc.delete_dataset(dataset_id)
 
