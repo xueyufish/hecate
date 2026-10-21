@@ -599,6 +599,21 @@ class TaskControlService:
             "pending_reconciliation": row.get("pending_reconciliation"),
         }
 
+    async def assert_run_observable(self, *, workspace_id: uuid.UUID, run_id: uuid.UUID) -> RunModel:
+        """Raise the observation not-found error for an invisible run/task pair.
+
+        REST read gates call this before any role decision or relay
+        projection: the run and its parent task must both be live rows in
+        the workspace (registry semantics keep missing, foreign and
+        soft-deleted rows indistinguishable).
+        """
+        try:
+            run = await self._registry.get_run(run_id, workspace_id)
+            await self._registry.get_task(run.task_id, workspace_id)
+        except TaskNotFoundError as exc:
+            raise TaskControlNotFoundError(f"run {run_id} not found in workspace") from exc
+        return run
+
     async def read_run_events(
         self,
         workspace_id: uuid.UUID,
@@ -607,11 +622,8 @@ class TaskControlService:
         cursor: str | None = None,
         limit: int = 100,
     ) -> EventPage:
+        run = await self.assert_run_observable(workspace_id=workspace_id, run_id=run_id)
         await self._pump_events()
-        try:
-            run = await self._registry.get_run(run_id, workspace_id)
-        except TaskNotFoundError as exc:
-            raise TaskControlNotFoundError(str(exc)) from exc
         if run.projection.get("entry_name"):
             from hecate.core.composition.entry_assembly import get_shared_event_store
             from hecate.execution.entry_events import RunEventMapper
@@ -638,10 +650,7 @@ class TaskControlService:
         poll_interval: float = 0.2,
     ) -> Any:
         """Subscribe view: yield stored envelopes until the terminal event."""
-        try:
-            run = await self._registry.get_run(run_id, workspace_id)
-        except TaskNotFoundError as exc:
-            raise TaskControlNotFoundError(str(exc)) from exc
+        run = await self.assert_run_observable(workspace_id=workspace_id, run_id=run_id)
         if run.projection.get("entry_name"):
             from hecate.contracts.execution.events import EventKind
 
