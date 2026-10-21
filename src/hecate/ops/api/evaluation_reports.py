@@ -47,6 +47,34 @@ _TREND_BUCKETS = "^(day|hour)$"
 _BREAKDOWN_DIMENSIONS = "^(agent|task|session|source)$"
 
 
+def _require_aggregate_viewer(ctx: AuthContext) -> None:
+    """Gate the workspace-aggregate report endpoints.
+
+    The missing-workspace check runs explicitly and first:
+    ``ensure_workspace_role`` waives system-scope identities, which would
+    otherwise fall through to the service's null-workspace filter and get
+    an empty report instead of a denial. These endpoints take no
+    target-resource or workspace-selection parameter, so no active
+    workspace is 403 NO_WORKSPACE for every identity; a member below
+    viewer is 403 FORBIDDEN.
+    """
+    if ctx.workspace_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": {
+                    "code": "NO_WORKSPACE",
+                    "message": "request has no workspace scope",
+                    "details": None,
+                }
+            },
+        )
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
+
+
 @router.get("/reports/overview")
 async def overview_report(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -55,6 +83,7 @@ async def overview_report(
     end_date: datetime | None = None,
 ) -> dict:
     """Aggregate the four overview cards (quality/volume/coverage/error rate)."""
+    _require_aggregate_viewer(ctx)
     svc = EvaluationReportService(db)
     report = await _run(svc.overview(ctx.workspace_id, start_date=start_date, end_date=end_date))
     return report.model_dump(mode="json")
@@ -71,6 +100,7 @@ async def trends_report(
     end_date: datetime | None = None,
 ) -> dict:
     """Per-bucket pass-rate/score timeseries by dataset, workflow, or agent."""
+    _require_aggregate_viewer(ctx)
     svc = EvaluationReportService(db)
     report = await _run(
         svc.trends(
@@ -134,6 +164,7 @@ async def breakdowns_report(
     end_date: datetime | None = None,
 ) -> dict:
     """Online task scores grouped by agent, task, session, or source."""
+    _require_aggregate_viewer(ctx)
     svc = EvaluationReportService(db)
     report = await _run(
         svc.breakdowns(
