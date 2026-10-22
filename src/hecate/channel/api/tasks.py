@@ -387,11 +387,32 @@ async def list_task_runs(task_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) 
     return {"items": detail["runs"]}
 
 
+async def _run_read_gate(ctx: AuthContext, service: TaskControlService, run_id: uuid.UUID) -> uuid.UUID:
+    """Read gate shared by the four run observation entries.
+
+    Visibility first (foreign, missing and soft-deleted runs — and their
+    parent task — are indistinguishable), then the server-side VIEWER
+    floor. Everything runs before any ledger/event access, relay
+    projection or stream creation.
+    """
+    workspace_id = _workspace_id(ctx)
+    try:
+        await service.assert_run_observable(workspace_id=workspace_id, run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
+    return workspace_id
+
+
 @runs_router.get("/{run_id}")
 async def get_run(run_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
     """Run detail with the platform-side projection."""
+    workspace_id = await _run_read_gate(ctx, service, run_id)
     try:
-        return await service.get_run_detail(_workspace_id(ctx), run_id)
+        return await service.get_run_detail(workspace_id, run_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
 
@@ -399,8 +420,9 @@ async def get_run(run_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[
 @runs_router.get("/{run_id}/actions")
 async def list_run_actions(run_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
     """Whitelisted action-ledger records for one run (read-only, any attempt)."""
+    workspace_id = await _run_read_gate(ctx, service, run_id)
     try:
-        return await service.list_run_actions(_workspace_id(ctx), run_id)
+        return await service.list_run_actions(workspace_id, run_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
 
@@ -414,8 +436,9 @@ async def read_run_events(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict[str, Any]:
     """Cursor-paginated event read; resume with ``next_cursor``."""
+    workspace_id = await _run_read_gate(ctx, service, run_id)
     try:
-        page = await service.read_run_events(_workspace_id(ctx), run_id, cursor=cursor, limit=limit)
+        page = await service.read_run_events(workspace_id, run_id, cursor=cursor, limit=limit)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
     return {
@@ -433,7 +456,9 @@ async def stream_run_events(
     cursor: Annotated[str | None, Query()] = None,
 ) -> StreamingResponse:
     """SSE subscribe view over the durable run event stream."""
-    workspace_id = _workspace_id(ctx)
+    # The gate completes before the stream is created: authorization
+    # failures surface as normal HTTP 403/404, never as 200 + error frames.
+    workspace_id = await _run_read_gate(ctx, service, run_id)
 
     async def event_source():
         try:

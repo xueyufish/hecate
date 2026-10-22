@@ -417,11 +417,15 @@ async def test_pg_entry_maps_owned_artifacts_and_rejects_foreign_refs(
     existing_auth = app.dependency_overrides[get_auth_context]()
     other_auth = replace(existing_auth, workspace_id=uuid.uuid4())
     monkeypatch.setitem(app.dependency_overrides, get_auth_context, lambda: other_auth)
-    for suffix in ("", "/events"):
+    for suffix in ("", "/events", "/events/stream"):
         assert (await pg_client.get(f"/api/runs/{run.id}{suffix}")).status_code == 404
+    # step14: the SSE gate completes before the stream is created — a denied
+    # subscriber gets the plain HTTP 404 like every other entry, never a
+    # 200 stream carrying error frames.
     denied_stream = await pg_client.get(f"/api/runs/{run.id}/events/stream")
-    assert "event: error" in denied_stream.text
-    assert '"code": 404' in denied_stream.text
+    assert denied_stream.status_code == 404
+    assert denied_stream.headers.get("content-type", "") != "text/event-stream"
+    assert "event: error" not in denied_stream.text
     assert str(own.id) not in denied_stream.text
 
 
