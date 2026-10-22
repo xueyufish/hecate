@@ -45,3 +45,7 @@
 - AuthContext 经 dependency override 切换请求身份；membership 到上下文的生产解析仍由既有认证层负责。
 - 关联回归的 7 warnings 为：2 项共享 session factory 收集提示、2 项既有 HTTP 422 常量弃用提示、3 项 coroutine 未 await。后三项来自既有 `test_task_control_service.py` 将 `_spawn_background` 替换成 `held.append` 后未关闭所持 coroutine。已逐函数核对这三个测试及 `_spawn_background`、`submit`、`_dispatch_task` 的 AST 与 `origin/main` 一致；没有屏蔽 warning 或修改无关测试。
 - 其余 Task/command/reconciliation 读取角色门槛、task 级 pump 次序保持 proposal 登记的独立后续范围。
+
+## 归档后 CI 回归补充
+
+PR CI 的 `test_entry_contract_pg_e2e.py`(真实 PostgreSQL 入口 e2e,本地门禁未覆盖的文件)暴露一处漏改断言:`test_pg_entry_maps_owned_artifacts_and_rejects_foreign_refs` 的 SSE 拒绝段仍断言旧行为("200 + event: error 帧")。按本 change 新契约修正为:跨 workspace 的 stream 请求返回与详情/事件一致的 HTTP 404,content-type 非 `text/event-stream`,无 `event: error` 帧,message 仅回显调用方自带 run id;同用例的 404 循环扩为三后缀(`""`/`/events`/`/events/stream`)。修正依据即 CI 失败输出捕获的实际响应(404 + NOT_FOUND envelope),非推测。本地真实 PG 复跑在无关的首个用例上挂起(Windows/asyncpg 基础设施差异,该用例非本次修改对象),以 CI 重跑为最终验证;边界专项 76 项(含 run actions)与 ruff/format 复核通过。
