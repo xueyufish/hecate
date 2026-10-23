@@ -205,6 +205,32 @@ async def submit_task(
     return _submit_response(result)
 
 
+async def _task_read_gate(
+    ctx: AuthContext,
+    service: TaskControlService,
+    task_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """Read gate shared by the three task observation entries.
+
+    Workspace requirement first (403 NO_WORKSPACE, unchanged), then — for
+    the task-scoped entries — visibility (foreign, missing and
+    soft-deleted tasks are indistinguishable) before the server-side
+    VIEWER floor. Everything runs before any list/detail business query
+    or durable-state read.
+    """
+    workspace_id = _workspace_id(ctx)
+    if task_id is not None:
+        try:
+            await service.assert_task_visible(workspace_id=workspace_id, task_id=task_id)
+        except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+            raise _map_service_error(exc) from exc
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
+    return workspace_id
+
+
 @router.get("")
 async def list_tasks(
     service: ServiceDep,
@@ -214,10 +240,9 @@ async def list_tasks(
     lifecycle_state: Annotated[str | None, Query()] = None,
 ) -> dict[str, Any]:
     """Workspace-scoped task list with lifecycle projection."""
+    workspace_id = await _task_read_gate(ctx, service, None)
     try:
-        items, total = await service.list_tasks(
-            _workspace_id(ctx), state=lifecycle_state, page=page, page_size=page_size
-        )
+        items, total = await service.list_tasks(workspace_id, state=lifecycle_state, page=page, page_size=page_size)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
     return {"items": items, "total": total}
@@ -226,8 +251,9 @@ async def list_tasks(
 @router.get("/{task_id}")
 async def get_task(task_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
     """Task detail: responsibility record, lifecycle projection, runs."""
+    workspace_id = await _task_read_gate(ctx, service, task_id)
     try:
-        return await service.get_task_detail(_workspace_id(ctx), task_id)
+        return await service.get_task_detail(workspace_id, task_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
 
@@ -380,8 +406,9 @@ async def _issue(
 @router.get("/{task_id}/runs")
 async def list_task_runs(task_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
     """All execution attempts of one task."""
+    workspace_id = await _task_read_gate(ctx, service, task_id)
     try:
-        detail = await service.get_task_detail(_workspace_id(ctx), task_id)
+        detail = await service.get_task_detail(workspace_id, task_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
     return {"items": detail["runs"]}
