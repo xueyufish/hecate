@@ -320,7 +320,9 @@ def test_worktree_start_preserves_skills_unless_tool_generation_is_requested(tmp
     root = tmp_path / "repository"
     _repository(root, branch="main")
     for name in ("opsx-flow.sh", "worktree-help.sh"):
-        shutil.copyfile(REPO_ROOT / "scripts" / name, root / "scripts" / name)
+        target = root / "scripts" / name
+        shutil.copyfile(REPO_ROOT / "scripts" / name, target)
+        target.chmod(0o755)
     (root / "scripts/dev.sh").write_text("exit 0\n", encoding="utf-8")
     skill = Path(".agents/skills/local-workflow/SKILL.md")
     (root / skill).parent.mkdir(parents=True)
