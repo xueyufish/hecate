@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./scripts/worktree-help.sh start <name> [--tools <list>|--no-tools]
-#                                       # create worktree + openspec init (no auto-launch)
+#                                       # create worktree; preserve checked-in skills
 #   ./scripts/worktree-help.sh launch <name> [--tool <name>] [--background]
 #                                       # bind worktree to an AI tool (opencode by default)
 #   ./scripts/worktree-help.sh list   # list active worktrees
@@ -112,7 +112,7 @@ init_openspec_tools() {
     local wt_path="$1"
     local tools="$2"
 
-    [[ -n "${tools}" ]] || { echo "Skipping openspec init (no tools specified)"; return 0; }
+    [[ -n "${tools}" ]] || { echo "Keeping checked-in agent skills (no openspec init requested)"; return 0; }
     [[ "${tools}" != "none" ]] || { echo "Skipping openspec init (--tools none)"; return 0; }
 
     if ! command -v openspec >/dev/null 2>&1; then
@@ -122,6 +122,7 @@ init_openspec_tools() {
     fi
 
     echo "Initializing openspec for tools: ${tools}"
+    echo "Review generated changes: openspec init can overwrite repository skill customizations."
     if (cd "${wt_path}" && openspec init \
             --tools "${tools}" \
             --force \
@@ -162,7 +163,7 @@ case "${cmd}" in
     start)
         shift
         name=""
-        tools="opencode,zcode,codex"
+        tools=""
         while [[ $# -gt 0 ]]; do
             case "$1" in
                 --tools)
@@ -386,7 +387,7 @@ case "${cmd}" in
         cat <<EOF
 Usage:
   $0 start <name> [--tools <list>|--no-tools]
-                                      # create worktree + init openspec (no auto-launch)
+                                      # create worktree; preserve checked-in skills
   $0 launch <name> [--tool <name>] [--background]
                                       # bind worktree to an AI tool (opencode by default)
   $0 list                             # list active worktrees
@@ -396,7 +397,7 @@ Usage:
 
 start --tools flags:
   --tools <list>   comma-separated list passed to 'openspec init --tools'
-                   (default: opencode,zcode,codex)
+                   (default: keep checked-in skills without regeneration)
                    use "all" or "none" to forward to openspec verbatim
   --no-tools       skip 'openspec init' entirely
 
@@ -406,7 +407,7 @@ launch --tool flags:
   --background     launch detached; logs go to <wt>/.<tool>.log
 
 Workflow:
-  $0 start feat-my-change               # creates worktree + openspec init, no launch
+  $0 start feat-my-change               # creates worktree, keeps checked-in skills
   $0 launch feat-my-change              # bind to opencode (foreground)
   $0 launch feat-my-change --tool codex # bind to codex
   # ... do work in worktree ...

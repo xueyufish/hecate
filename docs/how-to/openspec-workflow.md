@@ -1,14 +1,28 @@
-# OpenSpec development workflow
+# Development workflow and optional OpenSpec
 
-Use an isolated worktree for each change. OpenSpec is required for every change, with the artifact depth selected by risk. Root [AGENTS.md](../../AGENTS.md) owns the exact classification and scope rules.
+Use an isolated worktree for each coherent goal. Develop directly by default. Root [AGENTS.md](../../AGENTS.md) owns the activation and authorization rules.
 
-## Choose the workflow by risk
+## Default development
 
-Use the lightweight schema for documentation-only or test-only changes, behavior-preserving mechanical refactors, local developer tooling that does not alter CI or release gates, and narrowly scoped fixes that restore an existing documented contract. The lightweight proposal records the existing contract, scope, acceptance criteria, and why the change qualifies; its tasks cover implementation and affected verification. It omits design and product delta specs. Record the actual focused tests and applicable shared checks in the PR or verification notes.
+Ordinary implementation, fixes, refactors, analysis, and design requests do not invoke OpenSpec commands or skills and do not require a change directory, proposal, delta spec, tasks file, or archive. This applies equally to APIs, security and tenant isolation, migrations, Runtime, architecture, CI/release gates, cross-domain work, and uncertain requirements. An existing OpenSpec change or a mention of OpenSpec does not activate the workflow.
 
-Use the full `spec-driven` schema for new or changed product requirements, public or persisted contracts, API/event/schema changes, migrations, security or tenant-isolation semantics, runtime lifecycle/concurrency/recovery, architecture or extension points, CI/branch-protection/release gates, cross-domain work, and any uncertain risk. If scope expands while implementing a lightweight change, stop and promote it before proceeding. Both workflows retain relevant tests, applicable static checks, CI, review, and truthful reporting of skipped checks.
+Investigate the relevant code and contracts, maintain a useful plan for long tasks, resolve material questions with the user, implement, and verify. Update existing specifications and design documents directly when their behavior changes; do not create delta specs merely to update documentation. Keep acceptance evidence proportional to the behavior and risk. Tests, shared static checks, CI, and PR review remain required where applicable.
 
-In Hecate, `/opsx-propose` reads the repository's risk rules and selects the lightweight schema only when every condition is met; otherwise the configured full schema remains the default. To create a qualifying change manually, use `openspec new change <name> --schema lightweight`.
+## Manually activate OpenSpec
+
+Enter OpenSpec only when the user manually invokes the corresponding slash command, named skill, or explicitly requests execution of a CLI command. A request such as "design a solution" or a discussion about OpenSpec is not an invocation. Follow-ups may continue an already selected action without re-entering its command, but do not implicitly select another action.
+
+| User-selected action | Scope |
+| --- | --- |
+| `/opsx-propose <name>` or `$openspec-propose` | Generate the selected schema's planning artifacts, then stop |
+| `/opsx-apply <name>` or `$openspec-apply-change` | Read required artifacts, implement tasks, and run affected verification |
+| `/opsx-sync <name>` or `$openspec-sync-specs` | Synchronize the selected change's delta specs to main specs |
+| `/opsx-archive <name>` or `$openspec-archive-change` | Check completion, synchronize applicable deltas, and archive |
+| `/opsx-explore` or `$openspec-explore` | Explore without implementation; capture only explicitly requested planning artifacts |
+
+The `/openspec-*` skill aliases are equivalent where supported. A CLI inspection request authorizes only that inspection, not a write workflow. Commands keep their artifact dependencies, validation, store/path selection, and task/sync checks. A normal implementation request does not authorize automatic propose, apply, sync, or archive. The user can explicitly request a sequence of actions in a single message; execute that sequence without requiring repeated messages.
+
+Once OpenSpec is selected, use the configured `spec-driven` schema unless the user selects another schema, such as `openspec new change <name> --schema lightweight`. Lightweight records concise intent and checkable tasks; it does not define product delta specs. Resolve a schema that cannot express the requested contract with the user rather than silently skipping required artifacts. Change risk alone never activates OpenSpec.
 
 ## Development commands
 
@@ -62,13 +76,13 @@ Pre-commit rejects commits on main and runs lint/format. Commit-msg validates Co
 cd ../.worktrees/<change-name>
 ```
 
-The script creates the branch/worktree and synchronizes its development environment. It initializes commands for the selected Coding Agent; `--tools codex` selects Codex only, and `--no-tools` keeps existing checked-in skills without regenerating them. `HECATE_WORKTREE_ROOT` overrides the default worktree parent.
+The script creates the branch/worktree and synchronizes its development environment. By default it keeps checked-in Agent skills and commands without running `openspec init`; direct work therefore does not create an OpenSpec root as a side effect. `--no-tools` remains an explicit equivalent. Use `--tools codex` only when you want to regenerate Codex integration, and review the resulting diff because generation can overwrite repository customizations. `HECATE_WORKTREE_ROOT` overrides the default worktree parent.
 
-The user triggers `/opsx-propose <change-name>` to prepare artifacts for the selected risk tier, then `/opsx-apply <change-name>` to implement. Natural-language requests can explicitly authorize those phases. Work from the change artifacts and related code; escalate to full `spec-driven` if a lightweight change grows beyond its criteria.
+Work directly from the code, relevant contracts, and the requested goal. Starting a worktree does not invoke any OpenSpec action. If the user manually selects OpenSpec, prepare the selected schema's required artifacts before apply and mark tasks complete only after their specified acceptance checks pass. A coherent change can cover related endpoints and tasks with a shared design and acceptance matrix; independent purposes still need separate PRs.
 
 ## Implement and verify
 
-Complete a behavior and its relevant regression evidence together. Mark its task complete immediately after the specified behavior is implemented and verified. Organize commits by coherent, reviewable changes; a task checkbox does not require its own commit. The main agent implements Apply directly.
+Complete a behavior and its relevant regression evidence together. If an OpenSpec task file is in use, mark its task complete immediately after the specified behavior is implemented and verified. Organize commits by coherent, reviewable changes; a task checkbox does not require its own commit. The main agent implements Apply directly.
 
 ```bash
 bash scripts/dev.sh check all
@@ -91,6 +105,8 @@ Keep each PR focused on one purpose. Fix CI failures and review findings, and le
 
 ## Archive and cleanup
 
-After merge, the user triggers `/opsx-archive <change-name>` against an up-to-date feature worktree. Synchronize delta specs when present. Review `positioning.md` only when product positioning or catalog text changed, and prune `AGENTS.md` when repository rules changed. Submit archive changes through a branch and PR; do not edit or commit directly on main.
+Ordinary development has nothing to archive. For a manually selected OpenSpec change, archive only when the user invokes the archive action or explicitly includes it in an action sequence. Follow the archive completion and delta-sync checks. Review `positioning.md` when product positioning or catalog text changed, and prune `AGENTS.md` when repository rules changed. Keep behavior and relevant main-spec updates reviewable together.
 
-Archive is not a prerequisite for the implementation PR. Keep required catalog updates with their behavior; a large independent catalog change can use a separate focused PR. When all work on a worktree has merged and its state is preserved, use `opsx-flow.sh delete <change-name>` for cleanup. Review local changes before deleting a worktree.
+Archive does not certify CI, review, or merge success; report pending states and failed or skipped checks truthfully. Resolve incomplete tasks, failed required checks, or sync conflicts within scope; exceptional archival needs the user's explicit decision. Subsequent review fixes update the relevant records and rerun affected verification.
+
+Push requires explicit chat confirmation. OpenSpec activation or archival does not authorize push, merge, publishing, or worktree deletion. After all work has merged and its state is preserved, `opsx-flow.sh delete <change-name>` is available for requested cleanup; review local changes first. Never edit or commit directly on main.

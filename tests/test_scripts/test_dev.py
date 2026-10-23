@@ -306,6 +306,73 @@ def test_worktree_start_delegates_sync_and_never_reports_failed_bootstrap_ready(
     assert "probe" in (target / "bootstrap-cwd").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize(
+    ("tool_arguments", "selected_tools"),
+    [
+        ((), None),
+        (("--no-tools",), None),
+        (("--tools", "codex"), "codex"),
+        (("--tools=opencode,codex",), "opencode,codex"),
+    ],
+)
+def test_worktree_start_preserves_skills_unless_tool_generation_is_requested(tmp_path, tool_arguments, selected_tools):
+    """Default setup preserves customization; explicit generation forwards only the requested tools."""
+    root = tmp_path / "repository"
+    _repository(root, branch="main")
+    for name in ("opsx-flow.sh", "worktree-help.sh"):
+        shutil.copyfile(REPO_ROOT / "scripts" / name, root / "scripts" / name)
+    (root / "scripts/dev.sh").write_text("exit 0\n", encoding="utf-8")
+    skill = Path(".agents/skills/local-workflow/SKILL.md")
+    (root / skill).parent.mkdir(parents=True)
+    (root / skill).write_text("Repository customization\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", "chore(test): prepare customized workflow")
+
+    tools = tmp_path / "tool stubs"
+    tools.mkdir()
+    trace = tmp_path / "init arguments"
+    executable = tools / "openspec"
+    executable.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$HECATE_INIT_TRACE"\n'
+        'printf "Generated workflow\\n" > .agents/skills/local-workflow/SKILL.md\n',
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    parent = tmp_path / "worktrees with spaces"
+    environment = {
+        **os.environ,
+        "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+        "HECATE_WORKTREE_ROOT": str(parent),
+        "HECATE_INIT_TRACE": trace.as_posix(),
+    }
+    result = subprocess.run(
+        [_bash(), "scripts/opsx-flow.sh", "start", "probe", *tool_arguments],
+        cwd=root,
+        env=environment,
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    target = parent / "probe"
+    if selected_tools is None:
+        assert not trace.exists()
+        assert (target / skill).read_text(encoding="utf-8") == "Repository customization\n"
+        assert not (target / "openspec").exists()
+    else:
+        assert trace.read_text(encoding="utf-8").splitlines() == [
+            "init",
+            "--tools",
+            selected_tools,
+            "--force",
+            "--no-animation",
+            "--no-copilot-cloud",
+            ".",
+        ]
+        assert (target / skill).read_text(encoding="utf-8") == "Generated workflow\n"
+
+
 def test_documentation_ci_uses_the_shared_lightweight_environment():
     """Documentation validation cannot silently install unpinned global tools."""
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/docs-check.yml").read_text(encoding="utf-8"))
