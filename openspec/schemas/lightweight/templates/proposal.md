@@ -1,8 +1,8 @@
 # Lightweight Change
 
-## Risk classification
+## Intent
 
-Explain briefly why the change meets the lightweight criteria in `AGENTS.md`.
+State the intended outcome for this manually selected lightweight change.
 
 ## Existing behavior or contract
 

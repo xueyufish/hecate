@@ -1,6 +1,6 @@
 ---
 name: openspec-apply-change
-description: Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks. Also use when the user says "openspec apply", "opsx apply", or "openspec implement".
+description: "Implement and verify an OpenSpec change only on a manual apply invocation; do not select for ordinary implementation requests."
 allowed-tools: Bash(openspec:*)
 license: MIT
 compatibility: Requires openspec CLI.
@@ -10,7 +10,9 @@ metadata:
   generatedBy: "1.13.1"
 ---
 
-Implement tasks from an OpenSpec change.
+**Invocation in Hecate:** Run only when the user manually invokes this action through its OpenSpec slash command, named skill, or an explicit CLI execution request, or when it is a required substep of an already selected action. A mention of OpenSpec, an ordinary implementation/design request, risk, or an existing change is not activation. Follow-ups can continue the selected action; do not select the next action automatically. If not invoked, return to ordinary development before any OpenSpec command or artifact write.
+
+Implement and verify tasks from the manually selected OpenSpec change. Read the selected schema artifacts and preserve its task, dependency, and blocked-state checks. On completion, report actual local verification and stop; do not automatically invoke sync or archive unless the user explicitly selected those actions. Ordinary development does not enter this skill.
 
 **Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`, `schemas`, `view`). Once selected, treat `--store <id>` as sticky for the rest of the workflow. Every unscoped example of those commands below is shorthand: before running it, append the flag. For example, run `openspec status --change "<name>" --json --store "<id>"`, not the unscoped form shown below. Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
@@ -66,7 +68,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
    - If `state: "blocked"`: show the message and pause implementation.
      - If `missingArtifacts` is non-empty: suggest completing the missing artifacts. Run `openspec status --change "<name>" --json`, select the next `ready` artifact (not `skipped` or `blocked`), and use `openspec instructions "<artifact-id>" --change "<name>" --json` for its rules and template. Keep the selected `--store <id>` on both commands.
      - Otherwise, follow the CLI instruction to create or repair the schema-configured tracking file from existing planning artifacts. Do not assume another artifact is ready or start implementation while blocked.
-   - If `state: "all_done"`: congratulate, suggest archive
+   - If `state: "all_done"`: inspect required local verification and report progress; task status alone is not verification evidence and does not select archive
    - Otherwise: proceed to implementation
 
    Treat `context` as a required prompt-level input. Read and consider it, and
@@ -112,10 +114,10 @@ In both branches, never create the root as a side effect: do not run `openspec i
    - Continue to next task
 
    **Pause if:**
-   - Task is unclear → ask for clarification
-   - Implementation reveals a design issue → suggest updating artifacts
-   - A task needs work beyond what the spec and tasks describe, or you are tempted to drop, narrow, defer, or accept exceptions to specified behavior to make it fit → surface the added scope and ask; do not absorb it silently
-   - Error or blocker encountered → report and wait for guidance
+   - Task has material unresolved scope or acceptance criteria → ask; resolve routine details within the agreed goal
+   - Implementation reveals an unresolved material requirement or compatibility/security choice → ask; update routine design details within scope
+   - Work introduces a new goal or changes agreed behavior, compatibility, or security → surface it and ask. Update routine tasks within the authorized goal and continue; never silently drop, narrow, defer, or accept exceptions to specified behavior
+   - A blocker requires unavailable information or a user decision → report and ask; fix routine errors and failed checks within scope
    - User interrupts
 
 7. **On completion or pause, show status**
@@ -123,7 +125,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
    Display:
    - Tasks completed this session
    - Overall progress: "N/M tasks complete"
-   - If all done: suggest archive
+   - If all done: run required local checks, report pending CI/review/merge, and stop. Continue to sync or archive only when the user explicitly selected those additional actions
    - If paused: explain why and wait for guidance
 
 **Output During Implementation**
@@ -154,7 +156,7 @@ Working on task 4/7: <task description>
 - [x] Task 2
 ...
 
-All tasks complete! You can archive this change with `$openspec-archive-change (Codex) or /openspec-archive-change (other agents)`.
+Implementation and required local verification are complete. Report actual results and pending CI/review/merge. Sync and archive remain separate user-selected actions.
 ```
 
 **Output On Pause (Issue Encountered)**
@@ -180,8 +182,8 @@ What would you like to do?
 **Guardrails**
 - Keep going through tasks until done or blocked
 - Always read context files before starting (from the apply instructions output)
-- If task is ambiguous, pause and ask before implementing
-- If implementation reveals issues, pause and suggest artifact updates
+- Ask about material unresolved requirements; resolve routine implementation details within the authorized goal
+- Update artifacts for routine implementation findings; pause only for material unresolved decisions or expanded scope
 - Keep code changes minimal and scoped to each task
 - Update task checkbox immediately after completing each task
 - Pause on errors, blockers, or unclear requirements - don't guess
@@ -199,4 +201,4 @@ What would you like to do?
 This skill supports the "actions on a change" model:
 
 - **Can be invoked anytime**: Before all artifacts are done (if tasks exist), after partial implementation, interleaved with other actions
-- **Allows artifact updates**: If implementation reveals design issues, suggest updating artifacts - not phase-locked, work fluidly
+- **Allows artifact updates**: Update routine design details within scope; ask only for material unresolved choices or expanded scope

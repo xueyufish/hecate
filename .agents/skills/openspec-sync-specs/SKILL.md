@@ -1,6 +1,6 @@
 ---
 name: openspec-sync-specs
-description: Sync delta specs from an OpenSpec change to main specs. Use when the user wants to update main specs with changes from a delta spec, without archiving the change. Also use when the user says "openspec sync" or "opsx sync".
+description: "Synchronize OpenSpec delta specs only on a manual sync invocation or as a required substep of an explicitly selected archive action."
 allowed-tools: Bash(openspec:*)
 license: MIT
 compatibility: Requires openspec CLI.
@@ -9,6 +9,8 @@ metadata:
   version: "1.0"
   generatedBy: "1.13.1"
 ---
+
+**Invocation in Hecate:** Run only when the user manually invokes this action through its OpenSpec slash command, named skill, or an explicit CLI execution request, or when it is a required substep of an already selected action. A mention of OpenSpec, an ordinary implementation/design request, risk, or an existing change is not activation. Follow-ups can continue the selected action; do not select the next action automatically. If not invoked, return to ordinary development before any OpenSpec command or artifact write.
 
 Sync delta specs from a change to main specs.
 

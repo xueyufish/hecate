@@ -1,6 +1,8 @@
 ---
-description: "Sync delta specs from a change to main specs"
+description: "Synchronize OpenSpec delta specs only on a manual sync invocation or as a required substep of an explicitly selected archive action."
 ---
+
+**Invocation in Hecate:** Run only when the user manually invokes this action through its OpenSpec slash command, named skill, or an explicit CLI execution request, or when it is a required substep of an already selected action. A mention of OpenSpec, an ordinary implementation/design request, risk, or an existing change is not activation. Follow-ups can continue the selected action; do not select the next action automatically. If not invoked, return to ordinary development before any OpenSpec command or artifact write.
 
 Sync delta specs from a change to main specs.
 

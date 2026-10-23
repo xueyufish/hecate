@@ -48,9 +48,62 @@
 - **THEN** 安装失败且原 hook 保持不变
 
 ### Requirement: Consistent development guidance
-开发指南 SHALL 引用统一命令，要求受影响行为的局部验证，并将完整测试矩阵交由 CI。任务 checkbox、逻辑提交、push 明确授权及合并后用户触发归档 SHALL 遵循相同生命周期约定。
+开发指南 SHALL 引用统一命令，要求受影响行为的局部验证，并将完整测试矩阵交由 CI。普通开发 SHALL 默认直接执行，按需更新现有规格或设计文档；测试、静态检查、CI、PR review 和真实验证结果 SHALL 不因跳过 OpenSpec 而省略。逻辑提交、push 明确授权及手动 OpenSpec 命令的阶段边界 SHALL 遵循一致约定。
 
 #### Scenario: Implementing a task
 - **WHEN** 开发者按指南推进一个任务
 - **THEN** 指南不要求每个 task 重跑全量测试或机械创建独立提交
 - **AND** 不将未运行、跳过或待完成的 CI 报告为通过
+
+### Requirement: Manual OpenSpec activation
+Agent SHALL 仅在用户手动调用 OpenSpec slash command、命名 skill 或明确要求执行 OpenSpec CLI 命令时启动对应动作。普通需求、方案讨论、风险判断、已有 change 和提及 OpenSpec SHALL NOT 触发命令、技能或新 change 产物。该默认行为 SHALL 同样适用于 API/公共或持久化契约、安全/租户隔离、Runtime、架构、迁移、CI/release 门禁、跨域和不确定工作。Codex 技能 SHALL 禁用隐式调用，其他工具入口 SHALL 通过明确的调用规则保持同样边界。
+
+#### Scenario: Ordinary high-risk implementation
+- **WHEN** 用户要求实现权限边界、迁移、Runtime 或其他高风险修改，未手动调用 OpenSpec
+- **THEN** Agent 直接调查、明确验收条件、实施并验证，不自动生成 proposal、delta specs 或 archive
+
+#### Scenario: Uncertain requirement
+- **WHEN** 普通开发中存在调查后仍不明确的重要需求或兼容性/安全选择
+- **THEN** Agent 向用户提出具体问题，不用自动启动 OpenSpec 代替决策
+
+#### Scenario: Design discussion or existing change
+- **WHEN** 用户讨论 OpenSpec、要求普通设计方案，或仓库已有 change 但本次未调用对应动作
+- **THEN** Agent 不运行 OpenSpec 命令或自行创建 change；可阅读并按实际行为更新现有文档
+
+#### Scenario: Manual command selection
+- **WHEN** 用户手动调用 OpenSpec 命令或命名 skill
+- **THEN** Agent 按该动作和选定 schema 执行必要的上下文、依赖、任务和验证步骤
+
+### Requirement: OpenSpec action boundaries
+手动 propose SHALL 只创建规划产物；apply SHALL 从必需产物实施并验证任务；sync SHALL 同步规格；archive SHALL 保留完成状态与 delta 同步检查；explore SHALL 保持讨论边界，除非用户明确要求捕获规划产物。默认 schema SHALL 使用配置值，用户显式选定其他 schema 时 SHALL 遵从其产物契约。Agent SHALL NOT 自动跨入另一个动作，除非用户明确要求该动作或它是所选命令的必要子步骤。普通实施授权 SHALL NOT 转换为 OpenSpec 阶段授权，push SHALL 继续要求聊天中的明确确认。
+
+#### Scenario: Proposal command completes
+- **WHEN** 用户只调用 propose，规划产物已完成
+- **THEN** Agent 展示提案后停止，不自动 apply 或 archive
+
+#### Scenario: Apply command completes
+- **WHEN** 用户只调用 apply，任务及必要验证已完成
+- **THEN** Agent 报告实际结果，不自动 sync 或 archive
+
+#### Scenario: Explicit action sequence
+- **WHEN** 用户明确要求连续执行 propose、apply 和 archive
+- **THEN** Agent 按阶段依赖和验证要求执行该序列，不为已要求的阶段重复索取消息
+
+#### Scenario: Archive includes sync
+- **WHEN** 用户调用 archive，存在需要同步的 delta
+- **THEN** Agent 在该动作内检查并同步规格，确认一致后归档；不将归档报告为 CI、review 或 merge 已完成
+
+#### Scenario: Inspection is not implementation
+- **WHEN** 用户只要求运行 OpenSpec 状态或查看命令
+- **THEN** Agent 仅执行对应查看动作，不自行规划或实施
+
+### Requirement: Preserve checked-in agent workflows on worktree start
+worktree 启动 SHALL 默认保留受版本控制的 Agent 技能与命令，不运行重新生成流程且不激活 OpenSpec change 工作流。显式选择工具时 SHALL 允许初始化对应工具并提示审阅可能覆盖定制的 diff。原有 `--no-tools` 入口 SHALL 保持兼容，环境同步失败 SHALL 继续返回失败且不得报告 ready。
+
+#### Scenario: Default startup preserves customization
+- **WHEN** 在带有定制技能的仓库中以默认参数启动 worktree
+- **THEN** 启动不会调用 OpenSpec 工具生成，worktree 保留定制技能内容
+
+#### Scenario: Explicit tool initialization
+- **WHEN** 开发者显式指定要初始化的工具
+- **THEN** 启动将该选择传给 OpenSpec 初始化，且不默默扩大工具集合或激活开发流程

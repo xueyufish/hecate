@@ -1,6 +1,6 @@
 ---
 name: openspec-archive-change
-description: Archive a completed OpenSpec change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete. Also use when the user says "openspec archive" or "opsx archive".
+description: "Archive an OpenSpec change only on a manual archive invocation; do not select automatically after implementation."
 allowed-tools: Bash(openspec:*)
 license: MIT
 compatibility: Requires openspec CLI.
@@ -10,7 +10,9 @@ metadata:
   generatedBy: "1.13.1"
 ---
 
-Archive a completed change in the experimental workflow.
+**Invocation in Hecate:** Run only when the user manually invokes this action through its OpenSpec slash command, named skill, or an explicit CLI execution request, or when it is a required substep of an already selected action. A mention of OpenSpec, an ordinary implementation/design request, risk, or an existing change is not activation. Follow-ups can continue the selected action; do not select the next action automatically. If not invoked, return to ordinary development before any OpenSpec command or artifact write.
+
+Archive the manually selected OpenSpec change. Preserve artifact, task, verification, and spec-sync checks. The archive action includes normal delta synchronization; it does not imply push, merge, publishing, or worktree deletion. Report pending CI/review/merge separately and do not treat archive as proof that they passed.
 
 **Store selection:** If the user names a store (a store is a standalone OpenSpec repo registered on this machine) or the work lives in one, run `openspec store list --json` to discover registered store ids, then pass `--store <id>` on the commands that read or write specs and changes (`new change`, `status`, `instructions`, `list`, `show`, `validate`, `archive`, `doctor`, `context`, `schemas`, `view`). Once selected, treat `--store <id>` as sticky for the rest of the workflow. Every unscoped example of those commands below is shorthand: before running it, append the flag. For example, run `openspec status --change "<name>" --json --store "<id>"`, not the unscoped form shown below. Other commands do not take the flag. Hints printed by commands already carry the flag; keep it on follow-ups. Without a store, commands act on the nearest local `openspec/` root.
 
@@ -41,7 +43,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
    When prompting, show only active changes (not already archived).
    Include the schema used for each change if available.
 
-   Always announce: "Using change: <name>" and how to override (e.g., `/opsx-archive <other>`).
+   Always announce: "Using change: <name>" and how to override (e.g., `$openspec-archive-change (Codex) or /openspec-archive-change (other agents) <other>`).
 
    **Load current archive inputs before the existing archive checks:**
 
@@ -118,7 +120,9 @@ In both branches, never create the root as a side effect: do not run `openspec i
    - Determine what changes would be applied (adds, modifications, removals, renames)
    - Continue assessing the remaining capabilities even when one is sync-blocked. Show a combined summary before prompting.
 
-   **Prompt options:**
+   **Manually selected Hecate archive:** The archive invocation authorizes its normal sync and archive steps when completion checks pass. Verify actual local checks, not just task checkboxes. If already synced, proceed without a redundant prompt. Stop on incomplete work, failed required checks, blocked sync, or mismatches; resolve them within scope or ask for an explicit exceptional decision. An implementation request alone never invokes archive.
+
+   **Prompt options for other projects or exceptional requests:**
    - If any capability is sync-blocked: explain why and offer only "Archive without syncing", "Cancel"
    - Otherwise, if changes needed: "Sync now (recommended)", "Archive without syncing"
    - Otherwise, if already synced: "Archive now", "Sync anyway", "Cancel"
@@ -129,7 +133,7 @@ In both branches, never create the root as a side effect: do not run `openspec i
    - "Sync now" or "Sync anyway" — sync, then verify (below). Do not start any sync while a capability is sync-blocked; explain the blocker and repeat the available choices.
    - Anything else — ask again rather than archiving
 
-   Before a selected sync writes any main spec, run
+   Before the archive's sync or a selected sync writes any main spec, run
    `openspec instructions specs --change "<name>" --json` once with the same
    selected-root flags. Require a zero exit status and valid artifact-instruction
    JSON. If the lookup fails or returns invalid JSON, report the error and stop
