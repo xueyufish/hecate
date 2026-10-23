@@ -47,7 +47,7 @@ from hecate.models.evaluation import (
     EvaluationTaskUpdateSchema,
     TaskType,
 )
-from hecate.ops.api.evaluation import _forbidden
+from hecate.ops.api.evaluation import _forbidden, _no_workspace
 from hecate.ops.evaluation.tasks.runner import (
     CostGuardrailExceededError,
     OfflineTaskRunner,
@@ -264,10 +264,31 @@ async def list_scores(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """Query online task scores with optional filters, oldest first."""
+    """Query online task scores with optional filters, oldest first.
+
+    Scoped behind the task read boundary: without ``task_id`` the query
+    is workspace-scoped and requires an explicit active workspace (even
+    for system scope); with ``task_id`` the task resolves through the
+    task read boundary and scores are constrained to its real workspace.
+    """
     svc = EvaluationTaskService(db)
+    if task_id is not None:
+        task = await _get_task_for_read(ctx, task_id, db)
+        try:
+            ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+        except WorkspaceRoleRequiredError as e:
+            raise _forbidden(e) from e
+        workspace_filter: uuid.UUID = task.workspace_id
+    else:
+        if ctx.workspace_id is None:
+            raise _no_workspace()
+        try:
+            ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+        except WorkspaceRoleRequiredError as e:
+            raise _forbidden(e) from e
+        workspace_filter = ctx.workspace_id
     scores, total = await svc.list_scores(
-        workspace_id=ctx.workspace_id,
+        workspace_id=workspace_filter,
         task_id=task_id,
         target_id=target_id,
         session_id=session_id,
