@@ -189,10 +189,30 @@ async def sessions_report(
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     """Online task scores rolled up to session granularity, newest-scored first."""
+    if task_id is None:
+        # Workspace-scoped aggregate: the aggregate gate denies a missing
+        # workspace (403 NO_WORKSPACE) or a role below viewer (403) before
+        # any query.
+        _require_aggregate_viewer(ctx)
+        resource_workspace_id = ctx.workspace_id
+    else:
+        # Task-scoped: a non-system caller without an active workspace is
+        # denied with the scope 404 before any query; the task then resolves
+        # through the shared ownership-first resolver, and the rollup runs
+        # against the task's real workspace (system callers included).
+        if not ctx.is_system_scope and ctx.workspace_id is None:
+            raise _report_scope_not_found()
+        task = await _get_visible_task_or_404(task_id, db, ctx)
+        try:
+            ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+        except WorkspaceRoleRequiredError as e:
+            raise _forbidden(e) from e
+        resource_workspace_id = task.workspace_id
+
     svc = EvaluationReportService(db)
     report = await _run(
         svc.session_rollup(
-            ctx.workspace_id,
+            resource_workspace_id,
             task_id=task_id,
             start_date=start_date,
             end_date=end_date,
@@ -225,7 +245,7 @@ def _invalid_request(message: str) -> HTTPException:
 
 
 def _report_scope_not_found() -> HTTPException:
-    """Identifier-free 404 shared by every invisible distributions scope."""
+    """Identifier-free 404 shared by invisible resource-scoped reports."""
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail={"error": {"code": "NOT_FOUND", "message": "Report scope not found", "details": None}},
