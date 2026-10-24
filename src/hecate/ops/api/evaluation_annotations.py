@@ -32,6 +32,12 @@ write boundary: creation requires an active workspace for every identity
 and an editor floor for non-system callers; update and delete resolve the
 queue through the read boundary first (ownership before role), then apply
 the editor floor and operate in the queue's real workspace.
+
+Item intake writes sit behind the same write boundary: both intake
+endpoints resolve the queue through the read boundary first, from-task
+intake additionally requires the source task to be live in the queue's
+real workspace before the editor floor, and the intake itself only
+accepts traces the queue's workspace can see.
 """
 
 from __future__ import annotations
@@ -60,6 +66,7 @@ from hecate.models.evaluation import (
     AnnotationQueueModel,
     AnnotationQueueReadSchema,
     AnnotationQueueUpdateSchema,
+    EvaluationTaskModel,
 )
 from hecate.ops.api.evaluation import _forbidden, _no_workspace
 from hecate.ops.evaluation.annotation import (
@@ -277,12 +284,23 @@ async def add_items(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Enqueue completed root traces (duplicates in the queue are no-ops)."""
+    """Enqueue completed root traces (duplicates in the queue are no-ops).
+
+    Scoped behind the annotation write boundary: the queue resolves through
+    the queue read boundary (ownership before role), then an editor floor
+    applies and the intake runs in the queue's real workspace with the
+    caller's identity on ``added_by``.
+    """
+    queue = await _get_queue_for_read(ctx, queue_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
         result = await svc.add_items(
             queue_id,
-            workspace_id=ctx.workspace_id,
+            workspace_id=queue.workspace_id,
             target_ids=data.target_ids,
             added_by=ctx.user_id,
         )
@@ -304,12 +322,39 @@ async def add_items_from_task(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Enqueue target traces of matching online-task score samples."""
+    """Enqueue target traces of matching online-task score samples.
+
+    Scoped behind the annotation write boundary: the queue and the source
+    task both resolve first — the task must be live in the queue's real
+    workspace, before the editor role check — so an invisible queue or
+    task surfaces as the combined identifier-free 404 for every identity.
+    """
+    try:
+        queue = await _get_queue_for_read(ctx, queue_id, db)
+    except HTTPException as exc:
+        # An invisible queue and an invisible task are indistinguishable
+        # on this endpoint: both use the combined identifier-free 404.
+        raise _not_found("Annotation queue or task not found") from exc
+    task_live = (
+        await db.execute(
+            select(EvaluationTaskModel.id).where(
+                EvaluationTaskModel.id == data.task_id,
+                EvaluationTaskModel.workspace_id == queue.workspace_id,
+                ~EvaluationTaskModel.deleted,
+            )
+        )
+    ).scalar_one_or_none()
+    if task_live is None:
+        raise _not_found("Annotation queue or task not found")
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
         result = await svc.add_items_from_task(
             queue_id,
-            workspace_id=ctx.workspace_id,
+            workspace_id=queue.workspace_id,
             task_id=data.task_id,
             metric_name=data.metric_name,
             min_score=data.min_score,
