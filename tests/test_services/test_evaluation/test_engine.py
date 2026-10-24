@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.evaluation import EvaluationDatasetModel, EvaluationItemModel
+from hecate.models.evaluation import (
+    EvaluationDatasetModel,
+    EvaluationItemModel,
+    EvaluationRunModel,
+    EvaluationScoreModel,
+)
 from hecate.ops.evaluation.engine import EvaluationEngine
 from hecate.ops.evaluation.evaluator import Evaluator
 from hecate.ops.evaluation.types import AnswerSource, EvalInput, EvalOutput, Score
@@ -62,6 +69,119 @@ class HalfScoreEvaluator(Evaluator):
             scores=[Score(metric_name=self.name, value=0.5, source="deterministic")],
             duration_ms=3.0,
         )
+
+
+@pytest.mark.parametrize(
+    ("answer_source", "max_in_flight"),
+    [
+        (AnswerSource.AUTO, 1),
+        (AnswerSource.PIPELINE, 1),
+        (AnswerSource.AGENT, 1),
+        (AnswerSource.WORKFLOW, 1),
+        (AnswerSource.WORKFLOW, 2),
+    ],
+)
+async def test_generation_failure_persists_each_metric_and_keeps_siblings(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    answer_source: AnswerSource,
+    max_in_flight: int,
+) -> None:
+    """Serial and concurrent generation errors persist alongside successful siblings."""
+    workspace_id = uuid.uuid4()
+    dataset = EvaluationDatasetModel(name="generation-failure", workspace_id=workspace_id)
+    db_session.add(dataset)
+    await db_session.flush()
+    items = [
+        EvaluationItemModel(dataset_id=dataset.id, workspace_id=workspace_id, query=query)
+        for query in ("broken", "healthy-first", "healthy-second")
+    ]
+    db_session.add_all(items)
+    run = EvaluationRunModel(
+        dataset_id=dataset.id,
+        workspace_id=workspace_id,
+        evaluator_configs=["always_good", "half_score"],
+    )
+    db_session.add(run)
+    await db_session.flush()
+    generation_calls: list[str] = []
+    evaluation_calls: list[str] = []
+
+    async def generate(query: str) -> str:
+        generation_calls.append(query)
+        if query == "broken":
+            raise RuntimeError("stub generation failed")
+        return "generated answer"
+
+    async def generate_pipeline(self: EvaluationEngine, query: str, context: list[str]) -> str:
+        return await generate(query)
+
+    async def generate_agent(
+        self: EvaluationEngine,
+        query: str,
+        agent_id: uuid.UUID,
+        agent_definition: object = None,
+        rollout_capture: list[dict] | None = None,
+    ) -> str:
+        return await generate(query)
+
+    async def generate_workflow(self: EvaluationEngine, *, query: str, **kwargs: object) -> tuple[str, list[dict]]:
+        return await generate(query), []
+
+    async def ensure_workflow_task(self: EvaluationEngine, *args: object) -> None:
+        return None
+
+    original_evaluate = AlwaysGoodEvaluator.evaluate
+
+    async def evaluate(self: AlwaysGoodEvaluator, input: EvalInput) -> EvalOutput:
+        evaluation_calls.append(input.query)
+        assert input.generated_answer == "generated answer"
+        return await original_evaluate(self, input)
+
+    monkeypatch.setattr(EvaluationEngine, "_generate_answer_via_pipeline", generate_pipeline)
+    monkeypatch.setattr(EvaluationEngine, "_generate_answer_via_agent", generate_agent)
+    monkeypatch.setattr(EvaluationEngine, "_generate_answer_via_workflow", generate_workflow)
+    monkeypatch.setattr(EvaluationEngine, "_ensure_workflow_task", ensure_workflow_task)
+    monkeypatch.setattr(AlwaysGoodEvaluator, "evaluate", evaluate)
+    result = await EvaluationEngine(db_session).run(
+        [AlwaysGoodEvaluator(), HalfScoreEvaluator()],
+        dataset.id,
+        answer_source=answer_source,
+        agent_id=uuid.uuid4() if answer_source == AnswerSource.AGENT else None,
+        workflow_id=uuid.uuid4() if answer_source == AnswerSource.WORKFLOW else None,
+        workflow_version=1,
+        max_in_flight=max_in_flight,
+        run=run,
+    )
+    await db_session.commit()
+
+    assert sorted(generation_calls) == ["broken", "healthy-first", "healthy-second"]
+    assert sorted(evaluation_calls) == ["healthy-first", "healthy-second"]
+    assert result.total_items == 3
+    assert result.metric_averages == {"always_good": 1.0, "half_score": 0.5}
+    scores = (await db_session.execute(select(EvaluationScoreModel.__table__))).mappings().all()
+    assert len(scores) == 6
+    assert all(score["workspace_id"] == workspace_id and score["run_id"] == run.id for score in scores)
+    persisted = {
+        (str(score["item_id"]), score["metric_name"], score["value"], score["reasoning"], score["source"])
+        for score in scores
+    }
+    returned = {
+        (item_id, score.metric_name, score.value, score.reasoning, score.source)
+        for item_id, item_scores in result.item_scores.items()
+        for score in item_scores
+    }
+    assert persisted == returned and len(persisted) == 6
+    failed_scores = [score for score in scores if score["item_id"] == items[0].id]
+    assert len(failed_scores) == 2
+    assert all(score["value"] == -1.0 and score["source"] == "llm_judge" for score in failed_scores)
+    failure_prefix = {
+        AnswerSource.AGENT: "Agent invocation failed",
+        AnswerSource.WORKFLOW: "Workflow execution failed",
+    }.get(answer_source, "Pipeline answer generation failed")
+    assert all(score["reasoning"] == f"{failure_prefix}: stub generation failed" for score in failed_scores)
+    persisted_run = (await db_session.execute(select(EvaluationRunModel.__table__))).mappings().one()
+    assert persisted_run["status"] == "completed" and persisted_run["completed_at"] is not None
 
 
 async def _create_test_dataset(db: object, n_items: int = 3) -> uuid.UUID:
