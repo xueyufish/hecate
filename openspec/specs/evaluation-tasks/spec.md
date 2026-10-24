@@ -215,7 +215,7 @@ The system SHALL expose `GET /api/evaluation/tasks/{task_id}/runs` returning the
 
 ### Requirement: Evaluation task read access boundary
 
-The task listing, detail, and run-listing endpoints (`GET /api/evaluation/tasks`, `GET /api/evaluation/tasks/{task_id}`, `GET /api/evaluation/tasks/{task_id}/runs`) SHALL enforce one shared read access boundary: an authenticated non-system identity SHALL only observe evaluation tasks belonging to its active workspace, with a minimum viewer role in that workspace; the listing's items and `total` SHALL count only tasks within the caller's workspace. A task SHALL be readable only when it exists, is not soft-deleted, and belongs to the caller's workspace; a task failing any of these conditions SHALL produce a 404 whose body is identical for all conditions and SHALL NOT echo any resource identifier, and the runs of an invisible task SHALL NOT be listable. The task's run listing SHALL include only runs bound to that task AND carrying the task's workspace, excluding soft-deleted runs; `items` and `total` SHALL apply the same conditions. Ownership SHALL be checked before role so that a cross-workspace caller receives not-found rather than a role denial that discloses existence. Explicit system-scope identities SHALL read across workspaces — their `workspace_id=None` SHALL NOT be used as an equality query condition — and when a system-scope identity reads a task's runs, the runs SHALL be constrained to that task's real workspace. A non-system identity without an active workspace SHALL be denied and SHALL NOT reach an unscoped query. The boundary SHALL NOT change successful response shapes, pagination, task type/status filters, ordering, the task write endpoints' behavior, or the `get_task`/`_get_task_or_raise` scope semantics shared with writes, and the three endpoints SHALL remain read-only.
+The task listing, detail, and run-listing endpoints (`GET /api/evaluation/tasks`, `GET /api/evaluation/tasks/{task_id}`, `GET /api/evaluation/tasks/{task_id}/runs`) SHALL enforce one shared read access boundary: an authenticated non-system identity SHALL only observe evaluation tasks belonging to its active workspace, with a minimum viewer role in that workspace; the listing's items and `total` SHALL count only tasks within the caller's workspace. A task SHALL be readable only when it exists, is not soft-deleted, and belongs to the caller's workspace; a task failing any of these conditions SHALL produce a 404 whose body is identical for all conditions and SHALL NOT echo any resource identifier, and the runs of an invisible task SHALL NOT be listable. The task's run listing SHALL include only runs bound to that task AND carrying the task's workspace, excluding soft-deleted runs; `items` and `total` SHALL apply the same conditions. Ownership SHALL be checked before role so that a cross-workspace caller receives not-found rather than a role denial that discloses existence. Explicit system-scope identities SHALL read across workspaces — their `workspace_id=None` SHALL NOT be used as an equality query condition — and when a system-scope identity reads a task's runs, the runs SHALL be constrained to that task's real workspace. A non-system identity without an active workspace SHALL be denied and SHALL NOT reach an unscoped query. The boundary SHALL NOT change successful response shapes, pagination, task type/status filters, ordering, or the `get_task`/`_get_task_or_raise` scope semantics shared with reads and writes, and the three endpoints SHALL remain read-only.
 
 #### Scenario: Listing is scoped to the caller workspace
 - **WHEN** tasks exist in workspaces W1 and W2 and a W1 member calls `GET /api/evaluation/tasks`
@@ -249,9 +249,37 @@ The task listing, detail, and run-listing endpoints (`GET /api/evaluation/tasks`
 - **WHEN** an identity whose active workspace contains the task but whose workspace membership role is below viewer (or absent) calls any of the three task read endpoints
 - **THEN** the response SHALL be 403 authorization denied and no task or run content SHALL be returned
 
-#### Scenario: Boundary preserves read semantics, write behavior, and read-only guarantee
+#### Scenario: Boundary preserves read semantics and the read-only guarantee
 - **WHEN** task read requests succeed or are rejected by the boundary
-- **THEN** no task or run state is created, modified, or deleted; pagination, task type/status filters, and ordering keep their existing behavior; the task write endpoints' behavior and the shared `get_task`/`_get_task_or_raise` scope semantics remain unchanged
+- **THEN** no task or run state is created, modified, or deleted; pagination, task type/status filters, and ordering keep their existing behavior; the shared `get_task`/`_get_task_or_raise` scope semantics remain unchanged
+
+### Requirement: Evaluation task write access boundary
+
+The task management endpoints (`POST /api/evaluation/tasks`, `PUT /api/evaluation/tasks/{task_id}`, `DELETE /api/evaluation/tasks/{task_id}`, `POST /api/evaluation/tasks/{task_id}/enable`, `POST /api/evaluation/tasks/{task_id}/disable`) SHALL enforce one shared write access boundary. Creation SHALL require an explicit active workspace — including for explicit system-scope identities — and a minimum editor role in that workspace; a caller without an active workspace SHALL receive the uniform `403 NO_WORKSPACE` response, and a caller below editor (or without a workspace role) SHALL receive `403 FORBIDDEN`, both before the write service is invoked so that no task row is persisted (the model's zero-UUID workspace default SHALL NOT become a silent binding). Mutations of an existing task SHALL first resolve the task through the task read boundary (existence, not soft-deleted, workspace visibility — ownership before role), then require a minimum editor role; a task failing the visibility conditions SHALL produce the same identifier-free 404 as a missing task, and a non-system identity without an active workspace SHALL be denied before any query. The write service SHALL be invoked with the resolved task's real workspace — for system-scope identities this is the target task's workspace, never a `None` equality condition or the zero-UUID fallback; explicit system-scope identities have the workspace role check waived. Denials SHALL be read-only: the write service SHALL NOT be invoked and tasks, runs, and scores SHALL be unchanged. Successful mutations SHALL keep their existing semantics: partial update with merged-config re-validation, soft delete that retains produced runs and scores, enable/disable restricted to online tasks with `400 INVALID_REQUEST` otherwise, enable-time evaluator re-validation, and unchanged response shapes.
+
+#### Scenario: Creation requires an explicit workspace and editor role
+- **WHEN** an editor- or admin-role member of workspace W creates a task, while a viewer or role-less member of W and an identity without an active workspace — including system scope — issue the same request
+- **THEN** the member's task is created bound to W and returned active; the viewer and role-less members receive `403 FORBIDDEN`, the workspace-less identities receive `403 NO_WORKSPACE`, and in every denial no task row is persisted
+
+#### Scenario: Mutation of an invisible task is indistinguishable from missing
+- **WHEN** a caller updates, deletes, enables, or disables a task that does not exist, is soft-deleted, or belongs to another workspace
+- **THEN** every condition receives the same identifier-free 404 as a missing task, including callers holding editor or admin roles in their own workspace
+
+#### Scenario: Role floor applies after visibility
+- **WHEN** a viewer-role or role-less member of the task's workspace calls any mutation endpoint
+- **THEN** the response is `403 FORBIDDEN`, the write service is not invoked, and task, run, and score state is unchanged
+
+#### Scenario: Missing-workspace identity is denied before any query
+- **WHEN** a validly authenticated non-system identity without an active workspace calls any mutation endpoint
+- **THEN** the response is the identifier-free 404 and no database query is issued
+
+#### Scenario: System scope mutates through the target task's real workspace
+- **WHEN** an explicit system-scope identity mutates a task bound to a non-default workspace
+- **THEN** the mutation completes and lands on that task with its workspace unchanged; the service receives the task's real workspace, not a `None` equality condition or the zero-UUID fallback, and a missing task still yields the identifier-free 404
+
+#### Scenario: Mutation semantics are preserved
+- **WHEN** an allowed mutation succeeds, a visible task carries an invalid merged configuration, or an offline task is enabled or disabled
+- **THEN** update re-validates the merged configuration and returns `400 INVALID_REQUEST` on violation; delete and disable retain all produced runs and scores; enable/disable reject offline tasks with `400 INVALID_REQUEST`; successful response shapes are unchanged
 
 ### Requirement: Evaluation score read access boundary
 
