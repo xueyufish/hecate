@@ -13,6 +13,14 @@
 
 Human scores land in ``evaluation_task_scores`` (``source="human"``) via the
 annotation service; this router only maps errors and shapes responses.
+
+Queue reads sit behind the annotation read boundary: the queue list requires
+an active workspace and a viewer role floor (system scope has no global
+listing), and by-id reads resolve existence, soft-delete state, workspace
+ownership and queue/item binding before the role check — invisible resources
+surface as the same identifier-free 404. Item review context (trace
+projection, event reads, score suggestions) is only read after authorization
+and binding succeed.
 """
 
 from __future__ import annotations
@@ -23,17 +31,26 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import (
+    WorkspaceRole,
+    WorkspaceRoleRequiredError,
+    ensure_workspace_role,
+    get_auth_context,
+)
 from hecate.models.evaluation import (
     AnnotationQueueCreateSchema,
+    AnnotationQueueItemModel,
     AnnotationQueueItemReadSchema,
+    AnnotationQueueModel,
     AnnotationQueueReadSchema,
     AnnotationQueueUpdateSchema,
 )
+from hecate.ops.api.evaluation import _forbidden, _no_workspace
 from hecate.ops.evaluation.annotation import (
     AnnotationItemStateError,
     AnnotationQueueItemNotFoundError,
@@ -132,10 +149,21 @@ async def list_queues(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """List the workspace's annotation queues, newest first, with item counts."""
+    """List the workspace's annotation queues, newest first, with item counts.
+
+    Scoped behind the annotation read boundary: an active workspace and a
+    viewer role floor are required before any query — system scope lists
+    only its explicit workspace and has no global listing.
+    """
+    if ctx.workspace_id is None:
+        raise _no_workspace()
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     queues, total = await svc.list_queues(workspace_id=ctx.workspace_id, page=page, page_size=page_size)
-    counts = await svc.queue_item_counts([q.id for q in queues])
+    counts = await svc.queue_item_counts([q.id for q in queues], workspace_id=ctx.workspace_id)
     return {
         "items": [{**_queue_to_dict(q), "counts": counts.get(str(q.id), {})} for q in queues],
         "total": total,
@@ -148,11 +176,17 @@ async def get_queue(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Get a single annotation queue."""
-    svc = AnnotationService(db)
-    queue = await svc.get_queue(queue_id, workspace_id=ctx.workspace_id)
-    if queue is None:
-        raise _not_found("Annotation queue not found")
+    """Get a single annotation queue.
+
+    Scoped behind the annotation read boundary: the queue resolves through
+    the queue read boundary (ownership before role), then a viewer floor
+    applies.
+    """
+    queue = await _get_queue_for_read(ctx, queue_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     return _queue_to_dict(queue)
 
 
@@ -261,12 +295,22 @@ async def list_items(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """List a queue's items in enqueue order."""
+    """List a queue's items in enqueue order.
+
+    Scoped behind the annotation read boundary: the queue resolves through
+    the queue read boundary first (ownership before role), then a viewer
+    floor applies and the listing uses the queue's real workspace.
+    """
+    queue = await _get_queue_for_read(ctx, queue_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
         items, total = await svc.list_items(
             queue_id,
-            workspace_id=ctx.workspace_id,
+            workspace_id=queue.workspace_id,
             status=item_status,
             page=page,
             page_size=page_size,
@@ -286,19 +330,27 @@ async def get_item_detail(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Item state plus review context: trace projection and machine-score suggestions."""
+    """Item state plus review context: trace projection and machine-score suggestions.
+
+    Scoped behind the annotation read boundary: item visibility and the
+    queue binding resolve before the viewer floor, and the review context
+    (trace read, event projection, score suggestions) is only read after
+    authorization succeeds — an invisible trace keeps the missing-context
+    null semantics.
+    """
+    item, _queue = await _get_item_for_read(ctx, queue_id, item_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
-        detail = await svc.get_item_detail(item_id, workspace_id=ctx.workspace_id)
+        detail = await svc.get_item_detail(item_id, workspace_id=item.workspace_id, queue_id=queue_id)
     except AnnotationQueueItemNotFoundError as exc:
         raise _not_found("Annotation queue item not found") from exc
-
-    item = detail["item"]
-    if item.queue_id != queue_id:
-        raise _not_found("Annotation queue item not found")
     trace = detail["trace"]
     return {
-        "item": _item_to_dict(item),
+        "item": _item_to_dict(detail["item"]),
         "queue": _queue_to_dict(detail["queue"]),
         "trace": _trace_summary(trace),
         "projection": detail["projection"],
@@ -503,3 +555,67 @@ def _conflict(message: str) -> HTTPException:
         status_code=status.HTTP_409_CONFLICT,
         detail={"error": {"code": "CONFLICT", "message": message, "details": None}},
     )
+
+
+async def _get_queue_for_read(
+    ctx: AuthContext,
+    queue_id: uuid.UUID,
+    db: AsyncSession,
+) -> AnnotationQueueModel:
+    """Resolve queue visibility before callers enforce the workspace role.
+
+    Missing, soft-deleted, and cross-workspace queues surface as the same
+    identifier-free not-found. Keeping role checks in callers lets each
+    endpoint decide ownership before returning 403.
+    """
+    if not ctx.is_system_scope and ctx.workspace_id is None:
+        raise _not_found("Annotation queue not found")
+    queue = (
+        await db.execute(
+            select(AnnotationQueueModel).where(
+                AnnotationQueueModel.id == queue_id,
+                ~AnnotationQueueModel.deleted,
+            )
+        )
+    ).scalar_one_or_none()
+    if queue is None or (not ctx.is_system_scope and queue.workspace_id != ctx.workspace_id):
+        raise _not_found("Annotation queue not found")
+    return queue
+
+
+async def _get_item_for_read(
+    ctx: AuthContext,
+    queue_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession,
+) -> tuple[AnnotationQueueItemModel, AnnotationQueueModel]:
+    """Resolve item visibility and its queue binding before role enforcement.
+
+    The item must exist, be undeleted and workspace-visible, and belong to
+    the path's queue — all decided before any review context is read.
+    """
+    if not ctx.is_system_scope and ctx.workspace_id is None:
+        raise _not_found("Annotation queue item not found")
+    item = (
+        await db.execute(
+            select(AnnotationQueueItemModel).where(
+                AnnotationQueueItemModel.id == item_id,
+                ~AnnotationQueueItemModel.deleted,
+            )
+        )
+    ).scalar_one_or_none()
+    if item is None or (not ctx.is_system_scope and item.workspace_id != ctx.workspace_id):
+        raise _not_found("Annotation queue item not found")
+    queue = (
+        await db.execute(
+            select(AnnotationQueueModel).where(
+                AnnotationQueueModel.id == item.queue_id,
+                AnnotationQueueModel.id == queue_id,
+                AnnotationQueueModel.workspace_id == item.workspace_id,
+                ~AnnotationQueueModel.deleted,
+            )
+        )
+    ).scalar_one_or_none()
+    if queue is None:
+        raise _not_found("Annotation queue item not found")
+    return item, queue
