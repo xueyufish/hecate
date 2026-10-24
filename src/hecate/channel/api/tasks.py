@@ -210,7 +210,7 @@ async def _task_read_gate(
     service: TaskControlService,
     task_id: uuid.UUID | None,
 ) -> uuid.UUID:
-    """Read gate shared by the three task observation entries.
+    """Read gate shared by the task observation entries.
 
     Workspace requirement first (403 NO_WORKSPACE, unchanged), then — for
     the task-scoped entries — visibility (foreign, missing and
@@ -337,9 +337,11 @@ async def list_task_commands(
 
     Recorded states verbatim — the list never advances a command, never
     triggers execution and never performs the single-read lazy expiry.
+    The shared task read gate (visibility, then VIEWER) runs first.
     """
+    workspace_id = await _task_read_gate(ctx, service, task_id)
     try:
-        return await service.list_task_commands(_workspace_id(ctx), task_id, limit=limit, offset=offset)
+        return await service.list_task_commands(workspace_id, task_id, limit=limit, offset=offset)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
 
@@ -503,9 +505,23 @@ async def stream_run_events(
 
 @commands_router.get("/{command_id}")
 async def get_command(command_id: str, service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
-    """Read one command receipt (lazy expiry on read)."""
+    """Read one command receipt (lazy expiry on read).
+
+    Visibility precedes the role floor via a non-advancing lookup, so a
+    rejected caller neither distinguishes missing from foreign commands
+    nor triggers the lazy expiry; authorized reads keep it verbatim.
+    """
+    workspace_id = _workspace_id(ctx)
     try:
-        record = await service.get_command(_workspace_id(ctx), command_id)
+        await service.assert_command_visible(workspace_id=workspace_id, command_id=command_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
+    try:
+        record = await service.get_command(workspace_id, command_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
     return _command_summary(record)
@@ -513,8 +529,17 @@ async def get_command(command_id: str, service: ServiceDep, ctx: AuthDep) -> dic
 
 @reconciliation_router.get("/pending")
 async def pending_reconciliation(service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
-    """Read-only view of unconverged facts in this workspace."""
+    """Read-only view of unconverged facts in this workspace.
+
+    The VIEWER floor runs before the service query, so rejected callers
+    never trigger the lazy expiry sweep or the relay status read.
+    """
+    workspace_id = _workspace_id(ctx)
     try:
-        return await service.pending_reconciliation(_workspace_id(ctx))
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
+    try:
+        return await service.pending_reconciliation(workspace_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
