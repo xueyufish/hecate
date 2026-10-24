@@ -423,6 +423,12 @@ class TaskControlService:
             # Terminal on return: surface the run projection as the outcome.
             try:
                 run = await self._registry.get_run(uuid.UUID(r_ref.id), workspace_id)
+                # The registration created this run on the request session
+                # (identity map) with an empty projection, and the durable
+                # worker commits the real one through its own session —
+                # `session.get` would return the cached pre-worker row, so
+                # refresh before reading the outcome.
+                await self._db.refresh(run)
                 projection = run.projection or {}
                 result = {
                     "status": projection.get("state", state),
