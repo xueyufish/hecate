@@ -354,9 +354,7 @@ async def test_authorized_submission_preserves_modes_and_binding(env, role, wait
     if wait:
         assert body["lifecycle_state"] == "succeeded"
         assert body["result"]["status"] == "succeeded"
-        # Response freshness has a separate strict regression below; this
-        # matrix checks authorization, mode propagation and persisted facts.
-        assert isinstance(body["result"]["content"], str)
+        assert body["result"]["content"] == "boundary stub reply"
         assert len(env["entry"]) == 1 and env["entry"][0]["stream"] is stream
         assert env["spawned"] == []
     else:
@@ -379,16 +377,14 @@ async def test_authorized_submission_preserves_modes_and_binding(env, role, wait
     assert payload["stream"] is stream
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "Confirmed on base 92534a2e: the request identity map retains the pre-worker Run projection; "
-        "response freshness is outside the REST authorization change"
-    ),
-)
 async def test_wait_result_reads_the_completed_worker_projection(env):
-    """Keep the independently reproduced response-freshness defect visible."""
+    """The wait view must surface the worker's committed projection.
+
+    Registration creates the run on the request session with an empty
+    projection; the durable worker commits the real one through its own
+    session. The wait result reads a refreshed row, never the cached
+    pre-worker instance.
+    """
     _as(env, replace(env["admin_ctx"], role=WorkspaceRole.EDITOR))
     response = await _submit(env, _body(env, wait=True))
     if response.status_code != 201:

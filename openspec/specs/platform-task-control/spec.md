@@ -8,7 +8,7 @@
 
 ### Requirement: 平台任务提交经幂等键绑定服务端上下文
 
-`POST /api/tasks` SHALL 接受业务目标、执行目标(agent/deployment 引用)、输入与可选预算/截止时间,并在服务端验证的调用主体与 workspace 作用域内处理幂等键:键绑定主体、workspace 与规范化请求摘要。相同键、相同摘要的重复提交 SHALL 返回首次提交的 Task/Run 关联,不产生第二次执行;相同键、不同摘要 SHALL 返回冲突错误,原有关联不被改写;键绑定的主体/workspace 与验证上下文不一致 SHALL 被拒绝。提交成功 SHALL 返回持久化的 task_id 与 run_id;请求可携带等待参数以获取同步等待视图(在 Task 到达终态或超时后返回),未携带时提交立即返回 queued 状态。提交后任务 SHALL 经持久派发 worker 投递执行(`durable-execution-worker` 能力):worker 崩溃或进程重启后,未终态任务经对账继续(queued 重派、过期租约以新 fencing token 重派),平台据此宣称跨重启的后台执行保证;已终态任务不被重派。
+`POST /api/tasks` SHALL 接受业务目标、执行目标(agent/deployment 引用)、输入与可选预算/截止时间,并在服务端验证的调用主体与 workspace 作用域内处理幂等键:键绑定主体、workspace 与规范化请求摘要。相同键、相同摘要的重复提交 SHALL 返回首次提交的 Task/Run 关联,不产生第二次执行;相同键、不同摘要 SHALL 返回冲突错误,原有关联不被改写;键绑定的主体/workspace 与验证上下文不一致 SHALL 被拒绝。提交成功 SHALL 返回持久化的 task_id 与 run_id;请求可携带等待参数以获取同步等待视图(在 Task 到达终态或超时后返回),未携带时提交立即返回 queued 状态。同步等待视图在终态返回时 SHALL 读取已提交的最新 Run 投影(而非请求会话缓存的派发前记录)来组装结果;读取失败时按既有语义返回无结果而非伪造内容。提交后任务 SHALL 经持久派发 worker 投递执行(`durable-execution-worker` 能力):worker 崩溃或进程重启后,未终态任务经对账继续(queued 重派、过期租约以新 fencing token 重派),平台据此宣称跨重启的后台执行保证;已终态任务不被重派。
 
 提交入口 SHALL 在进入上述任何提交工作之前施加写权限门:先要求有效 workspace(缺 workspace 的非 system 身份与显式 system-scope 身份均维持既有 403 `NO_WORKSPACE` 拒绝,SHALL NOT 退化为全局提交),再要求调用方在其当前 workspace 具备至少 `EDITOR` 角色,角色不足或缺失 SHALL 返回 403。权限判定 SHALL 取自服务端解析的 `AuthContext` 与既有角色校验构件,SHALL NOT 接受请求体或查询串自报的角色。角色门 SHALL 先于业务校验(Agent 归属、部署、输入验证)、幂等查询或重放、持久化注册与派发:已降权调用方凭既有幂等键的重放 SHALL 同样被 403 拒绝,不返回原关联、不重复派发;恢复角色后同键同摘要重放 SHALL 仍返回原关联。请求结构校验的既有 422 语义保持不变;拒绝时 SHALL 零副作用:不创建 Task/Run 行、不写 durable 状态或 submission 记录、不触发执行或事件。
 
