@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.models.evaluation import EvaluationDatasetModel, EvaluationItemModel
 from hecate.ops.evaluation.synthesis import DatasetSynthesisService
-from hecate.ops.evaluation.synthesis.service import SynthesisRequest
+from hecate.ops.evaluation.synthesis.service import (
+    SeedDatasetUnavailableError,
+    SynthesisRequest,
+)
 
 
 def _patch_quality_all_pass(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,6 +224,106 @@ class TestDatasetSchemaTags:
 
         items, _ = await svc.list_items(ds.id, tags=["nonexistent_tag"])
         assert items == []
+
+
+class TestSeedValidation:
+    """The shared seed gate: existence, soft-delete, and target-workspace membership."""
+
+    async def test_validate_seed_resolves_visible_dataset(self, db_session: AsyncSession) -> None:
+        ws = uuid.uuid4()
+        ds = EvaluationDatasetModel(name="visible-seed", workspace_id=ws)
+        db_session.add(ds)
+        await db_session.commit()
+        resolved = await DatasetSynthesisService(db_session).validate_seed(ds.id, ws)
+        assert resolved.id == ds.id
+
+    @pytest.mark.parametrize("kind", ["missing", "soft_deleted", "foreign_workspace"])
+    async def test_validate_seed_rejects_ineligible(self, db_session: AsyncSession, kind: str) -> None:
+        ws = uuid.uuid4()
+        svc = DatasetSynthesisService(db_session)
+        if kind == "missing":
+            seed_id = uuid.uuid4()
+        elif kind == "soft_deleted":
+            ds = EvaluationDatasetModel(
+                name="deleted-seed", workspace_id=ws, deleted=True, deleted_at=datetime.now(UTC)
+            )
+            db_session.add(ds)
+            await db_session.commit()
+            seed_id = ds.id
+        else:
+            ds = EvaluationDatasetModel(name="foreign-seed", workspace_id=uuid.uuid4())
+            db_session.add(ds)
+            await db_session.commit()
+            seed_id = ds.id
+        with pytest.raises(SeedDatasetUnavailableError):
+            await svc.validate_seed(seed_id, ws)
+
+    async def test_load_seeds_reads_items_regardless_of_item_workspace(self, db_session: AsyncSession) -> None:
+        """Seed eligibility anchors to the parent dataset, not item workspace values."""
+        ws = uuid.uuid4()
+        ds = EvaluationDatasetModel(name="mixed-seed", workspace_id=ws)
+        db_session.add(ds)
+        await db_session.flush()
+        for item_ws in (uuid.UUID(int=0), ws, uuid.uuid4()):
+            db_session.add(EvaluationItemModel(dataset_id=ds.id, workspace_id=item_ws, query="q", expected_answer="a"))
+        db_session.add(
+            EvaluationItemModel(
+                dataset_id=ds.id,
+                workspace_id=ws,
+                query="gone",
+                expected_answer="a",
+                deleted=True,
+            )
+        )
+        await db_session.commit()
+        seeds = await DatasetSynthesisService(db_session)._load_seeds(ds.id, ws)
+        assert len(seeds) == 3
+        assert all(s.query == "q" for s in seeds)
+
+    async def test_synthesize_rejects_ineligible_seed_before_any_side_effect(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Execution-time re-validation: no target dataset, no model call."""
+        import hecate_llm.service
+
+        calls = {"n": 0}
+
+        async def _chat(*_a: object, **_kw: object) -> object:
+            calls["n"] += 1
+
+            class _R:
+                content = json.dumps({"query": "q", "expected_answer": "a"})
+
+            return _R
+
+        monkeypatch.setattr(hecate_llm.service.llm_service, "chat", _chat)
+        ws = uuid.uuid4()
+        ds = EvaluationDatasetModel(name="raced-seed", workspace_id=ws, deleted=True, deleted_at=datetime.now(UTC))
+        db_session.add(ds)
+        await db_session.commit()
+        datasets_before = (
+            await db_session.execute(select(func.count()).select_from(EvaluationDatasetModel))
+        ).scalar_one()
+        svc = DatasetSynthesisService(db_session)
+        req = SynthesisRequest(
+            seed_dataset_id=ds.id,
+            topic="fallback topic",
+            strategy="generation",
+            adversarial_intent=None,
+            count=5,
+            target_dataset_name="must-not-exist",
+            target_dataset_description=None,
+            llm_config=None,
+            quality_threshold=0.5,
+            workspace_id=ws,
+        )
+        with pytest.raises(SeedDatasetUnavailableError):
+            await svc.synthesize(req)
+        datasets_after = (
+            await db_session.execute(select(func.count()).select_from(EvaluationDatasetModel))
+        ).scalar_one()
+        assert datasets_after == datasets_before
+        assert calls["n"] == 0
 
 
 class TestEvaluatorsListMetadata:
