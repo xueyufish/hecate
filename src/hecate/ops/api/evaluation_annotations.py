@@ -26,6 +26,12 @@ Calibration reads sit behind the same boundary: every identity — system
 scope included — needs an active workspace, non-system callers need a viewer
 role floor, both checked before any statistics query, and system scope never
 widens the aggregation beyond its active workspace.
+
+Queue management writes (create, update, delete) sit behind the annotation
+write boundary: creation requires an active workspace for every identity
+and an editor floor for non-system callers; update and delete resolve the
+queue through the read boundary first (ownership before role), then apply
+the editor floor and operate in the queue's real workspace.
 """
 
 from __future__ import annotations
@@ -138,7 +144,19 @@ async def create_queue(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Create an annotation queue in the caller's workspace."""
+    """Create an annotation queue in the caller's workspace.
+
+    Scoped behind the annotation write boundary: an active workspace is
+    required for every identity — system scope included — and non-system
+    callers need at least an editor role; both checks precede the create
+    service and its metric validation.
+    """
+    if ctx.workspace_id is None:
+        raise _no_workspace()
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
         queue = await svc.create_queue(data, workspace_id=ctx.workspace_id)
@@ -202,15 +220,25 @@ async def update_queue(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Update an annotation queue (partial; metric defs re-validated)."""
+    """Update an annotation queue (partial; metric defs re-validated).
+
+    Scoped behind the annotation write boundary: the queue resolves through
+    the queue read boundary (ownership before role), then an editor floor
+    applies and the update runs in the queue's real workspace.
+    """
+    queue = await _get_queue_for_read(ctx, queue_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
-        queue = await svc.update_queue(queue_id, workspace_id=ctx.workspace_id, data=data)
+        updated = await svc.update_queue(queue_id, workspace_id=queue.workspace_id, data=data)
     except AnnotationQueueNotFoundError as exc:
         raise _not_found("Annotation queue not found") from exc
     except AnnotationValidationError as exc:
         raise _validation_error(str(exc)) from exc
-    return _queue_to_dict(queue)
+    return _queue_to_dict(updated)
 
 
 @router.delete("/annotation-queues/{queue_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -219,10 +247,20 @@ async def delete_queue(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
-    """Soft-delete an annotation queue; items and scores are retained."""
+    """Soft-delete an annotation queue; items and scores are retained.
+
+    Scoped behind the annotation write boundary: the queue resolves through
+    the queue read boundary (ownership before role), then an editor floor
+    applies and the soft delete runs in the queue's real workspace.
+    """
+    queue = await _get_queue_for_read(ctx, queue_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
-        await svc.delete_queue(queue_id, workspace_id=ctx.workspace_id)
+        await svc.delete_queue(queue_id, workspace_id=queue.workspace_id)
     except AnnotationQueueNotFoundError as exc:
         raise _not_found("Annotation queue not found") from exc
 

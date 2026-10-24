@@ -21,6 +21,8 @@ calibration signal for LLM judges.
 ### Requirement: Annotation queue definition and CRUD
 The system SHALL provide CRUD endpoints at `/api/evaluation/annotation-queues`. A queue SHALL have a `name`, an optional `description`, optional `instructions` (free-text reviewer guidance), a non-empty list of `metric_defs`, and an optional list of `assigned_user_ids`. Each metric definition SHALL contain a `name` (unique within the queue), a `data_type` (`numeric` | `categorical` | `boolean`), and for `numeric` a `min`/`max` range or for `categorical` a non-empty `categories` list. Queues SHALL be scoped to the creating workspace and invisible to other workspaces.
 
+The three management writes (queue create, update, delete) SHALL sit behind the annotation write boundary. Creation SHALL require an active workspace for every identity, system scope included (403 `NO_WORKSPACE`), and non-system callers SHALL hold at least an editor role (403 `FORBIDDEN`); both checks SHALL precede the create service and its metric validation. Update and delete SHALL resolve the queue through the read boundary first — existence, soft-delete state, and workspace ownership before the editor role check — with missing, soft-deleted, and cross-workspace queues surfacing as the same identifier-free 404 for non-system identities, and a workspace-less non-system identity denied before any query. Explicit system scope SHALL retain its role exemption and MAY operate on a live queue by its explicit id; the write SHALL run in the queue's real workspace. Updates SHALL persist `assigned_user_ids` as string UUIDs, matching creation: a non-empty list replaces, an empty list clears, and an omitted field keeps the stored value. Deletion SHALL be a soft delete that retains items and produced score rows, after which the existing read endpoints no longer expose the queue or its items. The request body SHALL NOT change a queue's workspace ownership. Denied writes SHALL NOT modify queue, item, or score data.
+
 #### Scenario: Create queue with metric definitions
 - **WHEN** `POST /api/evaluation/annotation-queues` is called with `{"name": "weekly-qa-review", "instructions": "Rate helpfulness 0-1", "metric_defs": [{"name": "helpfulness", "data_type": "numeric", "min": 0, "max": 1}, {"name": "tone", "data_type": "categorical", "categories": ["good", "neutral", "bad"]}]}`
 - **THEN** the queue SHALL be persisted and returned with its `id` and resolved metric definitions
@@ -32,6 +34,30 @@ The system SHALL provide CRUD endpoints at `/api/evaluation/annotation-queues`. 
 #### Scenario: Workspace isolation
 - **WHEN** a queue belonging to workspace A is requested from workspace B
 - **THEN** the API SHALL behave as if the queue does not exist
+
+#### Scenario: Create denied before validation and service
+- **WHEN** a workspace-less identity — system scope included — or a viewer / role-less non-system member posts the create endpoint
+- **THEN** the response SHALL be 403 (`NO_WORKSPACE` or `FORBIDDEN` respectively) before the create service or metric validation runs, and no queue SHALL be persisted
+
+#### Scenario: Invisible queue resolves before the editor check on writes
+- **WHEN** a non-system identity updates or deletes a missing, soft-deleted, or foreign-workspace queue
+- **THEN** the API SHALL return the same identifier-free 404 before the editor role check and before any write
+
+#### Scenario: Editor floor on queue management
+- **WHEN** a non-system viewer or role-less member of the owning workspace updates or deletes a live queue
+- **THEN** the API SHALL return 403 `FORBIDDEN` without modifying the queue, its items, or scores
+
+#### Scenario: System scope writes through the real workspace
+- **WHEN** an explicit system-scope identity updates or deletes a live queue by its explicit id
+- **THEN** the write SHALL succeed in the queue's real workspace, while queue creation still requires an active workspace
+
+#### Scenario: Assigned-list update round-trips like creation
+- **WHEN** an editor updates `assigned_user_ids` to a non-empty list, an empty list, or omits the field
+- **THEN** the stored list SHALL hold string UUIDs (replaced, cleared, or unchanged respectively) and the read-back SHALL match the create-then-read shape
+
+#### Scenario: Soft delete retains child records
+- **WHEN** an editor soft-deletes a queue holding items and produced score rows
+- **THEN** the items and score rows SHALL remain persisted while the queue and item read endpoints no longer expose the queue's resources
 
 ### Requirement: Annotation queue read access boundary
 The four queue read endpoints (`GET /api/evaluation/annotation-queues`, `GET /api/evaluation/annotation-queues/{queue_id}`, `GET /api/evaluation/annotation-queues/{queue_id}/items`, `GET /api/evaluation/annotation-queues/{queue_id}/items/{item_id}`) SHALL sit behind a workspace read boundary. The queue list SHALL require an active workspace for every identity, including system scope, and non-system callers SHALL hold at least a viewer role; both checks SHALL precede queue queries, and system scope SHALL NOT gain a global listing. By-id reads SHALL resolve existence, soft-delete state, workspace ownership, and queue/item binding before the viewer role check; missing or soft-deleted resources SHALL surface as the same identifier-free 404 for every identity, and cross-workspace resources SHALL use that same 404 for non-system identities, and a workspace-less non-system identity SHALL be denied before any query. Explicit system scope SHALL retain its role exemption and MAY read an explicit queue or item id; subsequent queries SHALL use the resource's real workspace. Item review context (trace read, event projection, score suggestions) SHALL only be read after authorization and binding succeed; the trace read SHALL apply the traces API tenant scope (session or agent belongs to the workspace), with invisible traces keeping the missing-context null semantics and no event reads. Score suggestions SHALL be constrained to the queue's workspace while keeping the latest-automated-score-per-metric rule. List `items`, `total`, and per-status counts SHALL exclude other-workspace and soft-deleted rows. Successful and denied reads SHALL NOT modify data.
