@@ -101,7 +101,7 @@
 
 ### Requirement: 待对账查询 API 汇聚未收敛事实
 
-`GET /api/reconciliation/pending` SHALL 以 workspace 作用域返回处于待对账状态的事实:生命周期为 `reconciliation_required` 的 Task、Action 台账中 `pending_reconciliation` 的记录(生产台账实现合入前该列表为空且显式标注来源为开发 Stub)、以及超过有效期仍未决的命令。查询 MUST NOT 触发任何对账动作或状态改写(过期命令的惰性 `expired` 收敛除外);结果中的每项 SHALL 携带足够的引用(task/run/action/command 标识)供后续对账。
+`GET /api/reconciliation/pending` SHALL 以 workspace 作用域返回处于待对账状态的事实:生命周期为 `reconciliation_required` 的 Task、Action 台账中 `pending_reconciliation` 的记录(生产台账实现合入前该列表为空且显式标注来源为开发 Stub)、以及超过有效期仍未决的命令。查询 MUST NOT 触发任何对账动作或状态改写(过期命令的惰性 `expired` 收敛除外);结果中的每项 SHALL 携带足够的引用(task/run/action/command 标识)供后续对账。进入查询前 SHALL 先满足「命令回执与待对账读取携带最低读角色门槛」的 workspace 与 `VIEWER` 门槛;被拒请求 SHALL NOT 触发过期命令清扫、relay 状态读取或任何状态改写,授权后的既有查询与清扫语义 SHALL 保持不变:Task/Action/命令事实与过期命令清扫仍按调用方当前 workspace 过滤;`event_relay` 继续返回既有进程级 outbox watermark/gap 状态。
 
 #### Scenario: 待对账任务可见
 
@@ -352,7 +352,7 @@ When a task resumes from a persistent wait, the platform SHALL record the succes
 
 ### Requirement: 按 Task 分页查询命令回执的只读 API
 
-系统 SHALL 提供只读查询 `GET /api/tasks/{task_id}/commands?limit=&offset=`（默认 limit=20，limit 上限 100、offset ≥ 0），返回 `{items, total}`：items 为该 Task 的命令回执列表，total 为过滤后总数。排序 SHALL 为 `issued_at DESC, command_id DESC` 的稳定序。查询 SHALL 覆盖该 Task 的全部五种命令状态（`requested`/`acknowledged`/`applied`/`rejected`/`expired`），本能力不提供状态筛选。列表读取 SHALL 是纯已记录事实：`requested` 与 `acknowledged` SHALL 原样返回，SHALL NOT 呈现或改写为 `applied`；已过期的 `requested` 在列表中 SHALL 保持 `requested`；列表查询 SHALL NOT 推进任何命令状态、SHALL NOT 触发命令执行、SHALL NOT 执行单条查询的懒过期清扫。查询引用 SHALL 从可见 Task 行的 issuer_domain 与 id 构造，SHALL NOT 将 issuer 固定为 hecate。Task 可见性 SHALL 先行校验：不存在、已删除或属于其他 workspace 的 Task SHALL 统一返回请求 Task 的 404，且可见性失败时 SHALL NOT 读取命令存储。返回字段 SHALL 沿用单条回执白名单（command_id、kind、state、issued_at、issuer、task_ref、run_ref、expires_at、expected_revision），SHALL NOT 返回 `payload`、`payload_schema_ref`、`detail_ns`、`extra` 等内部内容。命令存储查询或投影失败 SHALL 返回明确的错误（固定文案，不含存储层原文），SHALL NOT 呈现为空列表。既有 `GET /api/commands/{command_id}` 的行为（含懒过期）SHALL 保持不变。
+系统 SHALL 提供只读查询 `GET /api/tasks/{task_id}/commands?limit=&offset=`（默认 limit=20，limit 上限 100、offset ≥ 0），返回 `{items, total}`：items 为该 Task 的命令回执列表，total 为过滤后总数。排序 SHALL 为 `issued_at DESC, command_id DESC` 的稳定序。查询 SHALL 覆盖该 Task 的全部五种命令状态（`requested`/`acknowledged`/`applied`/`rejected`/`expired`），本能力不提供状态筛选。列表读取 SHALL 是纯已记录事实：`requested` 与 `acknowledged` SHALL 原样返回，SHALL NOT 呈现或改写为 `applied`；已过期的 `requested` 在列表中 SHALL 保持 `requested`；列表查询 SHALL NOT 推进任何命令状态、SHALL NOT 触发命令执行、SHALL NOT 执行单条查询的懒过期清扫。查询引用 SHALL 从可见 Task 行的 issuer_domain 与 id 构造，SHALL NOT 将 issuer 固定为 hecate。Task 可见性 SHALL 先行校验：不存在、已删除或属于其他 workspace 的 Task SHALL 统一返回请求 Task 的 404，且可见性失败时 SHALL NOT 读取命令存储；可见性判定之后、命令存储访问之前，SHALL 要求调用方在其当前 workspace 具备至少 `VIEWER` 角色，角色不足或缺失 SHALL 返回 403（详见「命令回执与待对账读取携带最低读角色门槛」的公共规则）。返回字段 SHALL 沿用单条回执白名单（command_id、kind、state、issued_at、issuer、task_ref、run_ref、expires_at、expected_revision），SHALL NOT 返回 `payload`、`payload_schema_ref`、`detail_ns`、`extra` 等内部内容。命令存储查询或投影失败 SHALL 返回明确的错误（固定文案，不含存储层原文），SHALL NOT 呈现为空列表。既有 `GET /api/commands/{command_id}` 在授权后的行为（含懒过期）SHALL 保持不变，其读取门槛由「命令回执与待对账读取携带最低读角色门槛」定义。
 
 #### Scenario: 分页与稳定排序
 
@@ -389,9 +389,14 @@ When a task resumes from a persistent wait, the platform SHALL record the succes
 - **WHEN** 命令存储查询抛出异常
 - **THEN** 响应为 500 且错误文案为固定文本，不含存储层异常原文，也不返回空列表
 
-#### Scenario: 单条查询行为不变
+#### Scenario: 角色不足的列表请求零副作用
 
-- **WHEN** 客户端以 `GET /api/commands/{command_id}` 读取一条已过期的 requested 命令
+- **WHEN** 同 workspace 内无角色的认证身份请求某可见 Task 的命令列表
+- **THEN** 响应为 403 授权拒绝，命令存储未被查询，任何命令状态（含已过期的 `requested`）与治理事件均不变
+
+#### Scenario: 授权后的单条查询行为不变
+
+- **WHEN** 具备至少 `VIEWER` 角色的客户端以 `GET /api/commands/{command_id}` 读取一条已过期的 requested 命令
 - **THEN** 该读取仍执行懒过期（返回 expired），与本列表查询的只读边界互不影响
 
 #### Scenario: 使用可见 Task 的真实 issuer
@@ -454,6 +459,45 @@ When a task resumes from a persistent wait, the platform SHALL record the succes
 
 - **WHEN** EDITOR 成员对需要审批或携带 `expected_revision`/期限的 Task 下发命令
 - **THEN** 原审批绑定、revision 冲突、期限与幂等键绑定语义按既有规则执行,EDITOR 角色不构成对这些校验的豁免
+
+### Requirement: 命令回执与待对账读取携带最低读角色门槛
+
+命令回执单条读取与待对账查询的 REST 入口(`GET /api/commands/{command_id}`、`GET /api/reconciliation/pending`)SHALL 在既有查询语义之前施加读权限门,任务命令列表入口(`GET /api/tasks/{task_id}/commands`)SHALL 复用相同的公共规则:
+
+- `GET /api/commands/{command_id}` SHALL 先以不推进状态的纯查询判定命令归属:不存在或属于其他 workspace 的命令 SHALL 统一返回 404(响应 message SHALL 仅回显调用方提供的 command_id),SHALL NOT 泄露具体原因,SHALL NOT 执行单条读取的懒过期;归属判定之后、懒过期之前,SHALL 要求调用方在其当前 workspace 具备至少 `VIEWER` 角色,角色不足或缺失 SHALL 返回 403。
+- `GET /api/reconciliation/pending` SHALL 先要求有效 workspace 与至少 `VIEWER` 角色,再进入查询;被拒请求 SHALL NOT 触发过期命令惰性清扫、relay 状态读取或任何状态迁移。
+
+权限判定 SHALL 取自服务端解析的 `AuthContext` 与既有角色校验构件,SHALL NOT 接受请求体或查询串自报的角色;拒绝时 SHALL 零副作用:不产生命令回执或状态事件、不推进任何命令状态、不触发派发或 relay 调用,Task/Run 行、durable 状态与 outbox SHALL NOT 发生任何变化。缺 workspace 的非 system 身份 SHALL 维持既有 403 `NO_WORKSPACE` 拒绝,SHALL NOT 退化为全局查询;显式 system-scope 身份的既有行为 SHALL 保持不变(维持 403 `NO_WORKSPACE`),SHALL NOT 因本门槛获得或失去跨 workspace 读取能力。授权后的既有行为 SHALL 全部保持:VIEWER、EDITOR 与 ADMIN 的成功响应结构完全一致,任务命令列表仍为纯已记录事实(不懒过期),单条读取保留懒过期,待对账查询保留过期命令清扫与 relay 状态读取,Task/Action/命令事实与清扫按调用方当前 workspace 过滤,`event_relay` 沿用既有进程级运行状态。
+
+#### Scenario: 跨 workspace 命令读取表现为不存在
+
+- **WHEN** workspace W2 的成员(任意角色)以 `GET /api/commands/{command_id}` 读取 workspace W1 中的命令
+- **THEN** 响应为 404,与读取一个不存在的 command_id 一致(message 仅回显调用方提供的 command_id);该命令的持久化状态(含已过期的 `requested`)与治理事件均不变
+
+#### Scenario: 同 workspace viewer 可读
+
+- **WHEN** workspace W1 的 viewer 角色成员读取 W1 内命令的单条回执、W1 内 Task 的命令列表或待对账查询
+- **THEN** 三个入口均成功,响应结构与 EDITOR、ADMIN 完全一致;单条读取照常执行懒过期,待对账查询照常执行过期命令清扫
+
+#### Scenario: 无角色身份与自报角色被拒
+
+- **WHEN** 有效认证但在当前 workspace 无任何角色的身份请求任一读取入口,或携带自报角色(如查询串 `role=admin`)
+- **THEN** 响应为 403 授权拒绝,不因自报角色提权;命令状态、durable 状态与 outbox 均无变化
+
+#### Scenario: 缺 workspace 与 system scope 行为保持
+
+- **WHEN** 无 workspace 归属的非 system 身份或显式 system-scope key 请求任一读取入口
+- **THEN** 响应均为 403 `NO_WORKSPACE`,与本门槛引入前一致,不新增全局查询能力
+
+#### Scenario: 拒绝不触发懒过期与清扫
+
+- **WHEN** 某 requested 命令的 expires_at 已过,被拒身份分别请求单条读取、任务命令列表与待对账查询
+- **THEN** 三者均被拒,该命令保持 `requested`,不产生 expired 收敛、状态事件、派发或 relay 调用
+
+#### Scenario: 待对账查询按调用方 workspace 作用域
+
+- **WHEN** workspace W2 的 viewer 请求待对账查询,而 W1 存在待对账 Task 与已过期未决命令
+- **THEN** 响应成功且仅包含 W2 作用域的事实,W1 的待对账事实与过期命令不被泄露、不被清扫
 
 ### Requirement: Run 观察读取携带最低读角色门槛
 
