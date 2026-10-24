@@ -416,36 +416,97 @@ async def trigger_workflow_evaluation(
     The pre-flight cost guardrail check is performed synchronously and
     returns 400 with the offending total when ``items × repetitions``
     exceeds ``max_total_executions`` (default 1000).
+
+    Scoped behind the workflow-evaluation trigger boundary: the workflow
+    resolves first and defines the target workspace; the dataset, the
+    optional dataset version, and the optional baseline run must each be
+    visible in that workspace (one constant 404 across missing,
+    soft-deleted, and wrong-workspace — system scope cannot stitch
+    resources across workspaces either). The EDITOR floor applies after
+    resolution and before config validation, item counting, the cost
+    guardrail, task/run creation, the commit, and the background handoff;
+    visible-but-mismatched bindings (version↔dataset, baseline↔dataset)
+    surface as 400 after the role floor.
     """
     from sqlalchemy import func
     from sqlalchemy import select as sa_select
 
+    from hecate.models.evaluation import (
+        EvaluationDatasetModel,
+        EvaluationDatasetVersionModel,
+        EvaluationItemModel,
+    )
     from hecate.models.workflow import WorkflowModel
 
-    if workflow_version < 1:
-        raise _validation_error("workflow_version must be >= 1")
-
+    # Resource resolution: every missing, soft-deleted, or wrong-workspace
+    # resource shares one constant 404 before any role denial.
+    if not ctx.is_system_scope and ctx.workspace_id is None:
+        raise _not_found()
     workflow_row = (
         await db.execute(
             sa_select(WorkflowModel).where(
                 WorkflowModel.id == body.workflow_id,
-                WorkflowModel.workspace_id == ctx.workspace_id,
                 ~WorkflowModel.deleted,
             )
         )
     ).scalar_one_or_none()
-    if workflow_row is None:
+    if workflow_row is None or (not ctx.is_system_scope and workflow_row.workspace_id != ctx.workspace_id):
         raise _not_found()
+    target_workspace = workflow_row.workspace_id
 
-    version_row = (
+    dataset_row = (
         await db.execute(
-            sa_select(WorkflowModel.current_version).where(
-                WorkflowModel.id == body.workflow_id,
-                ~WorkflowModel.deleted,
+            sa_select(EvaluationDatasetModel).where(
+                EvaluationDatasetModel.id == body.dataset_id,
+                ~EvaluationDatasetModel.deleted,
             )
         )
-    ).first()
-    current_version = int(version_row[0]) if version_row and version_row[0] is not None else None
+    ).scalar_one_or_none()
+    if dataset_row is None or dataset_row.workspace_id != target_workspace:
+        raise _not_found()
+
+    # Version binding (7.3b): when supplied, the run is pinned to a named
+    # version. The version must exist and be visible in the target
+    # workspace; its dataset binding is checked after the role floor.
+    dataset_version_row = None
+    if body.dataset_version_id is not None:
+        dataset_version_row = (
+            await db.execute(
+                sa_select(EvaluationDatasetVersionModel).where(
+                    EvaluationDatasetVersionModel.id == body.dataset_version_id,
+                    ~EvaluationDatasetVersionModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if dataset_version_row is None or dataset_version_row.workspace_id != target_workspace:
+            raise _not_found()
+
+    baseline_row = None
+    if body.baseline_run_id is not None:
+        baseline_row = (
+            await db.execute(
+                sa_select(EvaluationRunModel).where(
+                    EvaluationRunModel.id == body.baseline_run_id,
+                    ~EvaluationRunModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if baseline_row is None or baseline_row.workspace_id != target_workspace:
+            raise _not_found()
+
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
+
+    if workflow_version < 1:
+        raise _validation_error("workflow_version must be >= 1")
+    if dataset_version_row is not None and dataset_version_row.dataset_id != dataset_row.id:
+        raise _validation_error("dataset_version_id does not belong to the request's dataset")
+    if baseline_row is not None and baseline_row.dataset_id != dataset_row.id:
+        raise _validation_error("baseline_run_id must reference the request's dataset")
+
+    current_version = workflow_row.current_version
     if current_version is not None and workflow_version > current_version:
         raise _validation_error(f"workflow_version={workflow_version} exceeds current_version={current_version}")
 
@@ -463,6 +524,7 @@ async def trigger_workflow_evaluation(
         repetitions=body.repetitions,
         max_total_executions=body.max_total_executions,
         max_in_flight=body.max_in_flight,
+        agent_id=None,
     )
 
     config: dict
@@ -470,36 +532,13 @@ async def trigger_workflow_evaluation(
         config = build_task_config(payload)
         repetitions = int(config.get("repetitions", 1))
         max_total = int(config.get("max_total_executions", 1000))
-        from hecate.models.evaluation import (
-            EvaluationDatasetVersionModel,
-            EvaluationItemModel,
-        )
 
-        # Version binding (7.3b): when supplied, the run is pinned to a
-        # named version. The version must exist, belong to the request's
-        # workspace, and belong to the same dataset — trigger rejects
-        # otherwise without creating a run row. Item count for the
-        # guardrail comes from the frozen version, not the live dataset.
-        dataset_version_id = body.dataset_version_id
-        version_row = None
-        if dataset_version_id is not None:
-            version_row = (
-                await db.execute(
-                    sa_select(EvaluationDatasetVersionModel).where(
-                        EvaluationDatasetVersionModel.id == dataset_version_id,
-                        ~EvaluationDatasetVersionModel.deleted,
-                    )
-                )
-            ).scalar_one_or_none()
-            if version_row is None:
-                raise _not_found()
-            if ctx.workspace_id is not None and version_row.workspace_id != ctx.workspace_id:
-                raise _not_found()
-            if version_row.dataset_id != body.dataset_id:
-                raise _validation_error("dataset_version_id does not belong to the request's dataset")
-
-        if dataset_version_id is not None:
-            item_count = len(version_row.items or [])
+        # Item count for the guardrail comes from the frozen version when
+        # pinned, otherwise from the dataset's live items — historical
+        # items participate via their parent dataset, not their own
+        # workspace column.
+        if dataset_version_row is not None:
+            item_count = len(dataset_version_row.items or [])
         else:
             item_count = int(
                 (
@@ -534,25 +573,31 @@ async def trigger_workflow_evaluation(
         status="active",
         evaluator_configs=body.evaluators,
         config=config,
-        workspace_id=ctx.workspace_id,
+        workspace_id=target_workspace,
     )
-    validate_task(task)
+    try:
+        validate_task(task)
+    except EvaluationTaskValidationError as exc:
+        raise _validation_error(str(exc)) from exc
     db.add(task)
     await db.flush()
 
     run = EvaluationRunModel(
         dataset_id=body.dataset_id,
-        dataset_version_id=dataset_version_id,
+        dataset_version_id=body.dataset_version_id,
         task_id=task.id,
         evaluator_configs=list(body.evaluators),
         workflow_id=body.workflow_id,
         workflow_version=workflow_version,
         repetitions=repetitions,
         status="pending",
-        workspace_id=ctx.workspace_id,
+        workspace_id=target_workspace,
     )
     db.add(run)
     await db.flush()
+
+    # The background runner opens its own session — the queued rows must
+    # be committed before the handoff (same flow as the task-run API).
     await db.commit()
 
     await OfflineTaskRunner(db).run_in_background(run.id, task.id)
