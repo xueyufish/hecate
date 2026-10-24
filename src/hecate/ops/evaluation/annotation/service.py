@@ -28,6 +28,7 @@ from hecate.models.evaluation import (
     EvaluationTaskScoreModel,
     QueueItemStatus,
     TaskScoreStatus,
+    TaskType,
 )
 from hecate.models.session import SessionModel
 from hecate.ops.evaluation.dataset_service import EvaluationDatasetService
@@ -243,7 +244,8 @@ class AnnotationService:
 
         Returns ``{created, already_present, rejected}`` where ``rejected``
         lists target ids that are not workspace-visible completed root
-        traces.
+        traces. Duplicates include retained soft-deleted rows: they count
+        as ``already_present`` without revival or a second row.
         """
         if len(target_ids) > _MAX_BULK_ITEMS:
             raise AnnotationValidationError(f"bulk add is capped at {_MAX_BULK_ITEMS} items per call")
@@ -287,10 +289,12 @@ class AnnotationService:
     ) -> dict[str, Any]:
         """Enqueue the target traces of matching online-task score samples.
 
-        Selects the task's non-error score rows matching the optional
-        ``metric_name`` / score bounds, takes up to ``limit`` distinct
-        targets (score rows oldest first), and skips traces already in the
-        queue.
+        Selects the online task's completed, automated trace-typed scores
+        matching optional ``metric_name`` / score bounds, keeps only targets that
+        are workspace-visible completed root traces, takes up to ``limit``
+        distinct qualified targets (score rows oldest first), and skips
+        traces already in the queue. Unqualified targets never consume
+        the limit or the ``candidates`` count.
         """
         if limit < 1 or limit > _MAX_FROM_TASK_LIMIT:
             raise AnnotationValidationError(f"limit must be in [1, {_MAX_FROM_TASK_LIMIT}]")
@@ -307,10 +311,15 @@ class AnnotationService:
         ).scalar_one_or_none()
         if task is None:
             raise AnnotationQueueNotFoundError(str(task_id))
+        if task.task_type != TaskType.ONLINE.value:
+            raise AnnotationValidationError("from-task intake requires an online task")
 
         conditions: list[Any] = [
             EvaluationTaskScoreModel.task_id == task_id,
             EvaluationTaskScoreModel.workspace_id == workspace_id,
+            EvaluationTaskScoreModel.target_type == "trace",
+            EvaluationTaskScoreModel.source != _HUMAN_SOURCE,
+            EvaluationTaskScoreModel.status == TaskScoreStatus.COMPLETED.value,
             ~EvaluationTaskScoreModel.deleted,
             EvaluationTaskScoreModel.value != -1.0,  # error sentinel carries no score
         ]
@@ -329,9 +338,15 @@ class AnnotationService:
         candidates: list[uuid.UUID] = []
         seen: set[uuid.UUID] = set()
         for (target_id,) in rows.all():
-            if target_id not in seen:
-                seen.add(target_id)
-                candidates.append(target_id)
+            if target_id in seen:
+                continue
+            # The score's workspace and target id cannot substitute for
+            # trace validation: the trace itself must be a workspace-visible
+            # completed root trace to enter the queue.
+            if await self._workspace_trace(target_id, workspace_id) is None:
+                continue
+            seen.add(target_id)
+            candidates.append(target_id)
 
         existing_ids = await self._queue_target_ids(queue.id)
         created, skipped_existing = 0, 0
@@ -360,10 +375,16 @@ class AnnotationService:
         }
 
     async def _queue_target_ids(self, queue_id: uuid.UUID) -> set[uuid.UUID]:
+        """Trace targets already represented in the queue, live or soft-deleted.
+
+        Intake dedup counts retained soft-deleted rows too: re-enqueueing
+        such a target is a duplicate no-op rather than a second row that
+        would violate the queue/target unique constraint.
+        """
         rows = await self.db.execute(
             select(AnnotationQueueItemModel.target_id).where(
                 AnnotationQueueItemModel.queue_id == queue_id,
-                ~AnnotationQueueItemModel.deleted,
+                AnnotationQueueItemModel.target_type == "trace",
             )
         )
         return {row[0] for row in rows.all()}

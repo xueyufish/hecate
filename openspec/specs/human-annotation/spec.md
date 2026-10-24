@@ -93,6 +93,12 @@ The four queue read endpoints (`GET /api/evaluation/annotation-queues`, `GET /ap
 ### Requirement: Queue item intake
 The system SHALL support adding root traces as queue items via `POST /api/evaluation/annotation-queues/{queue_id}/items` (single or bulk, bulk capped at 100 per call) and via `POST /api/evaluation/annotation-queues/{queue_id}/items/from-task` with `{task_id, metric_name?, min_score?, max_score?, limit}` that selects matching online-task score records and enqueues their target traces (up to `limit`, default 50). A trace SHALL appear in a queue at most once: adding a trace already present SHALL be a no-op and the from-task flow SHALL skip already-enqueued traces. Adding a trace that does not exist as a completed root trace in the workspace SHALL be rejected. Queue items SHALL be created in `pending` state recording `added_by`.
 
+Both intake endpoints SHALL sit behind the annotation write boundary. The queue SHALL resolve through the read boundary first (existence, soft-delete state, workspace ownership before the editor role check). Manual intake SHALL return the same identifier-free queue 404 for a missing, soft-deleted, or non-system caller's foreign queue. From-task intake SHALL additionally require the source task to be live in the queue's real workspace before the role check; an invisible queue or task, or a cross-workspace queue/task pair, SHALL return the combined identifier-free `Annotation queue or task not found` 404. A workspace-less non-system identity SHALL receive the endpoint's corresponding 404 before any query. Non-system callers SHALL hold at least an editor role, denied before the intake service, score candidate reads, or trace validation. Explicit system scope SHALL retain its role exemption and MAY operate without an active workspace, using the queue's real workspace — it SHALL NOT pull another workspace's task or traces into the queue.
+
+Intake provenance SHALL be revalidated against the queue's workspace: only workspace-visible (session or agent owned), undeleted, completed root traces qualify, and a score row's workspace or target id SHALL NOT substitute for trace validation. After authorization, from-task intake SHALL reject a non-online source task with 400 `INVALID_REQUEST` before score selection or trace validation. From-task selection SHALL only consider the task's non-deleted, completed, trace-typed automated score rows in the queue's workspace (`source != "human"`, `status = "completed"`, and `value != -1.0`), filter unqualified traces before deduplication and the limit, and report `candidates` as the qualified deduplicated count.
+
+Re-enqueueing a trace whose prior trace-typed item row is soft-deleted SHALL be treated as a duplicate (manual `already_present`, from-task `skipped_existing`) without reviving, hard-deleting, or inserting a second row. A different target type with the same target id SHALL NOT suppress trace intake. Denied intakes SHALL NOT modify data.
+
 #### Scenario: Bulk manual intake
 - **WHEN** 3 trace IDs are posted to the items endpoint of a queue
 - **THEN** 3 items SHALL be created in `pending` state and the response reports the created count
@@ -107,7 +113,35 @@ The system SHALL support adding root traces as queue items via `POST /api/evalua
 
 #### Scenario: Reject unknown or non-root trace
 - **WHEN** an item is added with a trace ID that does not exist, belongs to another workspace, or is a child span
-- **THEN** the API SHALL return a validation error
+- **THEN** manual intake SHALL report that target in the per-item `rejected` list without rejecting the entire batch; from-task intake SHALL exclude the target from qualified candidates
+
+#### Scenario: Intake authorization resolves visibility before role
+- **WHEN** a non-system identity of any role posts intake for a missing, soft-deleted, or foreign queue, or from-task names a task that is missing, soft-deleted, or outside the queue's workspace
+- **THEN** the API SHALL return the identifier-free 404 (queue form for manual intake, combined queue-or-task form for from-task) before the role check and before any intake write
+
+#### Scenario: Editor floor on intake
+- **WHEN** a viewer or role-less member of the owning workspace posts either intake endpoint
+- **THEN** the API SHALL return 403 `FORBIDDEN` before the intake service, score candidate reads, or trace validation, and no item SHALL be created
+
+#### Scenario: System intake uses the queue's real workspace
+- **WHEN** an explicit system-scope identity without an active workspace enqueues into an explicit live queue, with from-task naming a task of that queue's workspace
+- **THEN** the intake SHALL succeed in the queue's workspace, while a task or trace of another workspace SHALL NOT enter the queue
+
+#### Scenario: Score provenance cannot bypass trace validation
+- **WHEN** from-task selection encounters score rows whose targets are foreign-workspace, soft-deleted, non-completed, or non-root traces
+- **THEN** those targets SHALL be excluded before deduplication and the limit, without consuming `candidates`, and only qualified traces SHALL be enqueued
+
+#### Scenario: Soft-deleted intake rows stay duplicates
+- **WHEN** a target whose prior queue item was soft-deleted is re-enqueued manually or via from-task
+- **THEN** the response SHALL report the duplicate (`already_present` / `skipped_existing`) without a 500, a second row, or reviving the soft-deleted item
+
+#### Scenario: Only online automated completed evidence supplies intake
+- **WHEN** an authorized caller names a non-online source task or the task's score rows include human or error-status evidence
+- **THEN** the non-online task SHALL return 400 `INVALID_REQUEST` before candidate reads, and human or error-status rows SHALL NOT become candidates even if they carry a task id or non-sentinel value
+
+#### Scenario: Duplicate identity includes target type
+- **WHEN** a queue contains a live or soft-deleted non-trace item with the same id as a valid trace target
+- **THEN** neither intake endpoint SHALL treat that item as a trace duplicate, and the non-trace row SHALL remain unchanged
 
 ### Requirement: Queue item workflow (claim / submit / skip)
 A queue item SHALL move through `pending → claimed → completed | skipped`. `POST .../items/{item_id}/claim` SHALL record `claimed_by` and `claimed_at`; when the queue has a non-empty `assigned_user_ids`, only assigned users MAY claim, otherwise any workspace member MAY claim. `POST .../items/{item_id}/submit` SHALL carry one annotation entry per queue metric (`metric_name`, `value`, optional `overrides_score_id`, optional `reason_code`, optional `justification`), validate each `value` against the metric definition's domain, and persist the entries as human score records (see "Human scores in the shared ledger"); the item SHALL become `completed` with `completed_by`/`completed_at`. `POST .../items/{item_id}/skip` SHALL mark the item `skipped`. Submitting or claiming a completed or skipped item SHALL be rejected. Deleting an item SHALL only be allowed in `pending` or `skipped` state.
