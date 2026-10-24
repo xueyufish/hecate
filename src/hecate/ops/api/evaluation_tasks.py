@@ -259,10 +259,23 @@ async def trigger_task_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Queue an asynchronous offline run and return 202 immediately."""
+    """Queue an asynchronous offline run and return 202 immediately.
+
+    Scoped behind the task trigger boundary: visibility resolves through
+    the task read boundary first, then the EDITOR floor applies — before
+    task validation, run creation, the request-session commit, and the
+    background handoff. The service operates on the task's real
+    workspace, so explicit system scope may trigger by task ID across
+    workspaces.
+    """
+    task = await _get_task_for_read(ctx, task_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationTaskService(db)
     try:
-        run = await svc.trigger_run(task_id, workspace_id=ctx.workspace_id)
+        run = await svc.trigger_run(task_id, workspace_id=task.workspace_id)
     except EvaluationTaskNotFoundError as exc:
         raise _not_found() from exc
     except EvaluationTaskValidationError as exc:
