@@ -153,6 +153,8 @@ An annotation entry MAY reference `overrides_score_id` — the identifier of an 
 ### Requirement: Calibration analytics
 The system SHALL expose `GET /api/evaluation/calibration` with optional filters `agent_id`, `task_id`, `metric_name`, and the standard time window. For each metric with machine-human paired samples (an automated row and a human row for the same `target_id` and `metric_name`), the response SHALL report: `pair_count`; for numeric metrics `agreement_rate` (fraction of pairs within an absolute tolerance of 0.1), `mae` (mean absolute error), and a 10-bucket machine-value × human-value heatmap; for categorical/boolean metrics the exact-match `agreement_rate` and Cohen's Kappa. Metrics without paired samples SHALL report zeroed stats; unpaired human-only and machine-only counts SHALL be reported per metric.
 
+The endpoint SHALL sit behind the annotation read boundary: every identity — system scope included — SHALL require an active workspace, non-system callers SHALL hold at least a viewer role, and both checks SHALL precede any statistics, score, or queue query. System scope SHALL keep its role exemption but SHALL NOT widen the statistics beyond its active workspace; the `agent_id`, `task_id`, and `metric_name` filters SHALL only narrow within that workspace. An inverted time window SHALL return a structured validation error, not a server error. Successful and denied reads SHALL NOT modify data.
+
 #### Scenario: Numeric calibration over paired samples
 - **WHEN** metric `helpfulness` has 10 paired samples with mean absolute difference 0.05 and 9 pairs within 0.1
 - **THEN** the response reports `pair_count: 10`, `agreement_rate: 0.9`, and `mae: 0.05`
@@ -164,6 +166,22 @@ The system SHALL expose `GET /api/evaluation/calibration` with optional filters 
 #### Scenario: Workspace isolation
 - **WHEN** the calibration endpoint is called from workspace A
 - **THEN** only workspace A's score rows are included in the statistics
+
+#### Scenario: Workspace-less identity denied before any query
+- **WHEN** an authenticated identity without an active workspace — system scope included — calls the calibration endpoint
+- **THEN** the response SHALL be 403 `NO_WORKSPACE` before any statistics, score, or queue query runs
+
+#### Scenario: Role floor for non-system callers
+- **WHEN** a workspace member without a role calls the calibration endpoint
+- **THEN** the response SHALL be 403 `FORBIDDEN` before any statistics query, while viewer and above read normally
+
+#### Scenario: System scope stays inside the active workspace
+- **WHEN** an explicit system-scope identity with active workspace A reads calibration while workspace B holds interference rows for the same targets and metrics, including a queue declaring a shared metric categorical
+- **THEN** only workspace A's score rows and queue declarations SHALL shape the statistics and the metric's data mode
+
+#### Scenario: Inverted time window is a structured validation error
+- **WHEN** the calibration endpoint is called with `start_date` after `end_date`
+- **THEN** the response SHALL be a structured 400 validation error, not a 500 server error
 
 ### Requirement: Annotation view in ops center
 The evaluation page SHALL include an Annotation view with: a queue list (name, instructions, per-state item counts, metric chips, assignees), a queue workbench for reviewing items (projected conversation and tool calls, machine-score suggestions, one input control per metric definition rendered by its data type, an override toggle exposing `reason_code` and `justification` when enabled, submit and skip actions, and next/previous item navigation), and an "add to annotation queue" action on the Online Quality session drill-down and low-score sample lists. The workbench SHALL present the suggestion values as pre-filled defaults the reviewer can accept or change.
