@@ -572,7 +572,8 @@ class EvaluationEngine:
         Returns the list of per-evaluator scores (one per evaluator, with
         ``value=-1.0`` for errors) and any trajectory rows collected from
         a workflow execution. Errors are isolated to the item — sibling
-        items keep scoring.
+        items keep scoring. For unbound runs, generation-error scores
+        are persisted alongside evaluator scores.
 
         When ``semaphore`` is provided, the answer-generation phase is
         gated so that at most ``semaphore`` value invocations run
@@ -618,81 +619,64 @@ class EvaluationEngine:
             return await self._generate_answer_via_pipeline(item.query, item.context or [])
 
         generated = "" if run.agent_version is not None else (item.generated_answer or "")
+        generation_failed = False
         if not generated and answer_source is not AnswerSource.MANUAL:
-            if semaphore is not None:
-                async with semaphore:
-                    try:
-                        generated = await _gen()
-                    except Exception as e:
-                        if run.agent_version is not None:
-                            raise
-                        logger.error(
-                            "Answer source %s failed on item %s: %s",
-                            answer_source.value,
-                            item.id,
-                            e,
-                        )
-                        for evaluator in evaluators:
-                            item_score_list.append(
-                                Score(
-                                    metric_name=evaluator.name,
-                                    value=-1.0,
-                                    reasoning=f"{failure_prefix}: {e}",
-                                    source="llm_judge",
-                                )
-                            )
-                        return item_score_list, trajectory_rows
-            else:
-                try:
-                    generated = await _gen()
-                except Exception as e:
-                    if run.agent_version is not None:
-                        raise
-                    logger.error(
-                        "Answer source %s failed on item %s: %s",
-                        answer_source.value,
-                        item.id,
-                        e,
-                    )
-                    for evaluator in evaluators:
-                        item_score_list.append(
-                            Score(
-                                metric_name=evaluator.name,
-                                value=-1.0,
-                                reasoning=f"{failure_prefix}: {e}",
-                                source="llm_judge",
-                            )
-                        )
-                    return item_score_list, trajectory_rows
-
-        eval_input = EvalInput(
-            query=item.query,
-            retrieved_contexts=item.context or [],
-            generated_answer=generated,
-            expected_answer=item.expected_answer,
-            agent_id=agent_id if answer_source == AnswerSource.AGENT else None,
-        )
-
-        for evaluator in evaluators:
             try:
-                output = await evaluator.evaluate(eval_input)
-                for score in output.scores:
-                    item_score_list.append(score)
+                if semaphore is not None:
+                    async with semaphore:
+                        generated = await _gen()
+                else:
+                    generated = await _gen()
             except Exception as e:
+                if run.agent_version is not None:
+                    raise
                 logger.error(
-                    "Evaluator %s failed on item %s: %s",
-                    evaluator.name,
+                    "Answer source %s failed on item %s: %s",
+                    answer_source.value,
                     item.id,
                     e,
                 )
-                item_score_list.append(
-                    Score(
-                        metric_name=evaluator.name,
-                        value=-1.0,
-                        reasoning=f"Evaluator error: {e}",
-                        source="llm_judge",
+                generation_failed = True
+                for evaluator in evaluators:
+                    item_score_list.append(
+                        Score(
+                            metric_name=evaluator.name,
+                            value=-1.0,
+                            reasoning=f"{failure_prefix}: {e}",
+                            source="llm_judge",
+                        )
                     )
-                )
+
+        # Generation errors must reach shared persistence without scoring an empty answer.
+        if not generation_failed:
+            eval_input = EvalInput(
+                query=item.query,
+                retrieved_contexts=item.context or [],
+                generated_answer=generated,
+                expected_answer=item.expected_answer,
+                agent_id=agent_id if answer_source == AnswerSource.AGENT else None,
+            )
+
+            for evaluator in evaluators:
+                try:
+                    output = await evaluator.evaluate(eval_input)
+                    for score in output.scores:
+                        item_score_list.append(score)
+                except Exception as e:
+                    logger.error(
+                        "Evaluator %s failed on item %s: %s",
+                        evaluator.name,
+                        item.id,
+                        e,
+                    )
+                    item_score_list.append(
+                        Score(
+                            metric_name=evaluator.name,
+                            value=-1.0,
+                            reasoning=f"Evaluator error: {e}",
+                            source="llm_judge",
+                        )
+                    )
 
         for score in item_score_list:
             self.db.add(

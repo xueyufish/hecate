@@ -65,6 +65,7 @@ from hecate.models.evaluation import (
     EvaluationRunReadSchema,
     EvaluationScoreModel,
     EvaluationScoreReadSchema,
+    RunStatus,
 )
 from hecate.ops.evaluation.dataset_service import EvaluationDatasetService
 from hecate.ops.evaluation.engine import EvaluationEngine, get_evaluator_class
@@ -500,9 +501,25 @@ async def create_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Create and execute an evaluation run."""
-    # Validate dataset exists
-    await _get_dataset_or_404(data.dataset_id, db)
+    """Create and execute an evaluation run.
+
+    Execution anchors to the target dataset's workspace. Ownership is
+    resolved first — a missing, soft-deleted, or cross-workspace dataset
+    yields one constant 404 that never echoes IDs — then the EDITOR floor
+    applies. A non-system identity without an active workspace can never
+    own the dataset, so it receives that same 404 before any query;
+    explicit system scope executes by dataset ID across workspaces with
+    the resolved dataset's workspace as target. Every denial happens
+    before any run/score row is created and before any evaluator, model,
+    or pipeline executes.
+    """
+    if not ctx.is_system_scope and ctx.workspace_id is None:
+        raise _dataset_not_found()
+    dataset = await _get_dataset_for_read(ctx, data.dataset_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
     # Resolve evaluators from names via the engine's class index
     evaluators: list[Evaluator] = []
@@ -522,9 +539,22 @@ async def create_run(
             )
         evaluators.append(cls())
 
+    # Pre-build the run so the row — and the scores the engine derives
+    # from it, which inherit ``run.workspace_id`` — lands in the dataset's
+    # workspace instead of the column's zero-UUID default that the read
+    # boundaries filter out.
+    run = EvaluationRunModel(
+        dataset_id=dataset.id,
+        status=RunStatus.RUNNING.value,
+        evaluator_configs=[e.name for e in evaluators],
+        workspace_id=dataset.workspace_id,
+    )
+    db.add(run)
+    await db.flush()
+
     engine = EvaluationEngine(db)
     source = AnswerSource(data.answer_source)
-    result = await engine.run(evaluators, data.dataset_id, answer_source=source, tags=data.tags)
+    result = await engine.run(evaluators, data.dataset_id, answer_source=source, tags=data.tags, run=run)
 
     # Convert result to API response
     return {
