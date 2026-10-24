@@ -1281,6 +1281,18 @@ class TaskControlService:
         await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REQUESTED)
         return _CANCEL_RUNNING_NOTE
 
+    async def assert_command_visible(self, *, workspace_id: uuid.UUID, command_id: str) -> None:
+        """Raise the read not-found error for a command outside this workspace.
+
+        REST read gates call this — a pure ``recorder.get``, never the
+        lazy-expiry transition — before any role decision, so a rejected
+        caller neither distinguishes missing from foreign commands nor
+        advances a lapsed receipt. Mirrors ``assert_task_visible``.
+        """
+        record = await asyncio.to_thread(self._recorder.get, command_id)
+        if record is None or str(record.extra.get("workspace_id")) != str(workspace_id):
+            raise TaskControlNotFoundError(f"command {command_id} not found in workspace")
+
     async def get_command(self, workspace_id: uuid.UUID, command_id: str) -> ControlCommandRecord:
         """Read one command receipt with workspace scoping and lazy expiry."""
         record = await asyncio.to_thread(self._recorder.get, command_id)
