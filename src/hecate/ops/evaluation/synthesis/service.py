@@ -19,6 +19,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.dataset_synthesis_job import DatasetSynthesisJobModel
@@ -41,6 +42,16 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+class SeedDatasetUnavailableError(Exception):
+    """Seed dataset is missing, soft-deleted, or outside the target workspace.
+
+    Deliberately not a ``ValueError`` so the API layer's invalid-request
+    (400) mapping cannot swallow it: the REST boundary translates it into
+    the dataset endpoints' constant 404, and the async job runner into an
+    explicit job failure.
+    """
 
 
 @dataclass
@@ -97,8 +108,12 @@ class DatasetSynthesisService:
         if not request.seed_dataset_id and not request.topic and request.strategy != "adversarial":
             raise ValueError("Provide at least one of: seed_dataset_id, topic (for non-adversarial strategies)")
 
-        # 1. Create target dataset up front so the filter pipeline can
-        # reference it for dedupe.
+        # Load and validate all seed material before creating a target:
+        # the async failure handler commits the current transaction.
+        seeds: list[Any] = []
+        if request.seed_dataset_id:
+            seeds = await self._load_seeds(request.seed_dataset_id, request.workspace_id)
+
         ds_svc = EvaluationDatasetService(self.db)
         target_ds = await ds_svc.create_dataset(
             name=request.target_dataset_name,
@@ -106,12 +121,6 @@ class DatasetSynthesisService:
             workspace_id=request.workspace_id,
         )
 
-        # 2. Load seeds if a seed dataset was provided
-        seeds: list[Any] = []
-        if request.seed_dataset_id:
-            seeds = await self._load_seeds(request.seed_dataset_id)
-
-        # 3. Strategy generates candidates
         strategy = self._build_strategy(request.strategy, request.llm_config)
         candidates = await strategy.generate(
             seeds=seeds,
@@ -182,8 +191,37 @@ class DatasetSynthesisService:
             return AdversarialStrategy(llm_config=llm_config)
         raise ValueError(f"Unknown strategy: {name!r}")
 
-    async def _load_seeds(self, seed_dataset_id: uuid.UUID) -> list[Any]:
-        """Read (query, expected_answer) pairs from a seed dataset."""
+    async def validate_seed(
+        self,
+        seed_dataset_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> EvaluationDatasetModel:
+        """Resolve the seed dataset or raise :class:`SeedDatasetUnavailableError`.
+
+        Shared by the REST boundary (seed visibility, checked before the
+        role floor) and the pipeline (execution-time re-validation) so
+        both enforce the same existence, soft-delete, and target-workspace
+        membership conditions.
+        """
+        result = await self.db.execute(
+            select(EvaluationDatasetModel).where(
+                EvaluationDatasetModel.id == seed_dataset_id,
+                ~EvaluationDatasetModel.deleted,
+            )
+        )
+        ds = result.scalar_one_or_none()
+        if ds is None or ds.workspace_id != workspace_id:
+            raise SeedDatasetUnavailableError("seed dataset is missing, soft-deleted, or outside the target workspace")
+        return ds
+
+    async def _load_seeds(self, seed_dataset_id: uuid.UUID, workspace_id: uuid.UUID) -> list[Any]:
+        """Read (query, expected_answer) pairs from a validated seed dataset.
+
+        Eligibility is anchored to the parent dataset row — the items'
+        own historical ``workspace_id`` values (including the zero UUID)
+        never disqualify a legitimate seed.
+        """
+        await self.validate_seed(seed_dataset_id, workspace_id)
         result = await self.db.execute(
             EvaluationItemModel.__table__.select().where(
                 EvaluationItemModel.dataset_id == seed_dataset_id,
@@ -207,6 +245,7 @@ class DatasetSynthesisService:
 __all__ = [
     "CandidateItem",
     "DatasetSynthesisService",
+    "SeedDatasetUnavailableError",
     "SynthesisRequest",
     "SynthesisResult",
     "DatasetSynthesisJobModel",

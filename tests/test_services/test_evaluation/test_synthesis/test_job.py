@@ -3,16 +3,32 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.dataset_synthesis_job import (
     DatasetSynthesisJobCreateSchema,
     DatasetSynthesisJobModel,
 )
+from hecate.models.evaluation import EvaluationDatasetModel
 from hecate.ops.evaluation.synthesis import DatasetSynthesisJobService
+from hecate.ops.evaluation.synthesis.service import SeedDatasetUnavailableError
+
+
+def _job_config(seed_dataset_id: uuid.UUID | None) -> dict:
+    return {
+        "seed_dataset_id": str(seed_dataset_id) if seed_dataset_id else None,
+        "topic": None,
+        "adversarial_intent": None,
+        "count": 5,
+        "target_dataset_name": "queued-target",
+        "target_dataset_description": None,
+        "llm_config": None,
+        "quality_threshold": None,
+    }
 
 
 class TestCreateJob:
@@ -104,6 +120,117 @@ class TestGetJob:
         # Tenant isolation: another workspace must not see this job
         other = await svc.get_job(job.id, workspace_id=uuid.uuid4())
         assert other is None
+
+
+class TestSeedUnavailablePropagation:
+    """A seed invalidated after acceptance fails the job explicitly."""
+
+    async def _seed_deleted_dataset(self, db_session: AsyncSession, ws: uuid.UUID) -> EvaluationDatasetModel:
+        ds = EvaluationDatasetModel(name="queued-seed", workspace_id=ws, deleted=True, deleted_at=datetime.now(UTC))
+        db_session.add(ds)
+        await db_session.commit()
+        return ds
+
+    async def _seed_queued_job(
+        self, db_session: AsyncSession, ws: uuid.UUID, seed_id: uuid.UUID
+    ) -> DatasetSynthesisJobModel:
+        job = DatasetSynthesisJobModel(
+            strategy="generation", status="queued", config=_job_config(seed_id), workspace_id=ws
+        )
+        db_session.add(job)
+        await db_session.commit()
+        return job
+
+    async def _target_dataset_count(self, db_session: AsyncSession) -> int:
+        return (
+            await db_session.execute(
+                select(func.count())
+                .select_from(EvaluationDatasetModel)
+                .where(EvaluationDatasetModel.name == "queued-target")
+            )
+        ).scalar_one()
+
+    async def test_run_pipeline_raises_before_target_or_model(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hecate_llm.service
+
+        calls = {"n": 0}
+
+        async def _chat(*_a: object, **_kw: object) -> object:
+            calls["n"] += 1
+            raise AssertionError("model must not be called for an unavailable seed")
+
+        monkeypatch.setattr(hecate_llm.service.llm_service, "chat", _chat)
+        ws = uuid.uuid4()
+        seed = await self._seed_deleted_dataset(db_session, ws)
+        job = await self._seed_queued_job(db_session, ws, seed.id)
+        svc = DatasetSynthesisJobService(db_session)
+        with pytest.raises(SeedDatasetUnavailableError):
+            await svc._run_pipeline(db_session, job)
+        assert await self._target_dataset_count(db_session) == 0
+        assert calls["n"] == 0
+
+    async def test_execute_job_marks_failed_when_seed_unavailable(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hecate.core.database as database_mod
+
+        ws = uuid.uuid4()
+        seed = await self._seed_deleted_dataset(db_session, ws)
+        job = await self._seed_queued_job(db_session, ws, seed.id)
+        monkeypatch.setattr(database_mod, "async_session_factory", lambda: db_session)
+
+        await DatasetSynthesisJobService(db_session)._execute_job(job.id)
+
+        refreshed = (
+            await db_session.execute(select(DatasetSynthesisJobModel).where(DatasetSynthesisJobModel.id == job.id))
+        ).scalar_one()
+        assert refreshed.status == "failed"
+        assert refreshed.completed_at is not None
+        assert "seed" in (refreshed.error_message or "").lower()
+        assert refreshed.target_dataset_id is None
+        assert await self._target_dataset_count(db_session) == 0
+
+    async def test_seed_read_failure_does_not_commit_an_orphan_target(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A seed rejected during loading leaves only the failed job, never a target."""
+        import hecate_llm.service
+
+        import hecate.core.database as database_mod
+        from hecate.models.evaluation import EvaluationItemModel
+        from hecate.ops.evaluation.synthesis import DatasetSynthesisService
+
+        ws = uuid.uuid4()
+        seed = EvaluationDatasetModel(name="live-seed", workspace_id=ws)
+        db_session.add(seed)
+        await db_session.commit()
+        job = await self._seed_queued_job(db_session, ws, seed.id)
+        calls = {"seed": 0, "model": 0}
+
+        async def unavailable_during_load(
+            self: DatasetSynthesisService, seed_dataset_id: uuid.UUID, workspace_id: uuid.UUID
+        ) -> list:
+            calls["seed"] += 1
+            raise SeedDatasetUnavailableError("Seed dataset unavailable during loading")
+
+        async def unexpected_model(*args: object, **kwargs: object) -> None:
+            calls["model"] += 1
+            raise AssertionError("An unavailable seed must not reach the model")
+
+        monkeypatch.setattr(DatasetSynthesisService, "_load_seeds", unavailable_during_load)
+        monkeypatch.setattr(hecate_llm.service.llm_service, "chat", unexpected_model)
+        monkeypatch.setattr(database_mod, "async_session_factory", lambda: db_session)
+        await DatasetSynthesisJobService(db_session)._execute_job(job.id)
+
+        job_table = DatasetSynthesisJobModel.__table__
+        row = (await db_session.execute(select(job_table).where(job_table.c.id == job.id))).mappings().one()
+        assert row["status"] == "failed" and row["completed_at"] is not None
+        assert row["target_dataset_id"] is None and "unavailable" in row["error_message"]
+        assert calls == {"seed": 1, "model": 0}
+        assert await self._target_dataset_count(db_session) == 0
+        assert (await db_session.execute(select(func.count()).select_from(EvaluationItemModel))).scalar_one() == 0
 
 
 class TestStatusTransitions:
