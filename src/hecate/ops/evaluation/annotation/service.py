@@ -214,7 +214,9 @@ class AnnotationService:
         if data.instructions is not None:
             queue.instructions = data.instructions
         if data.assigned_user_ids is not None:
-            queue.assigned_user_ids = list(data.assigned_user_ids)
+            # Serialize to strings like create_queue: the JSON column cannot
+            # persist UUID objects.
+            queue.assigned_user_ids = [str(u) for u in data.assigned_user_ids]
         if data.metric_defs is not None:
             queue.metric_defs = _validate_metric_defs([d.model_dump() for d in data.metric_defs])
         await self.db.flush()
