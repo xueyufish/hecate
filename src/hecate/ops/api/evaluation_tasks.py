@@ -13,6 +13,12 @@
   shortcut: create an ad-hoc workflow-evaluation task + queue a run (7.3)
 - ``GET /api/evaluation/scores`` — query online scores (paginated, filterable)
 
+Task mutations (create / update / delete / enable / disable) sit behind
+the task write boundary: creation requires an explicit active workspace
+(even for system scope), mutations of existing tasks resolve visibility
+before the EDITOR role floor, and the service always receives the
+resolved task's real workspace.
+
 Offline run execution follows the synthesis-job flow: the handler persists a
 ``queued`` run row, commits, spawns the background runner, and returns 202.
 """
@@ -75,7 +81,19 @@ async def create_task(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Create an evaluation task in ``active`` state."""
+    """Create an evaluation task in ``active`` state.
+
+    Scoped behind the task write boundary: creation requires an explicit
+    active workspace (even for system scope) and an EDITOR role floor,
+    both checked before the service is invoked — otherwise the model's
+    zero-UUID default would silently bind the row.
+    """
+    if ctx.workspace_id is None:
+        raise _no_workspace()
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationTaskService(db)
     try:
         task = await svc.create_task(data, workspace_id=ctx.workspace_id)
@@ -135,15 +153,26 @@ async def update_task(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Update an evaluation task (partial; merged config is re-validated)."""
+    """Update an evaluation task (partial; merged config is re-validated).
+
+    Scoped behind the task write boundary: the task resolves through the
+    task read boundary first (ownership before role), then an EDITOR
+    floor applies and the service operates on the task's real workspace
+    — system scope included, never a ``None`` equality fallback.
+    """
+    task = await _get_task_for_read(ctx, task_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationTaskService(db)
     try:
-        task = await svc.update_task(task_id, workspace_id=ctx.workspace_id, data=data)
+        updated = await svc.update_task(task_id, workspace_id=task.workspace_id, data=data)
     except EvaluationTaskNotFoundError as exc:
         raise _not_found() from exc
     except EvaluationTaskValidationError as exc:
         raise _validation_error(str(exc)) from exc
-    return _task_to_dict(task)
+    return _task_to_dict(updated)
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -152,10 +181,19 @@ async def delete_task(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
-    """Soft-delete an evaluation task."""
+    """Soft-delete an evaluation task.
+
+    Scoped behind the task write boundary like update: visibility first,
+    then the EDITOR floor; produced runs and scores are retained.
+    """
+    task = await _get_task_for_read(ctx, task_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationTaskService(db)
     try:
-        await svc.delete_task(task_id, workspace_id=ctx.workspace_id)
+        await svc.delete_task(task_id, workspace_id=task.workspace_id)
     except EvaluationTaskNotFoundError as exc:
         raise _not_found() from exc
 
@@ -166,15 +204,25 @@ async def enable_task(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Enable an online task (evaluators re-validated at enable time)."""
+    """Enable an online task (evaluators re-validated at enable time).
+
+    Scoped behind the task write boundary: visibility resolves through
+    the task read boundary, then the EDITOR floor applies; the service
+    operates on the task's real workspace.
+    """
+    task = await _get_task_for_read(ctx, task_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationTaskService(db)
     try:
-        task = await svc.enable_task(task_id, workspace_id=ctx.workspace_id)
+        enabled = await svc.enable_task(task_id, workspace_id=task.workspace_id)
     except EvaluationTaskNotFoundError as exc:
         raise _not_found() from exc
     except EvaluationTaskValidationError as exc:
         raise _validation_error(str(exc)) from exc
-    return _task_to_dict(task)
+    return _task_to_dict(enabled)
 
 
 @router.post("/tasks/{task_id}/disable")
@@ -183,15 +231,25 @@ async def disable_task(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Disable an online task; produced scores remain queryable."""
+    """Disable an online task; produced scores remain queryable.
+
+    Scoped behind the task write boundary: visibility resolves through
+    the task read boundary, then the EDITOR floor applies; the service
+    operates on the task's real workspace.
+    """
+    task = await _get_task_for_read(ctx, task_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = EvaluationTaskService(db)
     try:
-        task = await svc.disable_task(task_id, workspace_id=ctx.workspace_id)
+        disabled = await svc.disable_task(task_id, workspace_id=task.workspace_id)
     except EvaluationTaskNotFoundError as exc:
         raise _not_found() from exc
     except EvaluationTaskValidationError as exc:
         raise _validation_error(str(exc)) from exc
-    return _task_to_dict(task)
+    return _task_to_dict(disabled)
 
 
 @router.post("/tasks/{task_id}/runs", status_code=status.HTTP_202_ACCEPTED)

@@ -16,9 +16,11 @@ endpoints (listing, detail, run listing):
   null workspace is never applied as an equality condition (the fix:
   system reads used to be permanently empty); missing-workspace
   non-system identities never degrade to an unscoped query.
-- Semantics: pagination, type/status filters, ordering, and the task
-  write endpoints' behavior (including the unchanged system-write
-  outcome) survive the boundary, and all reads leave persisted state unchanged.
+- Semantics: pagination, type/status filters, and ordering survive the
+  boundary, all reads leave persisted state unchanged, and the task
+  write endpoints keep their shapes (their access rules now live in
+  the task write boundary, including system scope's real-workspace
+  mutations).
 """
 
 from __future__ import annotations
@@ -247,7 +249,8 @@ async def test_listing_scoped_to_caller_workspace(
     ws1, ws1_ctx = await _workspace_with_role(db_session, "ws-one", WorkspaceRole.VIEWER)
     ws2, _ = await _workspace_with_role(db_session, "ws-two", WorkspaceRole.VIEWER)
 
-    async with _client_as(client, ws1_ctx) as http:
+    # Setup writes go through the task write boundary, so they need editor.
+    async with _client_as(client, _member_as(ws1, WorkspaceRole.EDITOR)) as http:
         await _create_task_via_api(http, "w1-a")
         await _create_task_via_api(http, "w1-b")
     async with _client_as(client, _member_as(ws2, WorkspaceRole.ADMIN)) as http:
@@ -464,7 +467,7 @@ async def test_write_paths_keep_their_behavior(
     db_session: AsyncSession,
     seeded_registry: None,
 ) -> None:
-    """Non-system writes work as before; system writes keep their outcome."""
+    """Non-system writes work as before; system writes reach the target."""
     ws, admin_ctx = await _workspace_with_role(db_session, "ws-admin", WorkspaceRole.ADMIN)
     ds = await _seed_task(db_session, ws.id)
 
@@ -479,11 +482,13 @@ async def test_write_paths_keep_their_behavior(
         foreign_update = await http.put(f"/api/evaluation/tasks/{ds.id}", json={"name": "still-own"})
         assert foreign_update.status_code == 200, foreign_update.text
 
-    # System-scope writes keep their pre-boundary outcome (still resolved
-    # through the non-Optional workspace equality): not loosened by D1.
+    # System-scope writes resolve through the task read boundary and now
+    # operate on the task's real workspace (the pre-boundary None-equality
+    # filter used to 404 every system write).
     async with _client_as(client, _system_context()) as http:
         system_update = await http.put(f"/api/evaluation/tasks/{ds.id}", json={"name": "system"})
-        assert system_update.status_code == 404, system_update.text
+        assert system_update.status_code == 200, system_update.text
+        assert system_update.json()["workspace_id"] == str(ws.id)
 
 
 async def test_task_disappearing_before_run_query_keeps_404(
