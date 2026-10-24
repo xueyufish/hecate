@@ -169,8 +169,16 @@ class AnnotationService:
         )
         return list(result.scalars().all()), int(total)
 
-    async def queue_item_counts(self, queue_ids: list[uuid.UUID]) -> dict[str, dict[str, int]]:
-        """Per-queue item counts grouped by status, for the queue list view."""
+    async def queue_item_counts(
+        self,
+        queue_ids: list[uuid.UUID],
+        workspace_id: uuid.UUID,
+    ) -> dict[str, dict[str, int]]:
+        """Per-queue item counts grouped by status, for the queue list view.
+
+        Counts cover only live items of the given workspace, so anomalous
+        cross-workspace rows under a queue id cannot inflate the counts.
+        """
         if not queue_ids:
             return {}
         rows = await self.db.execute(
@@ -181,6 +189,7 @@ class AnnotationService:
             )
             .where(
                 AnnotationQueueItemModel.queue_id.in_(queue_ids),
+                AnnotationQueueItemModel.workspace_id == workspace_id,
                 ~AnnotationQueueItemModel.deleted,
             )
             .group_by(AnnotationQueueItemModel.queue_id, AnnotationQueueItemModel.status)
@@ -426,16 +435,20 @@ class AnnotationService:
         self,
         item_id: uuid.UUID,
         workspace_id: uuid.UUID,
+        *,
+        queue_id: uuid.UUID | None = None,
     ) -> tuple[AnnotationQueueItemModel, AnnotationQueueModel]:
-        item = (
-            await self.db.execute(
-                select(AnnotationQueueItemModel).where(
-                    AnnotationQueueItemModel.id == item_id,
-                    AnnotationQueueItemModel.workspace_id == workspace_id,
-                    ~AnnotationQueueItemModel.deleted,
-                )
+        statement = select(AnnotationQueueItemModel).where(
+            AnnotationQueueItemModel.id == item_id,
+            AnnotationQueueItemModel.workspace_id == workspace_id,
+            ~AnnotationQueueItemModel.deleted,
+        )
+        if queue_id is not None:
+            # The API precheck may have cached the item before its binding changed.
+            statement = statement.where(AnnotationQueueItemModel.queue_id == queue_id).execution_options(
+                populate_existing=True
             )
-        ).scalar_one_or_none()
+        item = (await self.db.execute(statement)).scalar_one_or_none()
         if item is None:
             raise AnnotationQueueItemNotFoundError(str(item_id))
         queue = await self.get_queue(item.queue_id, workspace_id)
@@ -700,10 +713,20 @@ class AnnotationService:
         self,
         item_id: uuid.UUID,
         workspace_id: uuid.UUID,
+        *,
+        queue_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
-        """Item state plus the review context: trace projection and suggestions."""
-        item, queue = await self._get_item_or_raise(item_id, workspace_id)
-        trace = await self._load_trace(item.target_id)
+        """Item state plus the review context: trace projection and suggestions.
+
+        The trace is loaded under the read-side tenant scope (session or
+        agent belongs to the workspace); an invisible or missing trace
+        surfaces as ``None`` so events are never read and the missing-context
+        null semantics hold. Suggestions are the latest automated score per
+        metric within the same workspace. When the API supplies ``queue_id``,
+        the path binding is rechecked before any review context is loaded.
+        """
+        item, queue = await self._get_item_or_raise(item_id, workspace_id, queue_id=queue_id)
+        trace = await self._visible_trace(item.target_id, workspace_id)
 
         projection: dict[str, Any] | None = None
         if trace is not None and trace.session_id is not None:
@@ -722,7 +745,7 @@ class AnnotationService:
                     "tool_calls": eval_input.tool_calls or [],
                 }
 
-        suggestions = await self._latest_automated_scores(item.target_id)
+        suggestions = await self._latest_automated_scores(item.target_id, workspace_id)
         return {
             "item": item,
             "queue": queue,
@@ -737,12 +760,53 @@ class AnnotationService:
         result = await self.db.execute(select(TraceModel).where(TraceModel.id == target_id, ~TraceModel.deleted))
         return result.scalar_one_or_none()
 
-    async def _latest_automated_scores(self, target_id: uuid.UUID) -> list[dict[str, Any]]:
-        """Latest automated score per metric for the target (suggestion prefill)."""
+    async def _visible_trace(self, target_id: uuid.UUID, workspace_id: uuid.UUID) -> Any | None:
+        """A trace visible to the workspace for review reads.
+
+        Read-side tenant scope mirrors the traces API and ``_workspace_trace``:
+        the trace's session OR its agent belongs to the workspace (orphan
+        traces are invisible). Unlike ``_load_trace`` — which backs the
+        dataset backflow write path — this never returns a trace outside the
+        workspace, so callers keep missing-context semantics for foreign
+        targets.
+        """
+        from hecate.models.agent import AgentModel
+        from hecate.models.trace import TraceModel
+
+        session_ws = (
+            select(SessionModel.id)
+            .where(
+                SessionModel.id == TraceModel.session_id,
+                SessionModel.workspace_id == workspace_id,
+                ~SessionModel.deleted,
+            )
+            .exists()
+        )
+        agent_ws = (
+            select(AgentModel.id)
+            .where(
+                AgentModel.id == TraceModel.agent_id,
+                AgentModel.workspace_id == workspace_id,
+                ~AgentModel.deleted,
+            )
+            .exists()
+        )
+        result = await self.db.execute(
+            select(TraceModel).where(
+                TraceModel.id == target_id,
+                ~TraceModel.deleted,
+                session_ws | agent_ws,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _latest_automated_scores(self, target_id: uuid.UUID, workspace_id: uuid.UUID) -> list[dict[str, Any]]:
+        """Latest automated score per metric for the target, workspace-scoped."""
         rows = await self.db.execute(
             select(EvaluationTaskScoreModel)
             .where(
                 EvaluationTaskScoreModel.target_id == target_id,
+                EvaluationTaskScoreModel.workspace_id == workspace_id,
                 EvaluationTaskScoreModel.source != _HUMAN_SOURCE,
                 ~EvaluationTaskScoreModel.deleted,
             )

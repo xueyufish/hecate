@@ -33,6 +33,37 @@ The system SHALL provide CRUD endpoints at `/api/evaluation/annotation-queues`. 
 - **WHEN** a queue belonging to workspace A is requested from workspace B
 - **THEN** the API SHALL behave as if the queue does not exist
 
+### Requirement: Annotation queue read access boundary
+The four queue read endpoints (`GET /api/evaluation/annotation-queues`, `GET /api/evaluation/annotation-queues/{queue_id}`, `GET /api/evaluation/annotation-queues/{queue_id}/items`, `GET /api/evaluation/annotation-queues/{queue_id}/items/{item_id}`) SHALL sit behind a workspace read boundary. The queue list SHALL require an active workspace for every identity, including system scope, and non-system callers SHALL hold at least a viewer role; both checks SHALL precede queue queries, and system scope SHALL NOT gain a global listing. By-id reads SHALL resolve existence, soft-delete state, workspace ownership, and queue/item binding before the viewer role check; missing or soft-deleted resources SHALL surface as the same identifier-free 404 for every identity, and cross-workspace resources SHALL use that same 404 for non-system identities, and a workspace-less non-system identity SHALL be denied before any query. Explicit system scope SHALL retain its role exemption and MAY read an explicit queue or item id; subsequent queries SHALL use the resource's real workspace. Item review context (trace read, event projection, score suggestions) SHALL only be read after authorization and binding succeed; the trace read SHALL apply the traces API tenant scope (session or agent belongs to the workspace), with invisible traces keeping the missing-context null semantics and no event reads. Score suggestions SHALL be constrained to the queue's workspace while keeping the latest-automated-score-per-metric rule. List `items`, `total`, and per-status counts SHALL exclude other-workspace and soft-deleted rows. Successful and denied reads SHALL NOT modify data.
+
+#### Scenario: Workspace-less non-system identity denied before any query
+- **WHEN** an authenticated non-system identity without an active workspace calls any of the four read endpoints
+- **THEN** the queue list SHALL return 403 `NO_WORKSPACE` and the by-id endpoints SHALL return the identifier-free 404, all before any database query
+
+#### Scenario: System scope requires a workspace only for queue listing
+- **WHEN** an explicit system-scope identity without an active workspace lists queues or reads a live queue or item by its explicit identifier
+- **THEN** listing SHALL return 403 `NO_WORKSPACE` before any query, while by-id reads SHALL use the resource's real workspace and return the normal successful response
+
+#### Scenario: Invisible queue resolves before the role check
+- **WHEN** a non-system viewer or role-less identity requests a missing, soft-deleted, or foreign-workspace queue, or system scope requests a missing or soft-deleted queue
+- **THEN** the API SHALL return the same identifier-free 404 before any item or context read
+
+#### Scenario: Item binding resolved before context reads
+- **WHEN** an item is missing or soft-deleted, invisible to the caller, bound to a different queue than the path's, or assigned a workspace different from its parent queue
+- **THEN** the API SHALL return the constant item 404 before role enforcement or any review context read; parent/item workspace mismatches SHALL be rejected for system scope as well
+
+#### Scenario: Detail lookup rechecks the path binding
+- **WHEN** an item disappears or its queue binding changes after the API precheck and before the detail service loads review context
+- **THEN** the service SHALL reject the lookup before reading the trace, events, or score suggestions, and the API SHALL map the failure to the same identifier-free item 404
+
+#### Scenario: Foreign trace keeps missing-context semantics
+- **WHEN** an item's target trace is not workspace-visible (its session and agent belong to another workspace) or is soft-deleted
+- **THEN** the item detail SHALL return `trace: null` and `projection: null` without reading events, while workspace-scoped suggestions still resolve
+
+#### Scenario: Suggestions exclude other-workspace scores
+- **WHEN** the item's target has automated score rows in another workspace, soft-deleted rows, or human rows in the queue's workspace
+- **THEN** only the queue's workspace live automated rows are eligible, latest per metric
+
 ### Requirement: Queue item intake
 The system SHALL support adding root traces as queue items via `POST /api/evaluation/annotation-queues/{queue_id}/items` (single or bulk, bulk capped at 100 per call) and via `POST /api/evaluation/annotation-queues/{queue_id}/items/from-task` with `{task_id, metric_name?, min_score?, max_score?, limit}` that selects matching online-task score records and enqueues their target traces (up to `limit`, default 50). A trace SHALL appear in a queue at most once: adding a trace already present SHALL be a no-op and the from-task flow SHALL skip already-enqueued traces. Adding a trace that does not exist as a completed root trace in the workspace SHALL be rejected. Queue items SHALL be created in `pending` state recording `added_by`.
 
