@@ -76,9 +76,17 @@ class CalibrationService:
         metric_name: str | None = None,
     ) -> CalibrationReportSchema:
         """Per-metric agreement statistics for the workspace window."""
-        from hecate.ops.evaluation.reports.service import resolve_window
+        from hecate.ops.evaluation.reports.service import (
+            EvaluationReportValidationError,
+            resolve_window,
+        )
 
-        window = resolve_window(start_date, end_date)
+        try:
+            window = resolve_window(start_date, end_date)
+        except EvaluationReportValidationError as exc:
+            # The shared report window feeds this endpoint's validation
+            # contract; surface one error type for callers to catch.
+            raise CalibrationValidationError(str(exc)) from exc
 
         categorical_metrics = await self._categorical_metric_names(workspace_id)
 

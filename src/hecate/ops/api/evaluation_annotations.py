@@ -21,6 +21,11 @@ ownership and queue/item binding before the role check — invisible resources
 surface as the same identifier-free 404. Item review context (trace
 projection, event reads, score suggestions) is only read after authorization
 and binding succeed.
+
+Calibration reads sit behind the same boundary: every identity — system
+scope included — needs an active workspace, non-system callers need a viewer
+role floor, both checked before any statistics query, and system scope never
+widens the aggregation beyond its active workspace.
 """
 
 from __future__ import annotations
@@ -482,8 +487,21 @@ async def calibration(
     task_id: uuid.UUID | None = None,
     metric_name: str | None = None,
 ) -> dict:
-    """Machine-vs-human agreement statistics per metric."""
+    """Machine-vs-human agreement statistics per metric.
+
+    Scoped behind the annotation read boundary: an active workspace is
+    required for every identity — system scope included — and non-system
+    callers need at least a viewer role; both checks precede any statistics
+    query, and the statistics never widen beyond the active workspace.
+    """
     from datetime import datetime
+
+    if ctx.workspace_id is None:
+        raise _no_workspace()
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
 
     svc = CalibrationService(db)
 
