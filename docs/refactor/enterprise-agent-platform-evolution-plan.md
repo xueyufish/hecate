@@ -203,7 +203,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 
 ## 二、现状及可复用资产
 
-本次核对基点为 `origin/main` 的 `f32205ea`，逐项对照代码、测试及关联验证记录。历史报告中的“未提交/未推送/未归档”保留当次语境；当前交付事实以该基点已包含的实现为准，不以是否归档判断代码是否交付。“技术完成”只适用于已验证切片，不能替代整体场景或生产认证。
+本次核对基点为 `origin/main` 的 `f8275d2e`，逐项对照代码、测试及关联验证记录。历史报告中的“未提交/未推送/未归档”保留当次语境；当前交付事实以该基点已包含的实现为准，不以是否归档判断代码是否交付。“技术完成”只适用于已验证切片，不能替代整体场景或生产认证。
 
 | 已有资产 | 当前边界与后续责任 |
 |---|---|
@@ -211,9 +211,9 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | 平台 builtin、`EntryExecutionService` 与聊天路径 | 多个入口已迁移，直接工具循环与图执行仍并存；step5d/G3 收口入口、事件与兼容性，不另造一套生命周期 |
 | `packages/hecate-durable` 与平台任务控制 | step6a—6f、决策接受、受控单动作/串行动作集合及最终回答的单回合恢复已交付；成功动作结果可显式续接模型输入，账本回填已补输出治理。完整循环、Plan Revision、通用 Child Run、任务验收及生产治理仍待增量验证 |
 | 语言中立执行契约、Deployment/Task/Run 模型 | 已有草案、隔离互操作和登记模型；登记成功不等于部署获准执行或取得治理等级 |
-| MemoryProvider、Knowledge/RAG、Sandbox、工具 Gateway、评估与观测 | 复用已有接口和实现；评估 Run/评分/报告、数据集/版本/样本、任务管理、合成及标注队列读取已有分段权限加固，报告页面已有查询状态修正。整体服务替换、ACL/删除、隔离及独立升级按 step7—step10/16 验证 |
+| MemoryProvider、Knowledge/RAG、Sandbox、工具 Gateway、评估与观测 | 复用已有接口和实现；评估 Run/评分/报告、数据集/版本/样本、任务管理与触发、合成、Workflow 评测触发、标注读取/队列管理/入队及 calibration 已有分段权限加固，报告页面已有查询状态修正。整体服务替换、ACL/删除、隔离及独立升级按 step7—step10/16 验证 |
 | 功能清单及生成工具、分层测试 | ADR-037、定位、架构、主 specs 与规划数据已完成目标职责对齐；继续保护历史 Feature ID 和证据，新切片按所属步骤同步，不将目标文档视为 Controller 实现 |
-| 版本评测、发布凭据与观察页面 | AgentVersion 匹配、冻结评测范围/覆盖门禁、只追加发布凭据及历史面板已交付；Task/Run/动作/事件与命令回执已有只读页面，观察读取及命令写入已分段加固角色边界。完整发布组合、审批/取消等页面交互及其余授权缺口仍开放 |
+| 版本评测、发布凭据与观察页面 | AgentVersion 匹配、冻结评测范围/覆盖门禁、只追加发布凭据及历史面板已交付；Task/Run/动作/事件与命令回执已有只读页面，Task/Run、命令回执/对账读取及命令/Task 提交写入已分段加固角色边界，等待提交已读取 worker 最新 Run 投影。完整发布组合、审批/取消等页面交互及其余授权缺口仍开放 |
 
 历史依赖、入口和安全问题见[实施基线](platform-evolution-baseline.md)与[独立消费基线](standalone-consumption-baseline.md)；当前验收范围见[Step1～Step6 复核](step1-step6-acceptance-review.md)及[Step6 后续复核](step6-followup-review.md)。基线是历史快照，不覆盖后续交付事实。
 
@@ -242,11 +242,11 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | step7 | 无图 `ToolCallExecutor` 已交付，补记账本回填的 PostTool 输出治理；保留治理 profile、旁路、预算和跨执行方式完整认证 |
 | step8 | 继续撤销，不恢复外部 Runtime 接入任务 |
 | step9 | 沿用 Memory/Knowledge 分段替换；已有 provider/向量 adapter 不等于完整绑定、迁移和删除认证 |
-| step10 | 复用版本匹配与证据覆盖门禁，补记评估数据/报告/任务/合成及标注读取的权限切片、报告页面查询状态；其余写入口、后端替换、运行时验收及完整证据生命周期仍开放 |
+| step10 | 复用版本匹配、证据覆盖门禁与报告页面查询状态；评估执行、任务/Workflow 评测触发、标注队列管理/入队及 calibration 权限切片已交付。标注领取/评分提交等剩余写流程、后端替换、运行时验收及完整证据生命周期仍开放 |
 | step11 | 补记最小平台发布门禁、历史凭据/UI 与版本生命周期权限；本地升级、完整 manifest/生命周期仍待交付 |
 | step12 | 企业 Team/Membership 治理仍待交付；现有协作模式不计作企业团队 |
 | step13 | 团队委派/交接/验收仍待交付；单决策动作集合的串行恢复不计作团队 Batch |
-| step14 | Task/Run、动作、事件和命令回执只读页面已交付；Task/Run 观察读取及 REST 命令写入已有角色门。审批/取消等页面交互、其他入口授权和完整工作台仍待交付 |
+| step14 | Task/Run、动作、事件和命令回执只读页面已交付；观察及命令回执/对账读取、REST 命令/Task 提交写入已有角色门，等待提交结果已刷新 Run 投影。审批/取消等页面交互、workflow callback、SSE 动态撤权和完整工作台仍待交付 |
 | step15 | 保留条件性启动；既有自进化/策略能力不计作有界自治理闭环 |
 | step16 | 复用已有 SQLite/PostgreSQL 组件及进程矩阵；继续按实际 profile 收口生产符合性，不整体勾选 |
 | step17 | 保留需求条件；现有 A2A 入口不等于跨组织信任与联邦认证 |
@@ -592,19 +592,23 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 **目标：**允许外部系统承担 trace 与评估执行，同时保持 Hecate 的治理和发布责任。
 
-**状态：内置发布评测的版本绑定、范围冻结及证据覆盖检查已随 step11 交付；评估数据、报告、任务管理、合成与标注读取已有权限切片，Run Report/Compare 已加固查询状态。外部替换与完整证据生命周期尚未交付。**这类发布评测不构成本次 Task 的运行时验收，也不修正真实模型基线尚未通过的质量门槛。
+**状态：内置发布评测的版本绑定、范围冻结及证据覆盖检查已随 step11 交付；评估数据、报告、Run 执行、任务管理/触发、合成、Workflow 评测触发、标注读取/队列管理/入队与 calibration 已有权限切片，Run Report/Compare 已加固查询状态。外部替换与完整证据生命周期尚未交付。**这类发布评测不构成本次 Task 的运行时验收，也不修正真实模型基线尚未通过的质量门槛。
 
 **已交付的评估访问与页面切片：**
 
 | 范围 | 当前保证与证据 |
 |---|---|
 | Run、评分、比较与报告读取 | Run 列表/详情/评分/比较、在线评分、分布/会话及 overview/trends/breakdowns 报告已有服务端可见性和 VIEWER 门槛；不可见资源不进入评分/聚合查询。无资源目标的聚合报告要求 active workspace，不提供全局汇总。见[Run 读取](../../openspec/changes/archive/2026-10-18-step10-evaluation-run-read-access-boundary/verification.md)、[在线评分](../../openspec/changes/archive/2026-10-21-step10-evaluation-score-read-access-boundary/verification.md)、[聚合报告](../../openspec/changes/archive/2026-10-20-step10-evaluation-report-aggregate-access-boundary/verification.md)、[分布](../../openspec/changes/archive/2026-10-20-step10-evaluation-report-distribution-access-boundary/verification.md)及[会话报告](../../openspec/changes/archive/2026-10-20-step10-evaluation-report-session-access-boundary/verification.md) |
+| 评估 Run 创建与执行 | 先解析数据集可见性，再要求 EDITOR，拒绝发生在 evaluator 解析、Run/评分创建及模型/pipeline 调用前；Run 和评分写入数据集实际 workspace。未绑定 AgentVersion 的答案生成失败也持久化错误评分，不评测空答案。见[执行边界测试](../../tests/test_api/test_evaluation_run_execution_access_boundary.py)及[引擎回归](../../tests/test_services/test_evaluation/test_engine.py) |
 | 数据集、样本与版本 | 数据集/样本及版本列表、详情、diff 读取已有 VIEWER 门槛；数据集 CRUD、样本增改删、版本创建/删除/恢复已有 EDITOR 门槛。按资源归属校验父子绑定及软删除，不可见资源先返回统一 404；写入不信任客户端归属字段。见[数据集读取](../../openspec/changes/archive/2026-10-20-step10-evaluation-dataset-read-access-boundary/verification.md)、[数据集写入](../../openspec/changes/archive/2026-10-21-step10-evaluation-dataset-write-access-boundary/verification.md)、[样本写入](../../openspec/changes/archive/2026-10-20-step10-evaluation-dataset-item-write-access-boundary/verification.md)、[版本读取](../../openspec/changes/archive/2026-10-20-step10-evaluation-dataset-version-read-access-boundary/verification.md)及[版本写入](../../openspec/changes/archive/2026-10-20-step10-evaluation-dataset-version-write-access-boundary/verification.md) |
-| 评估任务与合成 | 评估 Task 列表/详情/Run 列表已有 VIEWER 门槛，创建/更新/删除/启停已有 EDITOR 门槛；合成启动按服务端目标 workspace 与种子归属校验后要求 EDITOR，任务轮询要求 VIEWER。准入拒绝不启动模型或后台作业，已准入任务在执行期复验种子；显式 system 跨域操作按各入口既有规则保留。见[任务读取](../../openspec/changes/archive/2026-10-20-step10-evaluation-task-read-access-boundary/verification.md)、[管理边界测试](../../tests/test_api/test_evaluation_task_management_write_access_boundary.py)与[合成复核](../../openspec/changes/step10-dataset-synthesis-access-boundary/verification.md) |
+| 评估任务与合成 | 评估 Task 列表/详情/Run 列表已有 VIEWER 门槛，创建/更新/删除/启停及离线 Run 触发已有 EDITOR 门槛；触发先解析 Task 可见性，再作角色与业务校验，pending Run 按 Task 实际 workspace 提交成功后才交给后台。合成启动按服务端目标 workspace 与种子归属校验后要求 EDITOR，任务轮询要求 VIEWER。准入拒绝不启动模型或后台作业，已准入任务在执行期复验种子；显式 system 跨域操作按各入口既有规则保留。见[任务读取](../../openspec/changes/archive/2026-10-20-step10-evaluation-task-read-access-boundary/verification.md)、[管理边界测试](../../tests/test_api/test_evaluation_task_management_write_access_boundary.py)、[Run 触发测试](../../tests/test_api/test_evaluation_task_run_execution_access_boundary.py)与[合成复核](../../openspec/changes/step10-dataset-synthesis-access-boundary/verification.md) |
+| Workflow 评测触发 | Workflow 确定目标 workspace；数据集、可选版本和基线 Run 均须在该 workspace 可见，再要求 EDITOR。可见但绑定不符在角色门后拒绝；配置、版本和成本门禁通过后创建 Task/pending Run，提交成功才交后台。system 也不能跨 workspace 拼接资源。见[触发边界测试](../../tests/test_api/test_workflow_evaluation_execution_access_boundary.py) |
 | 标注队列读取 | 队列列表要求 active workspace；队列详情、条目列表/详情先核对可见性、软删除和 queue/item 绑定，再应用 VIEWER 门槛；授权后才读取 trace、事件投影与分数建议。显式 system 的按 ID 查询保留，列表不扩为全局查询。见[实现](../../src/hecate/ops/api/evaluation_annotations.py)及[读取边界测试](../../tests/test_api/test_annotation_read_access_boundary.py) |
+| 标注队列管理与入队 | 创建队列要求 active workspace 与 EDITOR；更新/删除及手动/来源 Task 入队先解析队列归属，再要求 EDITOR，来源 Task 还须在队列实际 workspace 存活。仅接受该 workspace 可见的已完成根 trace；来源 Task 限 online，筛选已完成的自动 trace 评分，不合格 trace 不占候选限额。已有或保留的软删除条目去重且不复活；此切片不包含领取、评分提交或回灌。见[管理边界测试](../../tests/test_api/test_annotation_queue_management_write_access_boundary.py)与[入队边界测试](../../tests/test_api/test_annotation_intake_write_access_boundary.py) |
+| Calibration 读取 | 所有身份均须有 active workspace，非 system 另需 VIEWER；校验先于统计查询，system 也仅聚合当前 workspace。非法日期/时间窗按校验错误返回。见[校准读取测试](../../tests/test_api/test_calibration_read_access_boundary.py) |
 | Run Report / Compare | 加载、空态和结构化失败分开，支持对应查询重试；更换选择或请求版本后丢弃迟到结果，独立分布/评分查询互不覆盖，Compare 保持显式提交。未改变分页范围、比较算法或后端授权。见[Run Report 复核](../../openspec/changes/archive/2026-10-20-step10-run-report-query-state-hardening/verification.md)与[Compare 复核](../../openspec/changes/archive/2026-10-20-step10-compare-view-query-state-hardening/verification.md) |
 
-上述角色门槛针对非 system 身份；system 例外及 active workspace 要求按入口分别执行，不承诺统一跨域能力。评估 Run 创建/执行、任务触发、标注写流程与 calibration 等相邻入口不因这些切片获得完整授权认证；字段级 ACL、导出/删除/冻结及完整证据生命周期仍按下列任务推进。
+上述角色门槛针对非 system 身份；system 例外及 active workspace 要求按入口分别执行，不承诺统一跨域能力。已交付切片不覆盖标注条目的 claim/skip/submit/delete 与 push-dataset 回灌等剩余写流程，也不构成所有评估入口的完整授权认证；字段级 ACL、导出/删除/冻结及完整证据生命周期仍按下列任务推进。
 
 **分段边界：**step1 的测试 fixture、step5e/6/7 的最小完成控制、交付/验收和关键证据、step11 所需的最小评测结果先行；本步扩展外部 evaluator/exporter、线上抽样和完整证据生命周期。不能等待选定 LangSmith 等服务才启动评测，也不能把单 Agent 验收延至 step13。
 
@@ -723,14 +727,16 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 ### step14 — 建设人类观察与干预工作台
 
-**状态：平台最小只读观察及命令回执页面已交付，Task/Run 观察读取和 REST 命令写入已有角色边界；审批/取消等页面交互和完整团队工作台待交付。**
+**状态：平台最小只读观察及命令回执页面已交付，Task/Run、命令回执/对账读取和 REST 命令/Task 提交写入已有角色边界；等待提交结果已刷新 Run 投影，审批/取消等页面交互和完整团队工作台待交付。**
 
 - [x] `GET /api/runs/{run_id}/actions` 提供归属校验后的账本白名单视图，恢复状态与已记录 outcome 分列，不支持与无结果分开；查询不派发、不修复动作。
 - [x] `/ops-center/tasks` 及详情页消费 Task/Run/动作查询，支持分页、Run 切换与手动刷新；事件时间线消费持久游标分页，显式显示 gap，分页耗尽不推断 Run 完成。页面当前只读，不含审批/取消操作或实时订阅。
 - [x] `GET /api/tasks/{task_id}/commands` 已支持完整 Task issuer 引用、归属校验、分页和命令回执白名单；列表读取不触发懒过期，不把 requested 改成 expired/applied。Task 详情已有 `TaskCommandsPanel`，按 Task 分页/刷新，展示真实状态、完整引用和可选字段；切换 Run 保留 Task 命令视图，切换 Task 隔离分页及迟到响应，不轮询、不发出写命令。
 - [x] Task 列表/详情/Run 列表、Run 详情/动作/事件/SSE 在业务查询、账本/事件读取或建流前校验 active workspace、资源可见性及 VIEWER 门槛；跨域、缺失或软删除资源不可区分。REST commands/cancel 写入先校验 Task 可见性及 EDITOR，再访问命令存储或处理幂等回放；降权后不能借旧命令绕过，不以 wake token 代替审批。
+- [x] 命令列表、单条回执和 pending reconciliation 读取已加入 VIEWER 门槛；单条回执先用不推进状态的查询核对可见性，拒绝不触发懒过期、清扫或 relay。授权读取保持既有语义：列表保留已记录状态，单条读取可懒过期，对账仅处理当前 workspace。
+- [x] `POST /api/tasks` 在业务校验、幂等查找/回放、登记和派发前要求 active workspace 与 EDITOR；降权后不能回放旧幂等键，缺 workspace（含 system scope）仍拒绝。授权后保留新建/回放/冲突与 wait/stream 语义；`wait=true` 的终态结果先刷新 worker 已提交的 Run 投影，避免请求会话缓存导致结果为空。
 
-证据：[动作查询](../../openspec/changes/archive/2026-10-18-step14-run-action-query/verification.md)、[Task/Run 页面](../../openspec/changes/archive/2026-10-18-step14-task-run-observation-ui/verification.md)、[事件时间线](../../openspec/changes/archive/2026-10-18-step14-run-event-timeline-ui/tasks.md)、[命令查询](../../openspec/changes/archive/2026-10-18-step14-task-command-query/verification.md)、[命令回执页面](../../openspec/changes/archive/2026-10-18-step14-task-command-receipts-ui/verification.md)、[Run 读取边界](../../openspec/changes/archive/2026-10-20-step14-run-observation-read-access-boundary/verification.md)、[Task 读取边界](../../openspec/changes/archive/2026-10-22-step14-task-observation-read-access-boundary/verification.md)及[命令写边界](../../openspec/changes/archive/2026-10-20-step14-task-command-write-access-boundary/verification.md)。命令回执/对账读取的角色加固、Task 提交、workflow callback 和已建立 SSE 的动态撤权仍为相邻缺口；这些切片不代表所有控制入口授权完成。后续在现有页面/API 上扩展干预；运行中取消仍可能仅为 requested，不能因查询或按钮成功宣称已停止。
+证据：[动作查询](../../openspec/changes/archive/2026-10-18-step14-run-action-query/verification.md)、[Task/Run 页面](../../openspec/changes/archive/2026-10-18-step14-task-run-observation-ui/verification.md)、[事件时间线](../../openspec/changes/archive/2026-10-18-step14-run-event-timeline-ui/tasks.md)、[命令查询](../../openspec/changes/archive/2026-10-18-step14-task-command-query/verification.md)、[命令回执页面](../../openspec/changes/archive/2026-10-18-step14-task-command-receipts-ui/verification.md)、[Run 读取边界](../../openspec/changes/archive/2026-10-20-step14-run-observation-read-access-boundary/verification.md)、[Task 读取边界](../../openspec/changes/archive/2026-10-22-step14-task-observation-read-access-boundary/verification.md)及[命令写边界](../../openspec/changes/archive/2026-10-20-step14-task-command-write-access-boundary/verification.md)；新增切片见[控制观察边界测试](../../tests/test_api/test_control_observation_access_boundary.py)与[Task 提交及等待结果测试](../../tests/test_api/test_task_submission_access_boundary.py)。workflow callback 和已建立 SSE 的动态撤权仍为相邻缺口；这些切片不代表所有控制入口授权完成。后续在现有页面/API 上扩展干预；运行中取消仍可能仅为 requested，不能因查询或按钮成功宣称已停止。
 
 **独立消费关联：**step6/7 即提供最小状态查询、审批/输入和控制命令接口，独立 App 可以实现自己的界面；I-Ca 验证本地审批，I-Cb 验证平台最小视图，本步再提供完整团队工作台。后端/宿主始终校验当前权限、参数和状态版本；前端按钮不能直接写审批表或把 requested 显示为 applied。未连接控制面的部署，其实时观察与干预只能由本地授权客户端完成，中心不虚报实时可控。
 
