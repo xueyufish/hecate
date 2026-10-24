@@ -1,4 +1,4 @@
 interface:
   display_name: "Hecate GLM Review"
-  short_description: "Review completed GLM worktree changes"
-  default_prompt: "Use $hecate-glm-review to review a completed GLM worktree and report integration blockers."
+  short_description: "Review and repair completed GLM worktree changes"
+  default_prompt: "Use $hecate-glm-review to review a completed GLM worktree, fix confirmed findings in place, and report integration readiness."
