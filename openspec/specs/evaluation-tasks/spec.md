@@ -36,9 +36,35 @@ The system SHALL provide CRUD endpoints at `/api/evaluation/tasks` for evaluatio
 ### Requirement: Offline task run execution
 The system SHALL expose `POST /api/evaluation/tasks/{task_id}/runs` that queues an asynchronous run of the task's evaluators against the task's dataset and returns `202` with a run identifier in `pending` state. The run SHALL execute in the background with the lifecycle `pending → running → completed | failed`, and SHALL be persisted as an evaluation run linked to the task via `task_id`. When `answer_source` is `manual`, the engine SHALL score the item's stored `generated_answer`. When `answer_source` is `pipeline` or `agent` and the item has no stored answer, the engine SHALL generate the answer — via the RAG pipeline fallback or by invoking the agent under test (one invocation per item), respectively. When `threshold` is configured, the completed run SHALL compute per-item pass/fail and aggregate `summary` (`total_items`, `passed_items`, `failed_items`, `pass_rate`, `metric_averages`); when `baseline_run_id` is configured, the summary SHALL additionally flag regressed metrics against the baseline.
 
+Triggering SHALL enforce a task-level access boundary before any task validation, run creation, persistence commit, or background handoff: for non-system identities, a task that does not exist, is soft-deleted, or belongs to another workspace SHALL produce one constant not-found (404) response that does not echo identifiers, and ownership SHALL be resolved before the minimum editor role so a role denial never discloses task existence. A non-system identity without an active workspace SHALL receive that same constant task not-found without querying the task. Explicit system-scope API keys SHALL trigger by task ID across workspaces, with or without an active workspace. Every denial SHALL occur before the background runner is handed off, and rejected requests SHALL leave existing task, run, and score rows unchanged. A successful trigger SHALL persist the pending run bound to the task's identity, dataset, evaluator configs, and the task's real workspace; the request-session commit SHALL precede the background handoff, and a failed commit SHALL NOT hand off. Authorized requests SHALL keep the existing 400 INVALID_REQUEST branch for online tasks, disabled tasks, and tasks with unresolvable evaluator configs — without creating a run or handing off.
+
 #### Scenario: Trigger asynchronous offline run
 - **WHEN** `POST /api/evaluation/tasks/{task_id}/runs` is called on an active offline task
 - **THEN** the API SHALL return `202` with a run identifier in `pending` state, and the run SHALL transition to `completed` (or `failed`) without requiring the HTTP request to stay open
+
+#### Scenario: Invisible task yields uniform not-found before role denial
+- **WHEN** any authenticated non-system identity triggers a run for a task that does not exist, is soft-deleted, or belongs to another workspace, regardless of the caller's workspace role
+- **THEN** the response SHALL be 404 with one consistent body across all conditions, without echoing the task ID, and no run SHALL be created or handed off
+
+#### Scenario: Missing workspace identity receives constant task not-found
+- **WHEN** a validly authenticated non-system identity without an active workspace triggers a run
+- **THEN** the response SHALL be the same 404 as a missing task, the task SHALL NOT be queried, and no run SHALL be created or handed off
+
+#### Scenario: Editor role required in the task's workspace
+- **WHEN** a viewer or role-less member of the task's workspace triggers a run, even for a task whose type, status, or evaluator config would fail validation
+- **THEN** the response SHALL be 403 authorization denied (preceding task validation) and no run SHALL be created or handed off
+
+#### Scenario: System scope triggers across workspaces
+- **WHEN** an explicit system-scope API key, with or without an active workspace different from the task's, triggers a run by task ID
+- **THEN** the trigger SHALL proceed and the pending run SHALL land in the resolved task's workspace
+
+#### Scenario: Pending run persists with task binding before background handoff
+- **WHEN** an editor or admin of the task's workspace triggers a run successfully
+- **THEN** the persisted pending run SHALL carry the task's identity, dataset, evaluator configs, and the task's real workspace; the background handoff SHALL receive exactly the persisted run and task IDs, happen only after the request-session commit succeeds, and be skipped when the commit fails; a same-workspace viewer SHALL read the run back through the task-run listing and run detail endpoints while members of other workspaces SHALL NOT observe it
+
+#### Scenario: Authorized trigger of invalid task is rejected without side effects
+- **WHEN** an editor of the task's workspace triggers a run for an online task, a disabled task, or a task whose persisted configuration fails validation (including unresolvable evaluator names or missing required fields)
+- **THEN** the response SHALL be 400 INVALID_REQUEST with the existing message semantics, and no run SHALL be created or handed off
 
 #### Scenario: Agent answer source invokes the agent under test
 - **WHEN** a task with `answer_source: "agent"` runs against items lacking `generated_answer`
