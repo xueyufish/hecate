@@ -212,3 +212,37 @@ The workflow evaluation trigger SHALL accept an optional `dataset_version_id`. W
 
 - **WHEN** a trigger supplies a `dataset_version_id` that does not exist or belongs to another workspace
 - **THEN** the trigger SHALL be rejected and no run SHALL be created
+
+### Requirement: Shortcut trigger access boundary
+
+`POST /api/evaluation/workflow-evaluations/{workflow_version}/runs` SHALL enforce a resource-anchored access boundary: a non-system identity without an active workspace SHALL receive one constant not-found (404) before any resource query; the workflow resolves first and defines the target workspace; the dataset, the optional dataset version, and the optional baseline run SHALL each be visible in that workspace — missing, soft-deleted, and wrong-workspace resources share one constant 404 that never echoes identifiers, for system and non-system identities alike, so system scope cannot stitch resources across workspaces. The minimum editor role SHALL apply after resource resolution and before config validation, item counting, the cost guardrail, task/run creation, the persistence commit, and the background handoff. Visible-but-mismatched bindings (a dataset version bound to another dataset, a baseline run referencing another dataset) SHALL return 400 INVALID_REQUEST after the role floor, as SHALL a `workflow_version` exceeding the workflow's current version, an unresolvable evaluator name, and a non-positive `workflow_version`. A cost-guardrail violation SHALL retain its existing 400 response with a string `detail` naming the offending total. None of these rejections SHALL create a task or run. A successful trigger SHALL keep the 202 response with `run_id`, `task_id`, `workflow_id`, `workflow_version`, and `status`; the created task and pending run SHALL bind the server-resolved target workspace, the workflow and version, the dataset (and optional named version), the evaluator configs, and the effective execution limits; live-path item counting SHALL follow the dataset's non-deleted items regardless of the item rows' historical workspace values, while version-bound counting SHALL use the frozen items. The request-session commit SHALL precede the background handoff and a failed commit SHALL NOT hand off or leave partial records; a same-workspace viewer SHALL read the task and run back through the existing task-run listing and run detail endpoints while members of other workspaces SHALL NOT observe them.
+
+#### Scenario: Invisible workflow, dataset, version, or baseline yields uniform not-found
+
+- **WHEN** a referenced resource is missing or soft-deleted, a non-system caller references a workflow outside its active workspace, or any identity references a dataset, dataset version, or baseline run outside the resolved workflow's workspace
+- **THEN** the response SHALL be 404 with one consistent body across all conditions and resources, without echoing identifiers, and no task or run SHALL be created or handed off
+
+#### Scenario: Missing workspace identity rejected before queries
+
+- **WHEN** a validly authenticated non-system identity without an active workspace triggers a workflow evaluation
+- **THEN** the response SHALL be the same constant 404 and no resource SHALL be queried
+
+#### Scenario: Editor role required after resolution
+
+- **WHEN** a viewer or role-less member of the target workspace triggers an evaluation whose resources are all visible, even with a `workflow_version` that would exceed the current version
+- **THEN** the response SHALL be 403 authorization denied (preceding config validation) and no task or run SHALL be created or handed off
+
+#### Scenario: System scope anchors to the workflow's workspace
+
+- **WHEN** an explicit system-scope API key, with or without an active workspace different from the workflow's, triggers an evaluation by workflow ID
+- **THEN** the trigger SHALL proceed with the workflow's workspace as target, and any dataset, version, or baseline run from another workspace SHALL still be rejected as not-found
+
+#### Scenario: Mismatched bindings rejected after the role floor
+
+- **WHEN** an authorized editor supplies a dataset version bound to another dataset, or a baseline run referencing another dataset, all visible in the target workspace
+- **THEN** the response SHALL be 400 INVALID_REQUEST naming the mismatch, and no task or run SHALL be created
+
+#### Scenario: Ad-hoc task and pending run persist to the target workspace before handoff
+
+- **WHEN** an editor of the target workspace triggers an evaluation successfully
+- **THEN** the created task and pending run SHALL carry the target workspace, the workflow/version, dataset (and named version when supplied), evaluator configs, and effective execution limits; the background handoff SHALL receive exactly the persisted run and task IDs only after the request-session commit succeeds, and be skipped when the commit fails; a same-workspace viewer SHALL read both back while other workspaces cannot observe them
