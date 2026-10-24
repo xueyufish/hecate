@@ -10,6 +10,8 @@
 
 `POST /api/tasks` SHALL 接受业务目标、执行目标(agent/deployment 引用)、输入与可选预算/截止时间,并在服务端验证的调用主体与 workspace 作用域内处理幂等键:键绑定主体、workspace 与规范化请求摘要。相同键、相同摘要的重复提交 SHALL 返回首次提交的 Task/Run 关联,不产生第二次执行;相同键、不同摘要 SHALL 返回冲突错误,原有关联不被改写;键绑定的主体/workspace 与验证上下文不一致 SHALL 被拒绝。提交成功 SHALL 返回持久化的 task_id 与 run_id;请求可携带等待参数以获取同步等待视图(在 Task 到达终态或超时后返回),未携带时提交立即返回 queued 状态。提交后任务 SHALL 经持久派发 worker 投递执行(`durable-execution-worker` 能力):worker 崩溃或进程重启后,未终态任务经对账继续(queued 重派、过期租约以新 fencing token 重派),平台据此宣称跨重启的后台执行保证;已终态任务不被重派。
 
+提交入口 SHALL 在进入上述任何提交工作之前施加写权限门:先要求有效 workspace(缺 workspace 的非 system 身份与显式 system-scope 身份均维持既有 403 `NO_WORKSPACE` 拒绝,SHALL NOT 退化为全局提交),再要求调用方在其当前 workspace 具备至少 `EDITOR` 角色,角色不足或缺失 SHALL 返回 403。权限判定 SHALL 取自服务端解析的 `AuthContext` 与既有角色校验构件,SHALL NOT 接受请求体或查询串自报的角色。角色门 SHALL 先于业务校验(Agent 归属、部署、输入验证)、幂等查询或重放、持久化注册与派发:已降权调用方凭既有幂等键的重放 SHALL 同样被 403 拒绝,不返回原关联、不重复派发;恢复角色后同键同摘要重放 SHALL 仍返回原关联。请求结构校验的既有 422 语义保持不变;拒绝时 SHALL 零副作用:不创建 Task/Run 行、不写 durable 状态或 submission 记录、不触发执行或事件。
+
 #### Scenario: 同键同摘要幂等
 
 - **WHEN** 同一主体以相同幂等键与相同请求体重复提交
@@ -24,6 +26,21 @@
 
 - **WHEN** 幂等键被绑定主体之外的验证上下文重放
 - **THEN** 提交被拒绝,不返回原关联
+
+#### Scenario: 降权后凭既有幂等键重放被拒
+
+- **WHEN** 某主体以 EDITOR 成功提交幂等键 K 后被降权为 viewer,再以相同键与相同请求体提交
+- **THEN** 响应为 403 授权拒绝,不返回原关联、不产生第二次执行;恢复 EDITOR 后同键重放仍返回原关联
+
+#### Scenario: 角色不足先于业务校验拒绝
+
+- **WHEN** viewer 或无角色身份提交结构合法但业务目标无效(如跨 workspace Agent)的请求
+- **THEN** 响应为 403 授权拒绝,提交服务的业务校验、幂等查询与注册均未执行
+
+#### Scenario: 缺 workspace 与 system scope 行为保持
+
+- **WHEN** 无 workspace 归属的非 system 身份或显式 system-scope key 提交任务
+- **THEN** 响应均为 403 `NO_WORKSPACE`,与写权限门引入前一致,不新增全局提交能力
 
 #### Scenario: 提交后进程重启执行继续
 

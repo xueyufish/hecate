@@ -186,9 +186,20 @@ async def submit_task(
     response: Response,
 ) -> dict[str, Any]:
     """Idempotently submit one task; 201 new, 200 for an idempotent replay."""
+    # Write gate before any submission work: workspace requirement (403
+    # NO_WORKSPACE, unchanged), then the server-side EDITOR floor —
+    # ahead of business validation, idempotent replay, registration and
+    # dispatch. Request bodies carry no role; the identity comes from
+    # the AuthContext only, so an existing idempotency key cannot
+    # bypass the check after a downgrade.
+    workspace_id = _workspace_id(ctx)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
     try:
         result = await service.submit(
-            workspace_id=_workspace_id(ctx),
+            workspace_id=workspace_id,
             user_id=ctx.user_id,
             goal=body.goal,
             agent_id=body.agent_id,
