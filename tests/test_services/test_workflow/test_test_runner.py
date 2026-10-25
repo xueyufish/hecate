@@ -145,16 +145,47 @@ async def test_run_result_has_timing(db_session: AsyncSession, monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_run_real_mode(db_session: AsyncSession) -> None:
-    """Test real (non-mock) mode still runs without LLM."""
+    """Real (non-mock) mode executes conversation nodes through the LLM service."""
+    from unittest.mock import AsyncMock, patch
+
+    from hecate_llm.service import LLMResponse, llm_service
+
     wf_id = await _create_workflow_with_dsl(db_session, LINEAR_DSL)
     runner = WorkflowTestRunner(db_session)
 
-    result = await runner.run_test(
-        workflow_id=wf_id,
-        input_data={},
-        mock=False,
-    )
+    chat_mock = AsyncMock(return_value=LLMResponse(content="real output", model="mock"))
+    with patch.object(llm_service, "chat", chat_mock):
+        result = await runner.run_test(
+            workflow_id=wf_id,
+            input_data={},
+            mock=False,
+        )
 
-    # Real mode still works — _TestWorker just produces different canned text
     assert result.status == "completed"
     assert len(result.nodes) >= 2
+    # Every conversation node invoked the LLM and emitted its response.
+    assert chat_mock.await_count >= 2
+    for node in result.nodes:
+        assert node.status == "completed"
+        assert node.output["messages"][-1]["content"] == "real output"
+
+
+@pytest.mark.asyncio
+async def test_run_real_mode_propagates_llm_failure(db_session: AsyncSession) -> None:
+    """A failing LLM call marks the run as errored instead of faking output."""
+    from unittest.mock import AsyncMock, patch
+
+    from hecate_llm.service import llm_service
+
+    wf_id = await _create_workflow_with_dsl(db_session, LINEAR_DSL)
+    runner = WorkflowTestRunner(db_session)
+
+    with patch.object(llm_service, "chat", AsyncMock(side_effect=RuntimeError("no credentials"))):
+        result = await runner.run_test(
+            workflow_id=wf_id,
+            input_data={},
+            mock=False,
+        )
+
+    assert result.status == "error"
+    assert result.error is not None

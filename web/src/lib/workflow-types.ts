@@ -38,6 +38,7 @@ export const ChannelDefSchema = z.object({
 
 /** Node configuration properties */
 export const NodeConfigSchema = z.object({
+  name: z.string().optional(),
   model: z.string().optional(),
   system_prompt: z.string().optional(),
   tool_name: z.string().optional(),
