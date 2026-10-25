@@ -522,6 +522,8 @@ Run 观察的 REST 读取入口(`GET /api/runs/{run_id}`、`GET /api/runs/{run_i
 
 SSE 入口(`events/stream`)SHALL 在创建 `StreamingResponse` 之前完成上述两级校验:被拒请求 SHALL 返回正常 HTTP 403/404,SHALL NOT 以"HTTP 200 后发送错误事件帧"的方式呈现授权结果;建立连接之后的运行时异常处理 SHALL 保持既有行为。事件读取路径的 outbox relay 投影(`_pump_events`)SHALL 发生在 Run 资源校验之后——被拒请求 SHALL NOT 触发 relay、产生任何状态变化或存储写入。
 
+已建立的 SSE 流 SHALL 持续遵守调用方的当前身份、VIEWER 门槛与 Run/父 Task 可见性,而非连接时刻的冻结事实:服务 SHALL 以原 Bearer 凭据复用既有认证链(`authenticate_bearer`),并通过短生命周期新会话读取当前认证与资源事实;重新认证 SHALL 绑定原 user、org、认证方式、scope 与流所属 workspace,SHALL NOT 因重新解析而切换流的租户或权限范围。检查间隔 SHALL 为 `RECHECK_INTERVAL_SECONDS`(默认 5 秒),单次复核 SHALL 受 `RECHECK_TIMEOUT_SECONDS`(默认 5 秒)约束;事实新鲜度从复核开始时刻计算,不得因慢查询重新延长有效期。已到期复核完成前 SHALL NOT 继续发送内容,同批次逐条发送及终态探测也 SHALL 遵守该门槛;在途读取或网络发送不能撤回,下一操作须复核。读取事件或触发 relay 投影之前、发送已取得批次之前按到期执行必要检查,空闲流也在同一节奏上检查;检查失败(基础设施故障)SHALL 拒绝继续读取并以安全 500 结束,SHALL NOT 泄露故障详情。复核发现撤权后 SHALL 停止读取、relay 与发送受保护内容。首次认证的事务 SHALL 在建流前释放,避免 API key 使用记录更新阻塞后续复核;周期复核 SHALL 不提交认证簿记更新。终止以仅含状态码的 `event: error` 帧表达并随帧关闭连接:认证失效(凭据过期/撤销、用户停用、成员移除、角色声明失配)为 401,workspace 归属失配或角色低于 VIEWER 为 403,Run/父 Task 不可见为统一 404。关闭观察 SHALL NOT 取消或唤醒执行中的 Run。
+
 VIEWER、EDITOR 与 ADMIN 的成功响应结构、动作字段白名单、事件游标分页、SSE 终态语义与断线续读语义 SHALL 与门槛引入前完全一致。缺 workspace 的非 system 身份 SHALL 维持既有 403 `NO_WORKSPACE` 拒绝,SHALL NOT 退化为全局查询;显式 system-scope 身份的既有行为 SHALL 保持不变,SHALL NOT 因本门槛获得或失去跨 workspace 读取能力。
 
 #### Scenario: 跨 workspace Run 观察表现为不存在
@@ -548,6 +550,41 @@ VIEWER、EDITOR 与 ADMIN 的成功响应结构、动作字段白名单、事件
 
 - **WHEN** 未通过可见性或角色校验的调用方请求 `events/stream`
 - **THEN** 响应为正常 HTTP 403/404,SHALL NOT 返回 200 或任何 SSE 事件帧;relay 投影未被触发
+
+#### Scenario: 建流后凭据失效关闭流
+
+- **WHEN** SSE 流建立后调用方的 API key 被停用或撤销、JWT 过期、用户被停用、workspace 成员被移除或角色声明因降级失配
+- **THEN** 流在明确的检查窗口内以 `event: error` 帧(仅含 `{"code": 401}`)结束并关闭连接,已缓冲未发送的内容被丢弃,此后不再读取事件或触发 relay 投影
+
+#### Scenario: 建流后资源失效关闭流
+
+- **WHEN** SSE 流建立后 Run 或其父 Task 被软删除
+- **THEN** 流以 `event: error` 帧(仅含 `{"code": 404}`)结束并关闭,不区分具体情形
+
+#### Scenario: 空闲流也检查
+
+- **WHEN** SSE 流空闲(没有新事件)期间调用方访问被撤回
+- **THEN** 流仍按检查节奏以对应的错误帧结束,无需等待新事件
+
+#### Scenario: 已取得批次在发送前复核
+
+- **WHEN** 一批事件已被读取、发送前复核发现撤权
+- **THEN** 该批次未发送内容被丢弃,流以错误帧结束,SHALL NOT 继续发送已取得内容或触发 relay 投影
+
+#### Scenario: 角色降级不额外限制观察
+
+- **WHEN** 调用方使用与当前 VIEWER 成员角色一致的凭据建立或保持流
+- **THEN** 流继续观察(VIEWER 仍为观察门槛);降级前 EDITOR 声明的旧凭据仍按认证链既有规则失效,不能在既有连接上更换凭据
+
+#### Scenario: 检查故障安全结束
+
+- **WHEN** 复核检查自身发生基础设施故障
+- **THEN** 流以 `event: error` 帧(仅含 `{"code": 500}`)结束,故障详情、凭据与异常正文不出现在帧中,且不再继续读取
+
+#### Scenario: 客户端断连清理观察
+
+- **WHEN** SSE 客户端断开连接
+- **THEN** 服务端清理上游事件生成器与轮询;执行中的 Run 不被取消或唤醒,后续请求正常服务
 
 #### Scenario: 拒绝请求不触发 relay
 

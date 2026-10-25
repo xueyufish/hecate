@@ -69,6 +69,8 @@ def load_entry_point_providers(gate: Callable[[], bool] | None = None) -> list[A
 async def resolve_auth_context(
     credentials: HTTPAuthorizationCredentials,
     db: AsyncSession,
+    *,
+    raise_provider_errors: bool = False,
 ) -> AuthContext:
     """Resolve authentication context by iterating registered providers.
 
@@ -78,6 +80,8 @@ async def resolve_auth_context(
     Args:
         credentials: The HTTP Bearer credentials.
         db: Async database session.
+        raise_provider_errors: Surface provider faults to a fail-closed
+            long-lived subscriber instead of treating them as invalid credentials.
 
     Returns:
         AuthContext from the first successful provider.
@@ -94,6 +98,8 @@ async def resolve_auth_context(
                 logger.debug("Authenticated via %s provider", provider.name)
                 return ctx
         except Exception:
+            if raise_provider_errors:
+                raise
             logger.debug("Provider %s failed, trying next", provider.name, exc_info=True)
 
     raise HTTPException(

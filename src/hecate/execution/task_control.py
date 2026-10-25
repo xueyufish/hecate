@@ -188,6 +188,19 @@ class CommandIssueResult:
     detail: str | None = None
 
 
+class _NullAccessGuard:
+    """No-op stand-in so stream loops read the same with or without a guard."""
+
+    async def before_read(self) -> None:
+        pass
+
+    async def before_send(self) -> None:
+        pass
+
+    async def idle(self, poll_interval: float) -> None:
+        await asyncio.sleep(poll_interval)
+
+
 class TaskControlService:
     """Platform task control surface over the durable seams and registry."""
 
@@ -721,37 +734,61 @@ class TaskControlService:
         *,
         cursor: str | None = None,
         poll_interval: float = 0.2,
+        access_guard: Any | None = None,
     ) -> Any:
-        """Subscribe view: yield stored envelopes until the terminal event."""
+        """Subscribe view: yield stored envelopes until the terminal event.
+
+        When ``access_guard`` is supplied (an object with ``before_read``,
+        ``before_send``, and ``idle`` coroutines — see
+        :class:`hecate.execution.run_stream_guard.PeriodicAccessGuard`), the
+        loop re-verifies the caller's access before each event read and
+        relay projection, before relaying a batch it just obtained, and on
+        the idle cadence; a failing check raises through and ends the
+        stream. The guard runs inside this generator so a revocation ends
+        the stream at a safe await point instead of cancelling an in-flight
+        read.
+        """
+        guard = access_guard if access_guard is not None else _NullAccessGuard()
+        await guard.before_read()
         run = await self.assert_run_observable(workspace_id=workspace_id, run_id=run_id)
         if run.projection.get("entry_name"):
             from hecate.contracts.execution.events import EventKind
 
             current = cursor
             while True:
+                await guard.before_read()
                 page = await self.read_run_events(workspace_id, run_id, cursor=current)
+                await guard.before_send()
                 for envelope in page.events:
+                    # Each yield can suspend on client backpressure for
+                    # longer than the access window, even within one page.
+                    await guard.before_send()
                     yield envelope
                     current = str(envelope.source_sequence)
                     if envelope.kind is EventKind.TERMINAL:
                         return
                 if not page.has_more:
+                    await guard.before_read()
                     await self._db.refresh(run)
                     if run.projection.get("state") in _TERMINAL_LIFECYCLE_STATES:
                         return
-                await asyncio.sleep(poll_interval)
+                await guard.idle(poll_interval)
         run_ref = run_row_ref(run)
         events = PlatformEventService(self._db)
         current = cursor
         while True:
+            await guard.before_read()
             page = await events.read_run_events(run_ref, workspace_id=workspace_id, cursor=current)
+            await guard.before_send()
             for envelope in page.events:
+                await guard.before_send()
                 yield envelope
                 current = str(envelope.source_sequence)
                 if envelope.payload_schema_ref == RUN_TERMINAL:
                     return
             # Everything stored has been consumed: stop only when the newest
             # envelope is the terminal marker, otherwise keep polling.
+            await guard.before_read()
             latest = await events.latest_run_envelope(run_ref, workspace_id=workspace_id)
             if (
                 latest is not None
@@ -759,7 +796,7 @@ class TaskControlService:
                 and (current is None or latest.source_sequence <= int(current))
             ):
                 return
-            await asyncio.sleep(poll_interval)
+            await guard.idle(poll_interval)
 
     # ------------------------------------------------------------------
     # control commands

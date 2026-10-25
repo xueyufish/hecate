@@ -87,7 +87,9 @@ def _env_system_context() -> AuthContext:
     )
 
 
-async def authenticate_bearer(token: str | None, db: AsyncSession) -> AuthContext | None:
+async def authenticate_bearer(
+    token: str | None, db: AsyncSession, *, raise_provider_errors: bool = False
+) -> AuthContext | None:
     """Resolve a raw bearer token through the shared provider chain.
 
     Single source of truth for bearer authentication, shared by the
@@ -95,6 +97,9 @@ async def authenticate_bearer(token: str | None, db: AsyncSession) -> AuthContex
     middleware: registered providers (JWT, database API key) first,
     then env bootstrap keys. Returns None when nothing accepts the
     token — callers decide the error surface (401 response etc.).
+    Long-lived subscribers may opt into ``raise_provider_errors`` to
+    distinguish a failed verification from a revoked credential; existing
+    request authentication keeps its provider-fallback behavior.
     """
     if not token:
         return None
@@ -102,9 +107,10 @@ async def authenticate_bearer(token: str | None, db: AsyncSession) -> AuthContex
     _ensure_providers()
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
     try:
-        return await resolve_auth_context(credentials, db)
-    except HTTPException:
-        pass
+        return await resolve_auth_context(credentials, db, raise_provider_errors=raise_provider_errors)
+    except HTTPException as exc:
+        if raise_provider_errors and exc.status_code != status.HTTP_401_UNAUTHORIZED:
+            raise
 
     return await _resolve_env_api_key(token)
 
