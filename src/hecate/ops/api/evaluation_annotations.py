@@ -45,6 +45,13 @@ write boundary: the item resolves through the item read boundary first
 and parent-child workspace consistency before the role check), then an
 editor floor applies and the write runs in the item's real workspace with
 the service rechecking the path binding before any mutation.
+
+Dataset backflow sits behind the same write boundary: the queue and any
+explicit target dataset resolve before the editor floor, and the
+backflow runs in the queue's real workspace — dataset resolution and
+creation, item selection, the projected trace, and the embedded human
+labels stay inside that workspace, and the service rechecks the queue's
+live state before materializing anything.
 """
 
 from __future__ import annotations
@@ -73,10 +80,12 @@ from hecate.models.evaluation import (
     AnnotationQueueModel,
     AnnotationQueueReadSchema,
     AnnotationQueueUpdateSchema,
+    EvaluationDatasetModel,
     EvaluationTaskModel,
 )
 from hecate.ops.api.evaluation import _forbidden, _no_workspace
 from hecate.ops.evaluation.annotation import (
+    AnnotationDatasetNotFoundError,
     AnnotationItemStateError,
     AnnotationQueueItemNotFoundError,
     AnnotationQueueNotFoundError,
@@ -592,18 +601,47 @@ async def push_to_dataset(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Materialize completed annotated items into an evaluation dataset."""
+    """Materialize completed annotated items into an evaluation dataset.
+
+    Scoped behind the annotation write boundary: the queue and any explicit
+    target dataset resolve first (ownership before role), then an editor
+    floor applies and the backflow runs in the queue's real workspace —
+    dataset resolution and creation, item selection, the projected trace,
+    and the embedded human labels all stay inside that workspace.
+    """
+    try:
+        queue = await _get_queue_for_read(ctx, queue_id, db)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_404_NOT_FOUND:
+            raise
+        raise _not_found("Annotation queue or dataset not found") from exc
+    if data.dataset_id is not None:
+        dataset = (
+            await db.execute(
+                select(EvaluationDatasetModel.id).where(
+                    EvaluationDatasetModel.id == data.dataset_id,
+                    EvaluationDatasetModel.workspace_id == queue.workspace_id,
+                    ~EvaluationDatasetModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if dataset is None:
+            raise _not_found("Annotation queue or dataset not found")
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
         result = await svc.push_to_dataset(
             queue_id,
-            workspace_id=ctx.workspace_id,
+            workspace_id=queue.workspace_id,
             dataset_id=data.dataset_id,
             dataset_name=data.dataset_name,
             item_ids=data.item_ids,
         )
-    except AnnotationQueueNotFoundError as exc:
-        raise _not_found("Annotation queue not found") from exc
+    except (AnnotationQueueNotFoundError, AnnotationDatasetNotFoundError) as exc:
+        raise _not_found("Annotation queue or dataset not found") from exc
     except AnnotationValidationError as exc:
         raise _validation_error(str(exc)) from exc
     return {

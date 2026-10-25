@@ -63,6 +63,10 @@ class AnnotationQueueItemNotFoundError(LookupError):
     """Queue item with the given id does not exist in the workspace."""
 
 
+class AnnotationDatasetNotFoundError(LookupError):
+    """The backflow target dataset is unavailable in the queue's workspace."""
+
+
 class AnnotationValidationError(ValueError):
     """Queue/annotation payload violates a validation rule."""
 
@@ -815,21 +819,14 @@ class AnnotationService:
             "suggestions": suggestions,
         }
 
-    async def _load_trace(self, target_id: uuid.UUID) -> Any | None:
-        from hecate.models.trace import TraceModel
-
-        result = await self.db.execute(select(TraceModel).where(TraceModel.id == target_id, ~TraceModel.deleted))
-        return result.scalar_one_or_none()
-
     async def _visible_trace(self, target_id: uuid.UUID, workspace_id: uuid.UUID) -> Any | None:
         """A trace visible to the workspace for review reads.
 
         Read-side tenant scope mirrors the traces API and ``_workspace_trace``:
         the trace's session OR its agent belongs to the workspace (orphan
-        traces are invisible). Unlike ``_load_trace`` — which backs the
-        dataset backflow write path — this never returns a trace outside the
-        workspace, so callers keep missing-context semantics for foreign
-        targets.
+        traces are invisible). Backflow uses ``_workspace_trace`` to require
+        a completed root trace as well; review reads keep missing-context
+        semantics for foreign targets without imposing that lifecycle filter.
         """
         from hecate.models.agent import AgentModel
         from hecate.models.trace import TraceModel
@@ -909,7 +906,10 @@ class AnnotationService:
 
         Idempotent per dataset: a trace already present (matched via
         ``metadata_.annotation.trace_id``) is skipped. Items without a
-        projection (no complete user→assistant exchange) are skipped too.
+        projection (no complete user→assistant exchange) are skipped too,
+        as are items without completed human trace scores or a visible,
+        completed root trace. The projection and the embedded human labels
+        only ever draw from that workspace.
         """
         if (dataset_id is None) == (dataset_name is None):
             raise AnnotationValidationError("exactly one of dataset_id or dataset_name is required")
@@ -937,22 +937,25 @@ class AnnotationService:
         )
 
         materialized_trace_ids = await self._dataset_trace_ids(dataset.id)
-        event_store = await self._get_event_store()
-
         created, skipped = 0, 0
         for item in items:
-            if str(item.target_id) in materialized_trace_ids:
+            if item.target_type != "trace" or str(item.target_id) in materialized_trace_ids:
                 skipped += 1
                 continue
-            trace = await self._load_trace(item.target_id)
+            trace = await self._workspace_trace(item.target_id, workspace_id)
             if trace is None or trace.session_id is None:
                 skipped += 1
                 continue
-            eval_input = await build_eval_input(trace.session_id, trace.start_time, trace.end_time, event_store)
+            labels = await self._human_labels(item.target_id, workspace_id)
+            if not labels:
+                skipped += 1
+                continue
+            eval_input = await build_eval_input(
+                trace.session_id, trace.start_time, trace.end_time, await self._get_event_store()
+            )
             if eval_input is None:
                 skipped += 1
                 continue
-            labels = await self._human_labels(item.target_id)
             self.db.add(
                 EvaluationItemModel(
                     dataset_id=dataset.id,
@@ -992,7 +995,7 @@ class AnnotationService:
                 )
             ).scalar_one_or_none()
             if dataset is None:
-                raise AnnotationValidationError(f"dataset {dataset_id} not found in workspace")
+                raise AnnotationDatasetNotFoundError("Annotation queue or dataset not found")
             return dataset
         dataset = (
             await self.db.execute(
@@ -1016,12 +1019,20 @@ class AnnotationService:
         # by the automated backflow path (7.2d) blocks a duplicate here too.
         return await dataset_trace_ids(self.db, dataset_id)
 
-    async def _human_labels(self, target_id: uuid.UUID) -> list[dict[str, Any]]:
+    async def _human_labels(self, target_id: uuid.UUID, workspace_id: uuid.UUID) -> list[dict[str, Any]]:
+        """The target's completed human trace scores in one workspace, oldest first.
+
+        Workspace-scoped like the ledger upsert: human rows of the same
+        target in other workspaces must never be embedded as labels.
+        """
         rows = await self.db.execute(
             select(EvaluationTaskScoreModel)
             .where(
                 EvaluationTaskScoreModel.target_id == target_id,
+                EvaluationTaskScoreModel.target_type == "trace",
+                EvaluationTaskScoreModel.workspace_id == workspace_id,
                 EvaluationTaskScoreModel.source == _HUMAN_SOURCE,
+                EvaluationTaskScoreModel.status == TaskScoreStatus.COMPLETED.value,
                 ~EvaluationTaskScoreModel.deleted,
             )
             .order_by(EvaluationTaskScoreModel.created_at.asc())
@@ -1040,6 +1051,7 @@ class AnnotationService:
 
 
 __all__ = [
+    "AnnotationDatasetNotFoundError",
     "AnnotationItemStateError",
     "AnnotationQueueItemNotFoundError",
     "AnnotationQueueNotFoundError",
