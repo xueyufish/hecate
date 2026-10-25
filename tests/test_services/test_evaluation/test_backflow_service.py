@@ -27,6 +27,7 @@ from hecate.models.session import SessionModel
 from hecate.models.trace import TraceModel
 from hecate.ops.evaluation.annotation import AnnotationService
 from hecate.ops.evaluation.backflow import (
+    BackflowReferenceNotFoundError,
     BackflowRuleNotFoundError,
     BackflowService,
     BackflowValidationError,
@@ -188,13 +189,13 @@ class TestRuleCrud:
     async def test_reject_unknown_task(self, db_session: AsyncSession) -> None:
         dataset = await _seed_dataset(db_session)
         svc = BackflowService(db_session)
-        with pytest.raises(BackflowValidationError, match="not found"):
+        with pytest.raises(BackflowReferenceNotFoundError, match="not found"):
             await svc.create_rule(_rule_data(uuid.uuid4(), dataset.id), workspace_id=_WS)
 
     async def test_reject_unknown_dataset(self, db_session: AsyncSession) -> None:
         task = await _seed_online_task(db_session)
         svc = BackflowService(db_session)
-        with pytest.raises(BackflowValidationError, match="not found"):
+        with pytest.raises(BackflowReferenceNotFoundError, match="not found"):
             await svc.create_rule(_rule_data(task.id, uuid.uuid4()), workspace_id=_WS)
 
     @pytest.mark.parametrize(
@@ -262,6 +263,7 @@ class TestRunSelection:
         assert result["created"] == 1 and result["skipped"] == 0 and result["dataset_id"] == dataset.id
         items = await _dataset_items(db_session, dataset.id)
         assert len(items) == 1 and items[0].query == "what is X?"
+        assert items[0].workspace_id == _WS
 
     async def test_error_sentinel_never_matches(self, db_session: AsyncSession) -> None:
         task, dataset = await _seed_online_task(db_session), await _seed_dataset(db_session)
