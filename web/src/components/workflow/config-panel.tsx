@@ -70,7 +70,12 @@ export function ConfigPanel({
 
   function handleChange(field: string, value: unknown) {
     const newConfig = { ...config, [field]: value };
-    onUpdate(node!.id, { ...node!.data, config: newConfig });
+    const newData = { ...node!.data, config: newConfig };
+    // Keep the canvas label in sync when the display name changes.
+    if (field === "name") {
+      newData.label = (value as string) || newData.label;
+    }
+    onUpdate(node!.id, newData);
   }
 
   function handleChannelsChange(updated: {
@@ -101,6 +106,18 @@ export function ConfigPanel({
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div>
+          <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            Name
+          </label>
+          <input
+            type="text"
+            className="w-full rounded-md border px-3 py-1.5 text-sm"
+            value={(config.name as string) || ""}
+            onChange={(e) => handleChange("name", e.target.value)}
+            placeholder="Node display name"
+          />
+        </div>
         {node.type === "conversation" && (
           <>
             <div>

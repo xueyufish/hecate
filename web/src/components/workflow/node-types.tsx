@@ -1,6 +1,7 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect } from "react";
+import { Handle, Position, useStoreApi } from "@xyflow/react";
 import {
   Bot,
   Compass,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 
 interface NodeProps {
+  id: string;
   data: {
     label: string;
     type: string;
@@ -177,20 +179,48 @@ export const EndNode = memo(function EndNode() {
 });
 
 function WorkflowNodeBase({
+  id,
   data,
   typeKey,
   children,
 }: NodeProps & { typeKey: string; children?: React.ReactNode }) {
   const style = TYPE_STYLES[typeKey] || TYPE_STYLES["conversation"];
+  // Measure handles synchronously on mount. React Flow's own update path
+  // schedules work via requestAnimationFrame and ResizeObserver, neither of
+  // which fires in embedded webviews — without this, handle bounds stay null
+  // and every edge touching custom nodes is silently dropped. The canvas
+  // wrapper's ref may not be set yet when child effects run, so retry briefly.
+  const store = useStoreApi();
+  useEffect(() => {
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const measure = () => {
+      const { domNode, updateNodeInternals } = store.getState();
+      const nodeElement = domNode?.querySelector(`.react-flow__node[data-id="${id}"]`);
+      if (nodeElement) {
+        updateNodeInternals(new Map([[id, { id, nodeElement, force: true }]]), { triggerFitView: false });
+        return;
+      }
+      if (attempts++ < 20) {
+        timer = setTimeout(measure, 150);
+      }
+    };
+    measure();
+    return () => clearTimeout(timer);
+  }, [id, store]);
   return (
     <div
       className={`min-w-[140px] rounded-md border px-3 py-2 shadow-sm ${style.bg} ${style.border}`}
     >
+      {/* Handles give edges anchor points; without them React Flow drops
+          all edges touching custom nodes, hiding the graph topology. */}
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-400" />
       <div className="flex items-center gap-2">
         {style.icon}
         <span className="text-sm font-medium">{data.label}</span>
       </div>
       {children}
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-slate-400" />
     </div>
   );
 }

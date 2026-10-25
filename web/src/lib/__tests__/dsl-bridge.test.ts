@@ -31,14 +31,16 @@ describe("dslToReactFlow", () => {
     expect(edges[0].target).toBe("end");
   });
 
-  it("assigns grid positions based on node order", () => {
+  it("assigns flow-ordered positions by graph depth from entry", () => {
     const dsl = makeDsl();
     const { nodes } = dslToReactFlow(dsl);
 
-    // First node: index 0 → x=0, y=0
-    expect(nodes[0].position).toEqual({ x: 0, y: 0 });
-    // Second node: index 1 → x=250, y=0
-    expect(nodes[1].position).toEqual({ x: 250, y: 0 });
+    // Entry node: depth 0 → x=0, y=0
+    const start = nodes.find((n) => n.id === "start");
+    expect(start?.position).toEqual({ x: 0, y: 0 });
+    // Downstream node: depth 1 → next column, same row (single node per layer)
+    const end = nodes.find((n) => n.id === "end");
+    expect(end?.position).toEqual({ x: 280, y: 0 });
   });
 
   it("uses system_prompt as node label when present", () => {

@@ -104,3 +104,33 @@ class TestResolver:
         providers = get_registered_providers()
         assert len(providers) == 2
         assert providers[0].name == "jwt"
+
+
+async def test_provider_fault_fallback_is_unchanged_for_ordinary_requests(db_session) -> None:
+    """Only the SSE verifier opts out of fallback after a provider fault."""
+    import uuid
+
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    from hecate.core.deps_workspace import authenticate_bearer
+
+    class _FailingProvider(_MockProvider):
+        async def authenticate(self, token: str, db: object) -> AuthContext | None:
+            """Simulate a provider outage before the next provider accepts."""
+            raise RuntimeError("provider unavailable")
+
+    ctx = AuthContext(
+        user_id=uuid.uuid4(),
+        org_id=None,
+        workspace_id=None,
+        role=None,
+        auth_method="api_key",
+        api_key_scope="system",
+    )
+    register_auth_providers(_FailingProvider("broken", None), _MockProvider("accepted", ctx))
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="token")
+    assert await resolve_auth_context(credentials, db_session) == ctx
+    assert await authenticate_bearer("token", db_session) == ctx
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await authenticate_bearer("token", db_session, raise_provider_errors=True)
+    assert await authenticate_bearer("token", db_session) == ctx

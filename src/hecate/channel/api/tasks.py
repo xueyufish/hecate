@@ -11,7 +11,10 @@ Task lifecycle surface over :class:`TaskControlService`:
 - ``GET /api/runs/{run_id}/actions`` — scoped action-ledger summaries.
 - ``GET /api/runs/{run_id}/events`` — cursor-paginated event reads;
   ``GET /api/runs/{run_id}/events/stream`` — the SSE subscribe view on
-  the same stream (resume by cursor after a disconnect).
+  the same stream (resume by cursor after a disconnect). An established
+  stream keeps re-verifying the caller's identity, VIEWER floor, and
+  run/task visibility on a bounded interval (idle streams included) and
+  ends with a code-only ``event: error`` frame once revoked.
 - ``POST /api/tasks/{id}/commands`` / ``POST /api/tasks/{id}/cancel`` /
   ``GET /api/commands/{command_id}`` — control-command receipts. An HTTP
   success here records a request; it never claims the command was
@@ -33,6 +36,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +49,7 @@ from hecate.core.deps_workspace import (
     WorkspaceRoleRequiredError,
     ensure_workspace_role,
     get_auth_context,
+    security_scheme,
 )
 
 if TYPE_CHECKING:
@@ -493,20 +498,62 @@ async def stream_run_events(
     run_id: uuid.UUID,
     service: ServiceDep,
     ctx: AuthDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     cursor: Annotated[str | None, Query()] = None,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)] = None,
 ) -> StreamingResponse:
-    """SSE subscribe view over the durable run event stream."""
-    # The gate completes before the stream is created: authorization
-    # failures surface as normal HTTP 403/404, never as 200 + error frames.
+    """SSE subscribe view over the durable run event stream.
+
+    The gate completes before the stream is created: authorization
+    failures surface as normal HTTP 403/404, never as 200 + error frames.
+    Once established, the stream keeps honoring the caller's current
+    access facts: the original Bearer credential is replayed through the
+    shared auth chain and the run/task visibility is re-derived on a
+    short-lived session at least once per recheck interval — including on
+    idle streams — before each event read and relay projection, and
+    before relaying a batch the loop already obtained. A revocation
+    (expired or revoked credential, removed membership, role below
+    viewer, deleted or invisible run/task) ends the stream with the
+    ``event: error`` frame carrying only the mapped status code
+    (401/403/404; 500 when the check itself fails); already buffered
+    envelopes are dropped instead of relayed. Closing the observation
+    never cancels or wakes the executing run.
+    """
     workspace_id = await _run_read_gate(ctx, service, run_id)
+    # API-key authentication flushes last_used_at. Release that request
+    # transaction before a fresh recheck tries to touch the same key;
+    # otherwise the long-lived stream holds its own verifier's row lock.
+    await db.commit()
+    token = credentials.credentials if credentials is not None else None
 
     async def event_source():
+        from hecate.execution.run_stream_guard import (
+            RECHECK_INTERVAL_SECONDS,
+            PeriodicAccessGuard,
+            RunStreamAccessError,
+            recheck_stream_access,
+        )
+
+        async def recheck() -> None:
+            await recheck_stream_access(token=token, bound_ctx=ctx, workspace_id=workspace_id, run_id=run_id)
+
+        guard = PeriodicAccessGuard(recheck, RECHECK_INTERVAL_SECONDS)
+        stream = service.stream_run_events(workspace_id, run_id, cursor=cursor, access_guard=guard)
         try:
-            async for envelope in service.stream_run_events(workspace_id, run_id, cursor=cursor):
+            async for envelope in stream:
                 yield f"data: {json.dumps(envelope.to_dict())}\n\n"
+        except RunStreamAccessError as exc:
+            # Revocation: a code-only frame; never the reason or any
+            # buffered-but-unrelayed content.
+            yield f"event: error\ndata: {json.dumps({'code': exc.status_code})}\n\n"
         except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
             detail = _map_service_error(exc)
             yield f"event: error\ndata: {json.dumps({'code': detail.status_code})}\n\n"
+        finally:
+            # Client disconnect or terminal end: close the upstream
+            # generator so nothing keeps polling. Closing the observation
+            # never touches the executing run itself.
+            await stream.aclose()
 
     return StreamingResponse(event_source(), media_type="text/event-stream")
 
