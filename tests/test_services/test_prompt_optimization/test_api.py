@@ -79,7 +79,7 @@ async def test_create_run_returns_202_and_persists_created_row(
         def __init__(self, db) -> None:
             pass
 
-        async def run_in_background(self, run_id) -> None:
+        async def run_in_background(self, run_id, *, workspace_id=None) -> None:
             spawned.append(str(run_id))
 
     monkeypatch.setattr("hecate.ops.api.prompt_optimization.PromptOptimizationRunner", StubRunner)

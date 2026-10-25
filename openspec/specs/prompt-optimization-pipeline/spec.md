@@ -7,6 +7,10 @@ Orchestrates evaluation-dataset-driven prompt self-optimization runs: validates 
 ### Requirement: Optimization run creation and config validation
 The system SHALL expose an endpoint to create a prompt optimization run for a workspace-scoped prompt. The run config SHALL include: `prompt_id`, optional `base_version` (defaults to the prompt's current version), `agent_id` (the agent under test — the rollout vehicle whose invocation the candidate templates are injected into), `dataset_id` with a pinned `dataset_version`, a train/validation split ratio, an evaluator set with a designated `primary_metric`, an improvement threshold (`min_improvement`), a regression tolerance (`max_regression`), a budget preset (`light` / `medium` / `heavy`) or explicit caps (`max_rounds`, `max_llm_calls`), and an optional reflection model override. Creation SHALL be rejected with 404/400 when: the prompt, agent, or dataset version does not exist in the workspace, the split ratio is invalid, or the primary metric is not produced by the evaluator set. Creation SHALL be rejected with 409 when another active run already exists for the same prompt.
 
+All endpoints SHALL sit behind the evaluation access boundary: every identity — system scope included — SHALL hold an active workspace (an explicit zero-UUID workspace stays legal; otherwise 403 `NO_WORKSPACE` before any query), non-system callers SHALL hold at least the editor role to create or cancel and at least the viewer role to read, checked after resource visibility and before any business query, config validation, conflict probe, or background dispatch. Creation SHALL validate the full input binding: prompt, base prompt version, agent, dataset, and pinned dataset version must all be live in the workspace and bound to each other — the base version must belong to the prompt and the dataset version to the dataset; a bare version id, or a version that merely matches the workspace, is never sufficient. By-id reads and writes SHALL resolve visibility with a minimal query first — missing, foreign, and soft-deleted runs share one 404 that leaks neither the reason nor any evidence. The background runner SHALL re-verify the run (never executing a deleted run) and every input reference on its fresh session before consuming templates, samples, agents, or model calls; invalid sources stop the run safely with zero model calls, zero rollouts, and no cross-workspace writes.
+
+Visibility checks SHALL select only identifiers and ownership metadata; full run configuration and candidate evidence SHALL NOT be loaded before the role decision. Input lookups and authorized listings SHALL use current database values rather than stale identity-map attributes. Background dispatch SHALL retain the workspace admitted by the API; a run moved out of that workspace before startup SHALL remain unmodified and SHALL NOT execute. The runner SHALL check the feature flag at startup, scope the actual template and sample reads to their live parents and workspace, verify the pinned dataset version hash, and recheck sources before each rollout. Startup validation SHALL NOT authorize a subsequent bare-ID read of a source that changed ownership.
+
 #### Scenario: Valid run creation
 - **WHEN** a run is created with an existing prompt, a pinned dataset version, evaluators producing the primary metric, and the `medium` budget preset
 - **THEN** the run is persisted with status `created`, the dataset version hash is recorded, and the endpoint returns the run id
@@ -18,6 +22,18 @@ The system SHALL expose an endpoint to create a prompt optimization run for a wo
 #### Scenario: Concurrent active run for the same prompt
 - **WHEN** a run is created for a prompt that already has a run in status `created` or `running`
 - **THEN** creation is rejected with 409
+
+#### Scenario: Workspace and role floors precede business work
+- **WHEN** a workspace-less identity — system scope included — calls any prompt-optimization endpoint, or a member below the entry's role floor calls it after visibility
+- **THEN** the response is 403 `NO_WORKSPACE` / 403 `FORBIDDEN` respectively, before any business query, validation, conflict probe, dispatch, or evidence read, and no facts change
+
+#### Scenario: Incomplete input binding is rejected
+- **WHEN** creation names a prompt, base version, agent, dataset, or dataset version that is missing, soft-deleted, foreign to the workspace, or not bound to its parent
+- **THEN** missing, soft-deleted, or foreign resources return 404; a mismatched dataset/version pair whose two resources are both visible retains its existing 400; no run row is persisted
+
+#### Scenario: Background execution re-verifies its sources
+- **WHEN** the background runner starts on a fresh session and the run was deleted, or its prompt, base version, dataset, pinned dataset version, or agent is no longer live in the run's workspace or no longer bound
+- **THEN** the run stops safely without executing: zero model calls, zero rollouts, no candidates, and no writes outside the workspace
 
 ### Requirement: Feature flag gating
 Prompt optimization endpoints and run execution SHALL be gated behind the `PROMPT_OPTIMIZATION_ENABLED` feature flag, default off. When the flag is off, run creation and mutation endpoints SHALL return 404, and no scheduled or background optimization work SHALL start.
