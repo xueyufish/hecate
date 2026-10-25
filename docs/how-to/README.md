@@ -27,6 +27,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Configure backup and recovery](deploy-production.md#backup-and-recovery)** — scheduled backups, verification, and restore.
 - **[Monitor with OpenTelemetry and Prometheus](monitor-opentelemetry.md)** — distributed tracing, Prometheus metrics, structured logging, Kubernetes-style health probes, and trace inspection.
 - **[Scale horizontally](deploy-production.md#horizontal-scaling)** — Redis session state store, multi-replica deployment.
+- **[Cancel a task](task-cancellation.md)** — request task cancellation from the ops console, read the five receipt states, retry safely with a stable command id, and know what cancellation cannot promise.
 
 ## Versioning and lifecycle
 

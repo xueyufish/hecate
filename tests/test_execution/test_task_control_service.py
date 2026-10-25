@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from hecate.contracts.execution.durable import CommandState, ControlCommandKind, TaskLifecycleState
@@ -278,6 +278,59 @@ async def test_submit_conflicting_replay_rejected(harness):
             await _submit(harness, db, service, idempotency_key="key-2", goal="first goal", wait=True)
             with pytest.raises(SubmissionConflictError):
                 await _submit(harness, db, service, idempotency_key="key-2", goal="different goal", wait=True)
+    finally:
+        stub.unpatch()
+
+
+async def test_task_detail_projects_revision_from_durable_state(harness, monkeypatch):
+    """The detail revision comes from the durable record read, never a guess.
+
+    A submitted task carries its recorded revision so revision-bound commands
+    can pin the page state; a platform task with no durable record projects
+    ``None`` and callers must refuse to submit rather than invent one.
+    """
+    import hecate.execution.task_control as task_control_module
+
+    # Keep the submitted task queued (no background dispatch contention).
+    monkeypatch.setattr(task_control_module, "_spawn_background", lambda coro: coro.close())
+    stub = _EntryStub()
+    stub.patch()
+    try:
+        async with harness["session_factory"]() as db:
+            service = _service(harness, db)
+            submitted = await _submit(harness, db, service)
+            detail = await service.get_task_detail(WS, uuid.UUID(submitted.task_ref.id))
+            assert detail["lifecycle_state"] == "queued"
+            assert isinstance(detail["revision"], int)
+            assert detail["revision"] >= 0
+
+            from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
+            from hecate.contracts.execution.references import deployment_ref
+            from hecate.execution.task_run_registry import TaskRunRegistry
+
+            deployment_id = (
+                await db.execute(select(AgentDeploymentModel.id).where(AgentDeploymentModel.workspace_id == WS))
+            ).scalar_one()
+            chain = IdentityChain(
+                initiator=str(OWNER),
+                principal_id=str(harness["agent_id"]),
+                workload=WorkloadIdentity(
+                    deployment=deployment_ref("hecate", str(deployment_id)),
+                    workload_id="hecate:revision-projection",
+                ),
+                audience="hecate:test",
+            )
+            orphan = await TaskRunRegistry(db).create_task(
+                goal="no durable record",
+                initiator_ref=chain.to_dict(),
+                workspace_id=WS,
+            )
+            # The seam store's SQLite read path takes BEGIN IMMEDIATE; close
+            # this session's flush transaction before handing control over.
+            await db.commit()
+            unrecorded = await service.get_task_detail(WS, orphan.id)
+            assert unrecorded["lifecycle_state"] == "unrecorded"
+            assert unrecorded["revision"] is None
     finally:
         stub.unpatch()
 

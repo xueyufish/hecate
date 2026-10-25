@@ -30,12 +30,36 @@ export interface TaskCommandsPage {
   total: number;
 }
 
+/** Response of POST /api/tasks/{id}/commands: the receipt the server records. */
+export interface CommandIssueResponse {
+  command_id: string;
+  kind: string;
+  state: string;
+  issued_at: string;
+  issuer: string;
+  task_ref: CommandBackendRef;
+  run_ref: CommandBackendRef | null;
+  expires_at: string | null;
+  expected_revision: number | null;
+  detail?: string | null;
+}
+
 export const TASK_COMMANDS_PAGE_SIZE = 20;
 
 export const taskCommandsApi = {
   list(taskId: string, limit = TASK_COMMANDS_PAGE_SIZE, offset = 0) {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     return api.get<TaskCommandsPage>(`/api/tasks/${taskId}/commands?${params.toString()}`);
+  },
+  // The full-command endpoint (not the /cancel shorthand) so the request
+  // carries the caller's stable command_id and the page-read revision. The
+  // same id + body replays the same server command instead of minting one.
+  issueCancel(taskId: string, commandId: string, expectedRevision: number) {
+    return api.post<CommandIssueResponse>(`/api/tasks/${taskId}/commands`, {
+      kind: "cancel",
+      command_id: commandId,
+      expected_revision: expectedRevision,
+    });
   },
 };
 
@@ -56,6 +80,20 @@ export const COMMAND_STATE_LABELS: Record<string, string> = {
 export function commandStateLabel(state: string | null | undefined): string {
   if (!state) return "未记录";
   return Object.hasOwn(COMMAND_STATE_LABELS, state) ? COMMAND_STATE_LABELS[state] : state;
+}
+
+/** What each recorded receipt state actually attests — never "已生效". */
+export const COMMAND_STATE_MEANINGS: Record<string, string> = {
+  requested: "平台已记录命令；执行方尚未确认接收或应用",
+  acknowledged: "执行方已确认接收命令；不证明命令已生效",
+  applied: "执行方报告命令已实际生效；任务生命周期仍以重新查询为准",
+  rejected: "命令被拒绝（如任务已终态、版本不符或能力不支持）",
+  expired: "命令在生效前已过期",
+};
+
+export function commandStateMeaning(state: string | null | undefined): string | null {
+  if (!state) return null;
+  return Object.hasOwn(COMMAND_STATE_MEANINGS, state) ? COMMAND_STATE_MEANINGS[state] : null;
 }
 
 export const COMMAND_KIND_LABELS: Record<string, string> = {
