@@ -127,10 +127,19 @@ async def test_create_run_rejects_dataset_version_mismatch(
     prompt = seed_prompt(db_session, ws, "Answer {{q}}.", ["q"])
     agent = seed_agent(db_session, ws)
     _, version = seed_dataset_version(db_session, ws, dataset_items(4))
+    # A different but live dataset in the same workspace: the version does
+    # not belong to it, so the parent-child mismatch check must fire. A
+    # nonexistent dataset id is a plain 404 instead (covered in the
+    # boundary suite).
+    other_dataset, _ = seed_dataset_version(db_session, ws, dataset_items(4))
     await db_session.flush()
 
-    data = _create_data(prompt, agent, version, dataset_id=uuid.uuid4())
+    data = _create_data(prompt, agent, version, dataset_id=other_dataset.id)
     with pytest.raises(ValueError, match="does not match"):
+        await PromptOptimizationService(db_session).create_run(data, ws)
+
+    data = _create_data(prompt, agent, version, dataset_id=uuid.uuid4())
+    with pytest.raises(LookupError, match="[Dd]ataset"):
         await PromptOptimizationService(db_session).create_run(data, ws)
 
 

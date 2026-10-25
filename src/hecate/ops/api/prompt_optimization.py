@@ -10,7 +10,23 @@
 - ``POST   /api/prompt-optimization/candidates/{candidate_id}/reject``  — reject with reason
 
 All endpoints are gated behind ``PROMPT_OPTIMIZATION_ENABLED`` (404 when
-off) and workspace-scoped to the caller's auth context.
+off — structurally valid requests keep that behavior ahead of any
+workspace or role decision) and workspace-scoped to the caller's auth
+context.
+
+Every entry sits behind the evaluation access boundary: an active
+workspace is required for every identity — system scope included (403
+``NO_WORKSPACE``; an explicit zero-UUID workspace stays a legal value).
+Create and list check the role floor (EDITOR to create, VIEWER to read)
+before any business query, config validation, active-run conflict
+probe, or background dispatch. By-id entries resolve resource
+visibility first with a minimal query (missing, foreign, and
+soft-deleted runs/candidates — including candidates whose parent run no
+longer matches the workspace — share one 404 that leaks neither the
+reason nor any content), then apply the role floor, and only then read
+evidence, validate state, or mutate. The review service re-verifies the
+candidate→run→prompt bindings inside the write transaction, so a stale
+API precheck cannot publish to another object.
 """
 
 from __future__ import annotations
@@ -23,7 +39,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import (
+    WorkspaceRole,
+    WorkspaceRoleRequiredError,
+    ensure_workspace_role,
+    get_auth_context,
+)
 from hecate.models.prompt_optimization import (
     PromptOptimizationCandidateReadSchema,
     PromptOptimizationRejectSchema,
@@ -42,12 +63,33 @@ router = APIRouter()
 
 
 def _workspace_id(ctx: AuthContext) -> uuid.UUID:
-    return ctx.workspace_id or uuid.UUID(int=0)
+    """The caller's explicit workspace; never a silent zero-UUID default."""
+    if ctx.workspace_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": {"code": "NO_WORKSPACE", "message": "An active workspace is required", "details": None}},
+        )
+    return ctx.workspace_id
+
+
+def _require_role(ctx: AuthContext, minimum: WorkspaceRole) -> None:
+    """Server-side role floor from the resolved auth context only."""
+    try:
+        ensure_workspace_role(ctx, minimum)
+    except WorkspaceRoleRequiredError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": {"code": "FORBIDDEN", "message": e.message, "details": None}},
+        ) from e
 
 
 def _require_feature() -> None:
     if not feature_enabled():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="prompt optimization is not available")
+
+
+def _not_found(message: str) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
 
 
 @router.post("/prompt-optimization/runs", status_code=status.HTTP_202_ACCEPTED)
@@ -56,19 +98,25 @@ async def create_run(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> PromptOptimizationRunReadSchema:
-    """Validate, persist, and start an optimization run in the background."""
+    """Validate, persist, and start an optimization run in the background.
+
+    Workspace requirement and the editor floor run before any business
+    query, config validation, conflict probe, or dispatch.
+    """
     _require_feature()
+    workspace_id = _workspace_id(ctx)
+    _require_role(ctx, WorkspaceRole.EDITOR)
     service = PromptOptimizationService(db)
     try:
-        run = await service.create_run(data, _workspace_id(ctx), created_by=ctx.user_id)
+        run = await service.create_run(data, workspace_id, created_by=ctx.user_id)
     except LookupError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+        raise _not_found(str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except RunConflictError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     await db.commit()
-    await PromptOptimizationRunner(db).run_in_background(run.id)
+    await PromptOptimizationRunner(db).run_in_background(run.id, workspace_id=workspace_id)
     return PromptOptimizationRunReadSchema.model_validate(run)
 
 
@@ -80,8 +128,10 @@ async def list_runs(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict:
     _require_feature()
+    workspace_id = _workspace_id(ctx)
+    _require_role(ctx, WorkspaceRole.VIEWER)
     service = PromptOptimizationService(db)
-    rows = await service.list_runs(_workspace_id(ctx), limit=limit, prompt_id=prompt_id)
+    rows = await service.list_runs(workspace_id, limit=limit, prompt_id=prompt_id)
     items = [PromptOptimizationRunReadSchema.model_validate(row).model_dump(mode="json") for row in rows]
     return {"items": items, "total": len(items)}
 
@@ -93,9 +143,14 @@ async def get_run(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> PromptOptimizationRunReadSchema:
     _require_feature()
-    run = await PromptOptimizationService(db).get_run(run_id, _workspace_id(ctx))
+    workspace_id = _workspace_id(ctx)
+    service = PromptOptimizationService(db)
+    if not await service.is_run_visible(run_id, workspace_id):
+        raise _not_found("run not found")
+    _require_role(ctx, WorkspaceRole.VIEWER)
+    run = await service.get_run(run_id, workspace_id)
     if run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+        raise _not_found("run not found")
     return PromptOptimizationRunReadSchema.model_validate(run)
 
 
@@ -106,11 +161,16 @@ async def cancel_run(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> PromptOptimizationRunReadSchema:
     _require_feature()
-    run = await PromptOptimizationService(db).cancel_run(run_id, _workspace_id(ctx))
-    if run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
+    workspace_id = _workspace_id(ctx)
+    service = PromptOptimizationService(db)
+    if not await service.is_run_visible(run_id, workspace_id):
+        raise _not_found("run not found")
+    _require_role(ctx, WorkspaceRole.EDITOR)
+    cancelled = await service.cancel_run(run_id, workspace_id)
+    if cancelled is None:
+        raise _not_found("run not found")
     await db.commit()
-    return PromptOptimizationRunReadSchema.model_validate(run)
+    return PromptOptimizationRunReadSchema.model_validate(cancelled)
 
 
 @router.get("/prompt-optimization/runs/{run_id}/candidates")
@@ -120,10 +180,14 @@ async def list_candidates(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     _require_feature()
-    service = PromptOptimizationService(db)
-    if await service.get_run(run_id, _workspace_id(ctx)) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found")
-    rows = await CandidateReviewService(db).list_candidates(run_id, _workspace_id(ctx))
+    workspace_id = _workspace_id(ctx)
+    if not await PromptOptimizationService(db).is_run_visible(run_id, workspace_id):
+        raise _not_found("run not found")
+    _require_role(ctx, WorkspaceRole.VIEWER)
+    try:
+        rows = await CandidateReviewService(db).list_candidates(run_id, workspace_id)
+    except LookupError as e:
+        raise _not_found("run not found") from e
     items = [PromptOptimizationCandidateReadSchema.model_validate(row).model_dump(mode="json") for row in rows]
     return {"items": items, "total": len(items)}
 
@@ -135,9 +199,14 @@ async def get_candidate(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> PromptOptimizationCandidateReadSchema:
     _require_feature()
-    candidate = await CandidateReviewService(db).get_candidate(candidate_id, _workspace_id(ctx))
+    workspace_id = _workspace_id(ctx)
+    service = CandidateReviewService(db)
+    if await service.get_candidate_binding(candidate_id, workspace_id) is None:
+        raise _not_found("candidate not found")
+    _require_role(ctx, WorkspaceRole.VIEWER)
+    candidate = await service.get_candidate(candidate_id, workspace_id)
     if candidate is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="candidate not found")
+        raise _not_found("candidate not found")
     return PromptOptimizationCandidateReadSchema.model_validate(candidate)
 
 
@@ -147,12 +216,27 @@ async def approve_candidate(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
+    """Publish a pending candidate as a new unlabeled prompt version.
+
+    Approval never grants protected-label management: the created version
+    carries ``labels=[]`` and provenance metadata only. The service
+    re-verifies the candidate→run→prompt bindings inside the write
+    transaction; an invisible or inconsistent chain 404s before any
+    mutation.
+    """
     _require_feature()
+    workspace_id = _workspace_id(ctx)
     service = CandidateReviewService(db)
+    binding = await service.get_candidate_binding(candidate_id, workspace_id)
+    if binding is None:
+        raise _not_found("candidate not found")
+    _require_role(ctx, WorkspaceRole.EDITOR)
     try:
-        candidate, version = await service.approve(candidate_id, _workspace_id(ctx), decided_by=ctx.user_id)
+        candidate, version = await service.approve(
+            candidate_id, workspace_id, decided_by=ctx.user_id, expected_binding=binding
+        )
     except LookupError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+        raise _not_found("candidate not found") from e
     except CandidateReviewError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     await db.commit()
@@ -170,11 +254,18 @@ async def reject_candidate(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> PromptOptimizationCandidateReadSchema:
     _require_feature()
+    workspace_id = _workspace_id(ctx)
     service = CandidateReviewService(db)
+    binding = await service.get_candidate_binding(candidate_id, workspace_id)
+    if binding is None:
+        raise _not_found("candidate not found")
+    _require_role(ctx, WorkspaceRole.EDITOR)
     try:
-        candidate = await service.reject(candidate_id, _workspace_id(ctx), data.reason, decided_by=ctx.user_id)
+        candidate = await service.reject(
+            candidate_id, workspace_id, data.reason, decided_by=ctx.user_id, expected_binding=binding
+        )
     except LookupError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+        raise _not_found("candidate not found") from e
     except CandidateReviewError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     await db.commit()

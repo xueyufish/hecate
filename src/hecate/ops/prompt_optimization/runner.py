@@ -32,9 +32,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.models.agent import AgentModel
 from hecate.models.evaluation import (
+    EvaluationDatasetModel,
     EvaluationDatasetVersionModel,
     EvaluationRunModel,
     RunStatus,
@@ -58,6 +61,7 @@ from hecate.ops.prompt_optimization.gates import (
     metric_sources,
 )
 from hecate.ops.prompt_optimization.scanner import PromptCandidateScanner
+from hecate.ops.prompt_optimization.service import feature_enabled
 from hecate.ops.prompt_optimization.strategy import MutationStrategy, ReflectionError
 
 logger = logging.getLogger(__name__)
@@ -93,6 +97,15 @@ class _BudgetExhaustedError(Exception):
     """Internal: rollout budget ran out mid-round."""
 
 
+class _InvalidSourcesError(Exception):
+    """The run's input references are no longer valid for this workspace.
+
+    Raised before any template, sample, agent, or model consumption; the
+    run stops safely with zero model calls, zero rollouts, and no
+    cross-workspace writes.
+    """
+
+
 class PromptOptimizationRunner:
     """Execute optimization runs in the background.
 
@@ -105,21 +118,25 @@ class PromptOptimizationRunner:
     def __init__(self, db: AsyncSession | None = None) -> None:
         self.db = db
 
-    async def run_in_background(self, run_id: uuid.UUID) -> None:
+    async def run_in_background(self, run_id: uuid.UUID, *, workspace_id: uuid.UUID | None = None) -> None:
         """Spawn an asyncio task executing the run; returns immediately."""
-        asyncio.create_task(self._execute(run_id))
+        asyncio.create_task(self._execute(run_id, workspace_id=workspace_id))
 
-    async def _execute(self, run_id: uuid.UUID) -> None:
+    async def _execute(self, run_id: uuid.UUID, *, workspace_id: uuid.UUID | None = None) -> None:
         from hecate.core.database import async_session_factory  # local import — avoid circular
 
+        if not feature_enabled():
+            return
         if async_session_factory is None:
             logger.error("async_session_factory unavailable — cannot run optimization run %s", run_id)
             return
 
         async with async_session_factory() as session:
             run = await session.get(PromptOptimizationRunModel, run_id)
-            if run is None:
-                logger.error("Optimization run %s not found", run_id)
+            if run is None or run.deleted or (workspace_id is not None and run.workspace_id != workspace_id):
+                # Never execute a deleted (or missing) run — a soft delete
+                # between dispatch and startup must stop the run cold.
+                logger.warning("Optimization run %s not available — not starting", run_id)
                 return
             if run.status not in (PromptOptimizationRunStatus.CREATED.value,):
                 logger.warning("Optimization run %s in status %s — not starting", run_id, run.status)
@@ -132,6 +149,7 @@ class PromptOptimizationRunner:
             await session.flush()
 
             try:
+                await self._verify_sources(run, session)
                 stop_reason = await self._loop(run, session, usage)
                 run.usage = usage
                 if run.stop_reason == PromptOptimizationStopReason.CANCELLED.value:
@@ -140,12 +158,90 @@ class PromptOptimizationRunner:
                 run.round_count = usage.get("rounds", run.round_count)
                 await self._finalize(run, session)
                 await session.commit()
+            except _InvalidSourcesError as exc:
+                logger.warning("Optimization run %s stopped on invalid sources (%s)", run_id, exc)
+                run.status = PromptOptimizationRunStatus.FAILED.value
+                run.error = "run inputs are no longer valid"
+                run.completed_at = datetime.now(UTC)
+                await session.commit()
             except Exception:
                 logger.exception("Optimization run %s failed", run_id)
                 run.status = PromptOptimizationRunStatus.FAILED.value
                 run.error = "internal error — see logs"
                 run.completed_at = datetime.now(UTC)
                 await session.commit()
+
+    async def _verify_sources(self, run: PromptOptimizationRunModel, session: AsyncSession) -> None:
+        """Re-verify the run and every input reference on the fresh session.
+
+        Runs before any template, sample, or agent consumption: a deleted
+        or foreign prompt, base version, dataset (version), or agent stops
+        the run safely instead of consuming another workspace's sources.
+        """
+        from hecate.models.prompt import PromptModel, PromptVersionModel
+
+        prompt = (
+            await session.execute(
+                select(PromptModel.id).where(
+                    PromptModel.id == run.prompt_id,
+                    PromptModel.workspace_id == run.workspace_id,
+                    ~PromptModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if prompt is None:
+            raise _InvalidSourcesError("prompt unavailable")
+
+        base_version = (
+            await session.execute(
+                select(PromptVersionModel.id).where(
+                    PromptVersionModel.prompt_id == run.prompt_id,
+                    PromptVersionModel.version == run.base_version,
+                    PromptVersionModel.workspace_id == run.workspace_id,
+                    ~PromptVersionModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if base_version is None:
+            raise _InvalidSourcesError("base prompt version unavailable")
+
+        dataset = (
+            await session.execute(
+                select(EvaluationDatasetModel.id).where(
+                    EvaluationDatasetModel.id == run.dataset_id,
+                    EvaluationDatasetModel.workspace_id == run.workspace_id,
+                    ~EvaluationDatasetModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if dataset is None:
+            raise _InvalidSourcesError("dataset unavailable")
+
+        version = (
+            await session.execute(
+                select(EvaluationDatasetVersionModel.id).where(
+                    EvaluationDatasetVersionModel.id == run.dataset_version_id,
+                    EvaluationDatasetVersionModel.dataset_id == run.dataset_id,
+                    EvaluationDatasetVersionModel.content_hash == run.dataset_version_hash,
+                    EvaluationDatasetVersionModel.workspace_id == run.workspace_id,
+                    ~EvaluationDatasetVersionModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if version is None:
+            raise _InvalidSourcesError("dataset version unavailable")
+
+        agent = (
+            await session.execute(
+                select(AgentModel.id).where(
+                    AgentModel.id == run.agent_id,
+                    AgentModel.workspace_id == run.workspace_id,
+                    ~AgentModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        if agent is None:
+            raise _InvalidSourcesError("agent unavailable")
 
     # --- loop -------------------------------------------------------------
 
@@ -158,10 +254,24 @@ class PromptOptimizationRunner:
         prompt_row = await self._load_base_template(run, session)
         base_template, base_variables = prompt_row
 
-        version = await session.get(EvaluationDatasetVersionModel, run.dataset_version_id)
-        if version is None or version.deleted:
-            msg = f"dataset version {run.dataset_version_id} vanished"
-            raise RuntimeError(msg)
+        version = (
+            await session.execute(
+                select(EvaluationDatasetVersionModel)
+                .join(EvaluationDatasetModel, EvaluationDatasetModel.id == EvaluationDatasetVersionModel.dataset_id)
+                .where(
+                    EvaluationDatasetVersionModel.id == run.dataset_version_id,
+                    EvaluationDatasetVersionModel.dataset_id == run.dataset_id,
+                    EvaluationDatasetVersionModel.content_hash == run.dataset_version_hash,
+                    EvaluationDatasetVersionModel.workspace_id == run.workspace_id,
+                    ~EvaluationDatasetVersionModel.deleted,
+                    EvaluationDatasetModel.workspace_id == run.workspace_id,
+                    ~EvaluationDatasetModel.deleted,
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if version is None:
+            raise _InvalidSourcesError("dataset version unavailable")
         items = _items_from_snapshot(list(version.items or []), run.dataset_id)
         train, val = self._split(items, run.split_ratio, run.id)
 
@@ -333,19 +443,25 @@ class PromptOptimizationRunner:
     ) -> tuple[str, list[str]]:
         from sqlalchemy import select
 
-        from hecate.models.prompt import PromptVersionModel
+        from hecate.models.prompt import PromptModel, PromptVersionModel
         from hecate.studio.template_engine import TemplateEngine
 
         result = await session.execute(
-            select(PromptVersionModel).where(
+            select(PromptVersionModel)
+            .join(PromptModel, PromptModel.id == PromptVersionModel.prompt_id)
+            .where(
                 PromptVersionModel.prompt_id == run.prompt_id,
                 PromptVersionModel.version == run.base_version,
+                PromptVersionModel.workspace_id == run.workspace_id,
+                ~PromptVersionModel.deleted,
+                PromptModel.workspace_id == run.workspace_id,
+                ~PromptModel.deleted,
             )
+            .execution_options(populate_existing=True)
         )
         row = result.scalar_one_or_none()
         if row is None:
-            msg = f"base prompt version {run.base_version} vanished"
-            raise RuntimeError(msg)
+            raise _InvalidSourcesError("base prompt version unavailable")
         variables = list(row.variables or [])
         if not variables:
             variables = TemplateEngine().extract_variables(row.template)
@@ -377,6 +493,9 @@ class PromptOptimizationRunner:
         candidate_id: uuid.UUID | None,
         usage: dict,
     ) -> dict:
+        # Startup validation cannot authorize a later rollout after a
+        # source is deleted, moved, or rebound while the loop was awaiting.
+        await self._verify_sources(run, session)
         eval_run = EvaluationRunModel(
             dataset_id=run.dataset_id,
             dataset_version_id=run.dataset_version_id,

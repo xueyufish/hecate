@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
 from hecate.models.agent import AgentModel
-from hecate.models.evaluation import EvaluationDatasetVersionModel
+from hecate.models.evaluation import EvaluationDatasetModel, EvaluationDatasetVersionModel
 from hecate.models.prompt import PromptModel, PromptVersionModel
 from hecate.models.prompt_optimization import (
     BUDGET_PRESETS,
@@ -69,7 +69,7 @@ class PromptOptimizationService:
             msg = f"Prompt {data.prompt_id} not found"
             raise LookupError(msg)
         base_version = data.base_version or prompt.current_version
-        base_version_row = await self._get_version(prompt.id, base_version)
+        base_version_row = await self._get_version(prompt.id, base_version, workspace_id)
         if base_version_row is None:
             msg = f"Prompt version {base_version} not found"
             raise LookupError(msg)
@@ -79,8 +79,15 @@ class PromptOptimizationService:
             msg = f"Agent {data.agent_id} not found"
             raise LookupError(msg)
 
-        version = await self.db.get(EvaluationDatasetVersionModel, data.dataset_version_id)
-        if version is None or version.deleted or version.workspace_id != workspace_id:
+        # Full input binding: the pinned dataset and its frozen version must
+        # both be live in the workspace and belong to each other — a bare
+        # version id alone never proves the samples are this workspace's.
+        dataset = await self._get_dataset(data.dataset_id, workspace_id)
+        if dataset is None:
+            msg = f"Dataset {data.dataset_id} not found"
+            raise LookupError(msg)
+        version = await self._get_dataset_version(data.dataset_version_id, workspace_id)
+        if version is None:
             msg = f"Dataset version {data.dataset_version_id} not found"
             raise LookupError(msg)
         if version.dataset_id != data.dataset_id:
@@ -153,11 +160,39 @@ class PromptOptimizationService:
         )
         return run
 
-    async def get_run(self, run_id: uuid.UUID, workspace_id: uuid.UUID) -> PromptOptimizationRunModel | None:
-        run = await self.db.get(PromptOptimizationRunModel, run_id)
-        if run is None or run.deleted or run.workspace_id != workspace_id:
-            return None
-        return run
+    async def is_run_visible(self, run_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
+        """Check ownership before authorization without reading run payloads."""
+        result = await self.db.execute(
+            select(PromptOptimizationRunModel.id).where(
+                PromptOptimizationRunModel.id == run_id,
+                PromptOptimizationRunModel.workspace_id == workspace_id,
+                ~PromptOptimizationRunModel.deleted,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_run(
+        self, run_id: uuid.UUID, workspace_id: uuid.UUID, *, for_update: bool = False
+    ) -> PromptOptimizationRunModel | None:
+        """Resolve run visibility with a fresh read.
+
+        ``populate_existing`` keeps the API precheck and the write paths
+        from authorizing against an identity-map row another session has
+        since deleted or moved.
+        """
+        stmt = (
+            select(PromptOptimizationRunModel)
+            .where(
+                PromptOptimizationRunModel.id == run_id,
+                PromptOptimizationRunModel.workspace_id == workspace_id,
+                ~PromptOptimizationRunModel.deleted,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def list_runs(
         self,
@@ -173,6 +208,7 @@ class PromptOptimizationService:
             )
             .order_by(PromptOptimizationRunModel.created_at.desc())
             .limit(limit)
+            .execution_options(populate_existing=True)
         )
         if prompt_id is not None:
             stmt = stmt.where(PromptOptimizationRunModel.prompt_id == prompt_id)
@@ -185,7 +221,7 @@ class PromptOptimizationService:
         run keeps executing its current round; the runner observes
         ``stop_reason`` on a fresh session read and finalizes.
         """
-        run = await self.get_run(run_id, workspace_id)
+        run = await self.get_run(run_id, workspace_id, for_update=True)
         if run is None:
             return None
         if run.status == PromptOptimizationRunStatus.CREATED.value:
@@ -201,30 +237,72 @@ class PromptOptimizationService:
 
     async def _get_prompt(self, prompt_id: uuid.UUID, workspace_id: uuid.UUID) -> PromptModel | None:
         result = await self.db.execute(
-            select(PromptModel).where(
+            select(PromptModel)
+            .where(
                 PromptModel.id == prompt_id,
                 PromptModel.workspace_id == workspace_id,
                 ~PromptModel.deleted,
             )
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
-    async def _get_version(self, prompt_id: uuid.UUID, version: int) -> PromptVersionModel | None:
+    async def _get_version(
+        self,
+        prompt_id: uuid.UUID,
+        version: int,
+        workspace_id: uuid.UUID,
+    ) -> PromptVersionModel | None:
+        """A live base version bound to this workspace's prompt."""
         result = await self.db.execute(
-            select(PromptVersionModel).where(
+            select(PromptVersionModel)
+            .where(
                 PromptVersionModel.prompt_id == prompt_id,
                 PromptVersionModel.version == version,
+                PromptVersionModel.workspace_id == workspace_id,
+                ~PromptVersionModel.deleted,
             )
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_dataset(self, dataset_id: uuid.UUID, workspace_id: uuid.UUID) -> EvaluationDatasetModel | None:
+        result = await self.db.execute(
+            select(EvaluationDatasetModel)
+            .where(
+                EvaluationDatasetModel.id == dataset_id,
+                EvaluationDatasetModel.workspace_id == workspace_id,
+                ~EvaluationDatasetModel.deleted,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_dataset_version(
+        self,
+        version_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> EvaluationDatasetVersionModel | None:
+        result = await self.db.execute(
+            select(EvaluationDatasetVersionModel)
+            .where(
+                EvaluationDatasetVersionModel.id == version_id,
+                EvaluationDatasetVersionModel.workspace_id == workspace_id,
+                ~EvaluationDatasetVersionModel.deleted,
+            )
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
     async def _get_agent(self, agent_id: uuid.UUID, workspace_id: uuid.UUID) -> AgentModel | None:
         result = await self.db.execute(
-            select(AgentModel).where(
+            select(AgentModel)
+            .where(
                 AgentModel.id == agent_id,
                 AgentModel.workspace_id == workspace_id,
                 ~AgentModel.deleted,
             )
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
