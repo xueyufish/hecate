@@ -242,7 +242,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | step7 | 无图 `ToolCallExecutor` 已交付，补记账本回填的 PostTool 输出治理；保留治理 profile、旁路、预算和跨执行方式完整认证 |
 | step8 | 继续撤销，不恢复外部 Runtime 接入任务 |
 | step9 | 沿用 Memory/Knowledge 分段替换；已有 provider/向量 adapter 不等于完整绑定、迁移和删除认证 |
-| step10 | 复用版本匹配、证据覆盖门禁与报告页面查询状态；评估执行、任务/Workflow 评测触发、标注队列管理/入队及 calibration 权限切片已交付。标注领取/评分提交等剩余写流程、后端替换、运行时验收及完整证据生命周期仍开放 |
+| step10 | 复用版本匹配、证据覆盖门禁与报告页面查询状态；评估执行、任务/Workflow 评测触发、标注队列管理/入队、条目工作流、人工回灌及 calibration 权限切片已交付。后端替换、运行时验收及完整证据生命周期仍开放 |
 | step11 | 补记最小平台发布门禁、历史凭据/UI 与版本生命周期权限；本地升级、完整 manifest/生命周期仍待交付 |
 | step12 | 企业 Team/Membership 治理仍待交付；现有协作模式不计作企业团队 |
 | step13 | 团队委派/交接/验收仍待交付；单决策动作集合的串行恢复不计作团队 Batch |
@@ -592,7 +592,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 **目标：**允许外部系统承担 trace 与评估执行，同时保持 Hecate 的治理和发布责任。
 
-**状态：内置发布评测的版本绑定、范围冻结及证据覆盖检查已随 step11 交付；评估数据、报告、Run 执行、任务管理/触发、合成、Workflow 评测触发、标注读取/队列管理/入队与 calibration 已有权限切片，Run Report/Compare 已加固查询状态。外部替换与完整证据生命周期尚未交付。**这类发布评测不构成本次 Task 的运行时验收，也不修正真实模型基线尚未通过的质量门槛。
+**状态：内置发布评测的版本绑定、范围冻结及证据覆盖检查已随 step11 交付；评估数据、报告、Run 执行、任务管理/触发、合成、Workflow 评测触发、标注读取/队列管理/入队/条目工作流/回灌与 calibration 已有权限切片，Run Report/Compare 已加固查询状态。外部替换与完整证据生命周期尚未交付。**这类发布评测不构成本次 Task 的运行时验收，也不修正真实模型基线尚未通过的质量门槛。
 
 **已交付的评估访问与页面切片：**
 
@@ -605,10 +605,13 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 | Workflow 评测触发 | Workflow 确定目标 workspace；数据集、可选版本和基线 Run 均须在该 workspace 可见，再要求 EDITOR。可见但绑定不符在角色门后拒绝；配置、版本和成本门禁通过后创建 Task/pending Run，提交成功才交后台。system 也不能跨 workspace 拼接资源。见[触发边界测试](../../tests/test_api/test_workflow_evaluation_execution_access_boundary.py) |
 | 标注队列读取 | 队列列表要求 active workspace；队列详情、条目列表/详情先核对可见性、软删除和 queue/item 绑定，再应用 VIEWER 门槛；授权后才读取 trace、事件投影与分数建议。显式 system 的按 ID 查询保留，列表不扩为全局查询。见[实现](../../src/hecate/ops/api/evaluation_annotations.py)及[读取边界测试](../../tests/test_api/test_annotation_read_access_boundary.py) |
 | 标注队列管理与入队 | 创建队列要求 active workspace 与 EDITOR；更新/删除及手动/来源 Task 入队先解析队列归属，再要求 EDITOR，来源 Task 还须在队列实际 workspace 存活。仅接受该 workspace 可见的已完成根 trace；来源 Task 限 online，筛选已完成的自动 trace 评分，不合格 trace 不占候选限额。已有或保留的软删除条目去重且不复活；此切片不包含领取、评分提交或回灌。见[管理边界测试](../../tests/test_api/test_annotation_queue_management_write_access_boundary.py)与[入队边界测试](../../tests/test_api/test_annotation_intake_write_access_boundary.py) |
+| 标注条目工作流与回灌 | claim/skip/submit/delete 先经条目读取边界解析可见性、软删除、queue/item 绑定与父子 workspace 一致性，再要求 EDITOR；服务复核路径绑定与队列当前规则后才写，人工评分 upsert 限定条目 workspace。push-dataset 回灌先经队列读取边界再要求 EDITOR，在队列实际 workspace 解析/创建数据集、筛选条目、投影 trace 并取人工标签；labels 仅来自该 workspace 的 human 行，不可见 trace 跳过，服务写前复核队列存活。见[条目边界测试](../../tests/test_api/test_annotation_item_write_access_boundary.py)与[回灌边界测试](../../tests/test_api/test_annotation_push_dataset_write_boundary.py) |
 | Calibration 读取 | 所有身份均须有 active workspace，非 system 另需 VIEWER；校验先于统计查询，system 也仅聚合当前 workspace。非法日期/时间窗按校验错误返回。见[校准读取测试](../../tests/test_api/test_calibration_read_access_boundary.py) |
 | Run Report / Compare | 加载、空态和结构化失败分开，支持对应查询重试；更换选择或请求版本后丢弃迟到结果，独立分布/评分查询互不覆盖，Compare 保持显式提交。未改变分页范围、比较算法或后端授权。见[Run Report 复核](../../openspec/changes/archive/2026-10-20-step10-run-report-query-state-hardening/verification.md)与[Compare 复核](../../openspec/changes/archive/2026-10-20-step10-compare-view-query-state-hardening/verification.md) |
 
-上述角色门槛针对非 system 身份；system 例外及 active workspace 要求按入口分别执行，不承诺统一跨域能力。已交付切片不覆盖标注条目的 claim/skip/submit/delete 与 push-dataset 回灌等剩余写流程，也不构成所有评估入口的完整授权认证；字段级 ACL、导出/删除/冻结及完整证据生命周期仍按下列任务推进。
+人工回灌的显式目标数据集在角色门前校验存活与队列 workspace 归属，不可见队列或目标使用统一、无标识符的 404；服务在写入前再次校验。来源限定为可见的已完成根 trace，标签限定为同 workspace、同目标、trace 类型的已完成人工评分。没有有效标签或来源不合格时跳过，不读取其事件。
+
+上述角色门槛针对非 system 身份；system 例外及 active workspace 要求按入口分别执行，不承诺统一跨域能力。已交付切片覆盖标注条目的 claim/skip/submit/delete 与 push-dataset 回灌写流程，但不构成所有评估入口的完整授权认证；字段级 ACL、导出/删除/冻结及完整证据生命周期仍按下列任务推进。
 
 **分段边界：**step1 的测试 fixture、step5e/6/7 的最小完成控制、交付/验收和关键证据、step11 所需的最小评测结果先行；本步扩展外部 evaluator/exporter、线上抽样和完整证据生命周期。不能等待选定 LangSmith 等服务才启动评测，也不能把单 Agent 验收延至 step13。
 

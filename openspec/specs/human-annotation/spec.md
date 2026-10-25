@@ -228,6 +228,10 @@ An annotation entry MAY reference `overrides_score_id` — the identifier of an 
 ### Requirement: Dataset backflow from completed annotations
 `POST /api/evaluation/annotation-queues/{queue_id}/push-dataset` with `{dataset_id | dataset_name, item_ids?}` SHALL materialize completed items (the given subset, or all completed items of the queue) into evaluation dataset items: `query` from the projected final user message, `generated_answer` from the projected final assistant message, `metadata_` recording `{trace_id, queue_id, queue_item_id, labels}` (the submitted human annotations), and `tags` including `human-annotation` and the queue name. The push SHALL be idempotent per dataset: a trace already materialized in the target dataset SHALL be skipped. Items without any submitted annotation SHALL NOT be pushed. The response SHALL report created and skipped counts.
 
+The endpoint SHALL sit behind the annotation write boundary. The queue SHALL resolve through the queue read boundary first; an explicit `dataset_id` SHALL additionally identify a live dataset in the queue's actual workspace before role enforcement or dataset-selector business validation. Invisible queues or explicit target datasets SHALL return the same identifier-free `Annotation queue or dataset not found` 404. Non-system callers SHALL then hold at least an editor role, and a workspace-less non-system identity SHALL be denied with that 404 before any query. Explicit system scope SHALL retain its role exemption and MAY operate without an active workspace, but SHALL NOT combine a queue and dataset from different workspaces. Request schema violations SHALL retain 422; after resource visibility and role checks, selecting both or neither dataset selectors SHALL retain 400. The service SHALL recheck queue and explicit target dataset liveness and ownership before materializing anything, mapping resource failures to the same 404.
+
+The backflow SHALL run in the queue's real workspace: dataset resolution and creation, item selection, the projected trace, and the embedded human labels SHALL stay inside that workspace. Only completed, undeleted trace-typed items of the queue SHALL qualify; their targets SHALL be live, completed root traces visible under the existing session-or-agent workspace rule. Labels SHALL be undeleted, completed `source=human`, `target_type=trace` rows for that target in the same workspace. An item without qualifying labels or a qualifying trace SHALL be skipped before any event projection; missing or incomplete projections SHALL also be skipped. An authorized request MAY still create an empty dataset when no items qualify. Dataset-wide sequential deduplication SHALL continue across both human and automated backflow paths.
+
 #### Scenario: Push completed annotations into a dataset
 - **WHEN** 2 completed items are pushed to dataset D
 - **THEN** D SHALL contain 2 new items whose metadata records the source trace and human labels, and whose tags include `human-annotation`
@@ -239,6 +243,38 @@ An annotation entry MAY reference `overrides_score_id` — the identifier of an 
 #### Scenario: Dataset name creates the dataset on first push
 - **WHEN** `push-dataset` is called with `dataset_name: "human-golden-v1"` that does not exist
 - **THEN** the dataset SHALL be created in the workspace and items materialized into it
+
+#### Scenario: Editor floor precedes backflow
+- **WHEN** a viewer or role-less member of the owning workspace pushes a queue's completed annotations to a dataset
+- **THEN** the API SHALL return 403 `FORBIDDEN` before the backflow service runs — even when the payload would also fail dataset-selector validation — and no dataset or dataset item SHALL be created
+
+#### Scenario: Invisible queues are denied before the role check
+- **WHEN** any identity — system scope included — targets a missing or soft-deleted queue, or a non-system identity targets another workspace's queue
+- **THEN** the API SHALL return the identifier-free combined queue/dataset 404 before the backflow service runs, and a workspace-less non-system identity SHALL be denied before any query
+
+#### Scenario: System scope backflows through the real workspace
+- **WHEN** an explicit system-scope identity pushes a live queue whose real workspace differs from the identity's active workspace
+- **THEN** the dataset SHALL be resolved or created in the queue's real workspace, labels SHALL come only from that workspace's qualifying human rows, a dataset in another workspace SHALL receive the combined queue/dataset 404, and soft-deleted or missing queues SHALL still be rejected
+
+#### Scenario: Queue state is rechecked before materializing
+- **WHEN** the queue is soft-deleted after the API precheck and before the service reads it
+- **THEN** the push SHALL be rejected with the identifier-free combined queue/dataset 404 and no dataset or dataset item SHALL be created
+
+#### Scenario: Labels and projections never cross workspaces
+- **WHEN** the ledger holds human rows for a pushed target in another workspace, or a queue item's trace is not visible in the queue's workspace
+- **THEN** the foreign human rows SHALL NOT be embedded as labels and the invisible trace SHALL be skipped instead of materialized
+
+#### Scenario: Explicit dataset visibility precedes role and selector validation
+- **WHEN** any identity supplies a missing, deleted, or other-workspace target dataset, including alongside `dataset_name`
+- **THEN** the endpoint SHALL return the combined queue/dataset 404 before the role check, business validation, or backflow service
+
+#### Scenario: Target dataset is rechecked by the service
+- **WHEN** a previously visible explicit dataset is deleted or moved to another workspace after the API precheck
+- **THEN** the service SHALL reject the push with the combined queue/dataset 404 before creating any dataset item or reading events
+
+#### Scenario: Ineligible sources cannot produce annotated samples
+- **WHEN** a completed item is not trace-typed, its target is not a completed root trace, or its only labels are foreign, deleted, errored, or for a different target type
+- **THEN** the item SHALL be skipped without reading its events or creating a dataset sample
 
 ### Requirement: Calibration analytics
 The system SHALL expose `GET /api/evaluation/calibration` with optional filters `agent_id`, `task_id`, `metric_name`, and the standard time window. For each metric with machine-human paired samples (an automated row and a human row for the same `target_id` and `metric_name`), the response SHALL report: `pair_count`; for numeric metrics `agreement_rate` (fraction of pairs within an absolute tolerance of 0.1), `mae` (mean absolute error), and a 10-bucket machine-value × human-value heatmap; for categorical/boolean metrics the exact-match `agreement_rate` and Cohen's Kappa. Metrics without paired samples SHALL report zeroed stats; unpaired human-only and machine-only counts SHALL be reported per metric.
