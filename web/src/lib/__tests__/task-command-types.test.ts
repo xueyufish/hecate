@@ -1,20 +1,23 @@
 // taskCommandsApi builds only the paged list path (never the lazy-expiry
-// single-command read); label maps are the single wording home with raw
-// fallback for unknown values.
+// single-command read); the cancel issue path is the full-command endpoint
+// with a caller-supplied stable id and revision; label maps are the single
+// wording home with raw fallback for unknown values.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const apiMock = vi.hoisted(() => ({ get: vi.fn() }));
+const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock("@/lib/api-client", () => ({ api: apiMock }));
 
 import {
   commandKindLabel,
   commandStateLabel,
+  commandStateMeaning,
   taskCommandsApi,
 } from "@/lib/task-command-types";
 
 beforeEach(() => {
   apiMock.get.mockReset();
+  apiMock.post.mockReset();
 });
 
 describe("taskCommandsApi", () => {
@@ -37,6 +40,26 @@ describe("taskCommandsApi", () => {
     for (const path of apiMock.get.mock.calls.map((call) => call[0] as string)) {
       expect(path).toMatch(/^\/api\/tasks\/task-3\/commands\?/);
       expect(path).not.toContain("/api/commands/");
+    }
+  });
+});
+
+describe("taskCommandsApi.issueCancel", () => {
+  it("posts the full-command endpoint with kind, the caller's id and revision", () => {
+    taskCommandsApi.issueCancel("task-9", "cmd-fixed", 4);
+    expect(apiMock.post).toHaveBeenCalledTimes(1);
+    expect(apiMock.post).toHaveBeenCalledWith("/api/tasks/task-9/commands", {
+      kind: "cancel",
+      command_id: "cmd-fixed",
+      expected_revision: 4,
+    });
+  });
+
+  it("never builds the /cancel shorthand path", () => {
+    taskCommandsApi.issueCancel("task-9", "cmd-fixed", 4);
+    for (const call of apiMock.post.mock.calls) {
+      expect(call[0]).toBe("/api/tasks/task-9/commands");
+      expect(String(call[0])).not.toMatch(/\/cancel$/);
     }
   });
 });
@@ -70,6 +93,22 @@ describe("command label maps", () => {
     expect(commandKindLabel("provide_input")).toBe("补充输入");
     expect(commandKindLabel("mystery")).toBe("mystery");
     expect(commandKindLabel(null)).toBe("未记录");
+  });
+});
+
+describe("command state meanings", () => {
+  it("explains each recorded state without overclaiming effect", () => {
+    expect(commandStateMeaning("requested")).toContain("尚未确认");
+    expect(commandStateMeaning("acknowledged")).toContain("不证明");
+    expect(commandStateMeaning("applied")).toContain("重新查询");
+    expect(commandStateMeaning("rejected")).toContain("拒绝");
+    expect(commandStateMeaning("expired")).toContain("过期");
+  });
+
+  it("returns null for unknown or missing states instead of guessing", () => {
+    expect(commandStateMeaning("future_state")).toBeNull();
+    expect(commandStateMeaning(null)).toBeNull();
+    expect(commandStateMeaning(undefined)).toBeNull();
   });
 });
 

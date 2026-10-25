@@ -6,6 +6,7 @@ import Link from "next/link";
 
 import { RunActionsPanel } from "@/components/tasks/run-actions-panel";
 import { RunEventsPanel } from "@/components/tasks/run-events-panel";
+import { TaskCancelPanel } from "@/components/tasks/task-cancel-panel";
 import { TaskCommandsPanel } from "@/components/tasks/task-commands-panel";
 import { LifecycleBadge } from "@/components/tasks/state-badge";
 import { Button } from "@/components/ui/button";
@@ -16,10 +17,15 @@ import {
   type TaskDetail,
 } from "@/lib/task-types";
 
+type RefreshError = { code: string | null; message: string };
+
 type DetailState =
   | { kind: "loading" }
   | { kind: "error"; code: string | null; message: string }
-  | { kind: "ready"; detail: TaskDetail };
+  // `refreshError` keeps the last ready detail (and any command receipt the
+  // user already holds) on screen when a re-query fails — a refresh failure
+  // must not read as "the submission failed" and trigger a new command.
+  | { kind: "ready"; detail: TaskDetail; refreshError?: RefreshError };
 
 function createdLabel(created_at: string | null): string {
   if (!created_at) return "未记录";
@@ -36,11 +42,19 @@ export default function TaskDetailPage() {
   });
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  // Bumped when a command is issued so the receipt list re-reads in place.
+  const [commandsRefresh, setCommandsRefresh] = useState(0);
   const state: DetailState = response.taskId === taskId ? response.state : { kind: "loading" };
 
   useEffect(() => {
     let active = true;
-    setResponse({ taskId, state: { kind: "loading" } });
+    // A same-Task refresh keeps the current content visible (stale-while-
+    // revalidate) instead of flashing to loading and dropping receipts.
+    setResponse((prev) =>
+      prev.taskId === taskId && prev.state.kind === "ready"
+        ? prev
+        : { taskId, state: { kind: "loading" } },
+    );
     async function fetchDetail() {
       try {
         const detail = await taskApi.get(taskId);
@@ -54,14 +68,25 @@ export default function TaskDetailPage() {
             : (detail.runs[detail.runs.length - 1]?.run_id ?? null),
         );
       } catch (err) {
-        if (active) setResponse({ taskId, state: {
-          kind: "error", code: taskErrorCode(err), message: taskErrorMessage(err),
-        } });
+        if (!active) return;
+        const code = taskErrorCode(err);
+        const message = taskErrorMessage(err);
+        setResponse((prev) => {
+          if (prev.taskId === taskId && prev.state.kind === "ready") {
+            return { taskId, state: { ...prev.state, refreshError: { code, message } } };
+          }
+          return { taskId, state: { kind: "error", code, message } };
+        });
       }
     }
     if (taskId) void fetchDetail();
     return () => { active = false; };
   }, [taskId, reloadTick]);
+
+  function refreshAfterCommand() {
+    setReloadTick((t) => t + 1);
+    setCommandsRefresh((c) => c + 1);
+  }
 
   if (!taskId || state.kind === "loading") {
     return (
@@ -102,6 +127,28 @@ export default function TaskDetailPage() {
           <LifecycleBadge state={detail.lifecycle_state} />
           <span>创建时间：{createdLabel(detail.created_at)}</span>
         </div>
+      </div>
+
+      {state.refreshError && (
+        <div className="space-y-2 rounded border p-3" data-testid="task-refresh-error" role="alert">
+          <p className="text-sm">
+            任务刷新失败：{state.refreshError.code && `[${state.refreshError.code}] `}
+            {state.refreshError.message}（当前显示最近一次成功读取的内容）
+          </p>
+          <Button variant="outline" size="sm" onClick={() => setReloadTick((t) => t + 1)}>
+            重试刷新
+          </Button>
+        </div>
+      )}
+
+      <div className="space-y-2" data-testid="task-cancel-section">
+        <h2 className="font-medium">取消任务</h2>
+        <TaskCancelPanel
+          taskId={taskId}
+          lifecycleState={detail.lifecycle_state}
+          revision={detail.revision}
+          onIssued={refreshAfterCommand}
+        />
       </div>
 
       <div className="space-y-2" data-testid="run-switcher">
@@ -147,7 +194,7 @@ export default function TaskDetailPage() {
           without any Run, so the panel mounts outside the Run switcher. */}
       <div className="space-y-2" data-testid="task-commands-section">
         <h2 className="font-medium">控制命令回执</h2>
-        <TaskCommandsPanel taskId={taskId} />
+        <TaskCommandsPanel taskId={taskId} refreshSignal={commandsRefresh} />
       </div>
 
       <div>

@@ -99,16 +99,34 @@ function CommandRow({
 export function TaskCommandsPanel({
   taskId,
   pageSize = TASK_COMMANDS_PAGE_SIZE,
+  refreshSignal = 0,
 }: {
   taskId: string;
   pageSize?: number;
+  /** Bumped by siblings (e.g. an issued command) to re-read the current page. */
+  refreshSignal?: number;
 }) {
   // A keyed content instance owns one Task visit, including pagination and
   // expansion. Returning to the same Task starts a fresh visit at offset zero.
-  return <TaskCommandsContent key={taskId} taskId={taskId} pageSize={pageSize} />;
+  return (
+    <TaskCommandsContent
+      key={taskId}
+      taskId={taskId}
+      pageSize={pageSize}
+      refreshSignal={refreshSignal}
+    />
+  );
 }
 
-function TaskCommandsContent({ taskId, pageSize }: { taskId: string; pageSize: number }) {
+function TaskCommandsContent({
+  taskId,
+  pageSize,
+  refreshSignal,
+}: {
+  taskId: string;
+  pageSize: number;
+  refreshSignal: number;
+}) {
   const [pos, setPosition] = useState<Position>(FIRST_POSITION);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [state, setState] = useState<PanelState>({ kind: "loading" });
@@ -119,7 +137,7 @@ function TaskCommandsContent({ taskId, pageSize }: { taskId: string; pageSize: n
 
   useEffect(() => {
     const seq = ++requestSeq.current;
-    setState({ kind: "loading" });
+    if (refreshSignal === 0) setState({ kind: "loading" });
     async function fetchPage() {
       try {
         const page = await taskCommandsApi.list(taskId, pageSize, pos.offset);
@@ -134,7 +152,9 @@ function TaskCommandsContent({ taskId, pageSize }: { taskId: string; pageSize: n
     }
     if (taskId) void fetchPage();
     return () => { requestSeq.current += 1; };
-  }, [taskId, reloadTick, pageSize, pos]);
+    // A refreshSignal bump re-reads the current page in place; the initial
+    // mount (signal 0) is the only run that shows the loading state.
+  }, [taskId, reloadTick, pageSize, pos, refreshSignal]);
 
   function load(next: Position) {
     // A fresh position object re-runs the fetch effect — including retry,

@@ -559,6 +559,10 @@ class TaskControlService:
             "issuer_domain": task.issuer_domain,
             "workspace_id": str(task.workspace_id),
             "lifecycle_state": record.lifecycle_state.value if record else UNRECORDED_LIFECYCLE,
+            # Nullable on purpose: no durable record means no revision exists,
+            # and callers must refuse to submit a revision-bound command rather
+            # than guess one from projections or local state.
+            "revision": record.revision if record else None,
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "runs": [self._run_summary(run) for run in runs],
         }

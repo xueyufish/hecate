@@ -423,6 +423,9 @@ async def test_authorized_roles_preserve_populated_responses_and_facts(env, role
     detail = actual["detail"]
     assert detail["goal"] == env["task"].goal
     assert detail["lifecycle_state"] == "waiting_input"
+    # Revision rides the same durable read as the lifecycle projection: an
+    # integer for a recorded task, null for one with no durable record.
+    assert isinstance(detail["revision"], int)
     assert detail["wait"] == env["wait"]
     assert actual["runs"] == {"items": detail["runs"]}
     assert [row["run_id"] for row in detail["runs"]] == [str(env["runs"][index].id) for index in (0, 2)]
@@ -431,6 +434,7 @@ async def test_authorized_roles_preserve_populated_responses_and_facts(env, role
     assert detail["runs"][1]["event_cursor"] == 7
     assert actual["empty_runs"] == {"items": []}
     assert actual["unrecorded_detail"]["lifecycle_state"] == "unrecorded"
+    assert actual["unrecorded_detail"]["revision"] is None
     assert "wait" not in actual["unrecorded_detail"]
     assert "service.get_task_detail" in env["calls"] and "store.list_tasks" in env["calls"]
     assert "store.get_task_state" in env["calls"]

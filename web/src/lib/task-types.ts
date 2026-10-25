@@ -31,6 +31,8 @@ export interface TaskDetail {
   issuer_domain: string;
   workspace_id: string;
   lifecycle_state: string;
+  /** Durable-record revision read with this response; null = no record. */
+  revision: number | null;
   created_at: string | null;
   runs: RunSummary[];
   wait?: Record<string, unknown>;

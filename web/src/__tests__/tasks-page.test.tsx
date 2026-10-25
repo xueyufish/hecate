@@ -29,7 +29,8 @@ function run(runId: string, attempt: number): RunSummary {
 function detail(taskId = "task-1", runs = [run("run-1", 1), run("run-2", 2)]): TaskDetail {
   return {
     task_id: taskId, goal: `Full goal for ${taskId}`, issuer_domain: "platform",
-    workspace_id: "workspace-1", lifecycle_state: "unrecorded", created_at: null, runs,
+    workspace_id: "workspace-1", lifecycle_state: "unrecorded", revision: null,
+    created_at: null, runs,
   };
 }
 

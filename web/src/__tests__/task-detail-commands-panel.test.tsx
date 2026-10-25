@@ -25,6 +25,7 @@ function detail(runs: Array<Record<string, unknown>>) {
     issuer_domain: "platform",
     workspace_id: "ws-1",
     lifecycle_state: "running",
+    revision: 2,
     created_at: "2026-10-18T00:00:00+00:00",
     runs,
   };
