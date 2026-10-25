@@ -43,26 +43,69 @@ const NODE_TYPE_LABELS: Record<string, string> = {
   controller: "Controller",
 };
 
+/** Short human-readable label for a canvas node. */
+function nodeLabel(id: string, nodeDef: DslNodeDef): string {
+  if (nodeDef.config.name) return nodeDef.config.name;
+  const prompt = nodeDef.config.system_prompt;
+  if (prompt) {
+    const oneLine = prompt.replace(/\s+/g, " ").trim();
+    return oneLine.length > 24 ? `${oneLine.slice(0, 24)}…` : oneLine;
+  }
+  return NODE_TYPE_LABELS[nodeDef.type] || id;
+}
+
 /** Convert Graph DSL to React Flow nodes and edges */
 export function dslToReactFlow(dsl: ParsedDsl): {
   nodes: FlowNode[];
   edges: Edge[];
 } {
   const nodeIds = Object.keys(dsl.nodes);
-  const nodes: FlowNode[] = nodeIds.map((id, index) => {
+  // Default layout: BFS depth from the entry node → left-to-right columns,
+  // so a pipeline reads in execution order without manual arranging.
+  const depth = new Map<string, number>();
+  const entryId = dsl.entry && dsl.nodes[dsl.entry] ? dsl.entry : nodeIds[0];
+  const queue = [entryId];
+  depth.set(entryId, 0);
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    for (const e of dsl.edges) {
+      if (e.source !== cur) continue;
+      const targets = typeof e.target === "string" ? [e.target] : Object.values(e.target);
+      for (const t of targets) {
+        if (dsl.nodes[t] && !depth.has(t)) {
+          depth.set(t, (depth.get(cur) ?? 0) + 1);
+          queue.push(t);
+        }
+      }
+    }
+  }
+  const maxDepth = Math.max(0, ...depth.values());
+  for (const id of nodeIds) {
+    if (!depth.has(id)) depth.set(id, maxDepth + 1);
+  }
+  const layerSeen = new Map<number, number>();
+  const nodes: FlowNode[] = nodeIds.map((id) => {
     const nodeDef = dsl.nodes[id];
+    const d = depth.get(id) ?? 0;
+    const row = layerSeen.get(d) ?? 0;
+    layerSeen.set(d, row + 1);
     return {
       id,
       type: nodeDef.type,
       position: {
-        x: 250 * (index % 4),
-        y: 150 * Math.floor(index / 4),
+        x: 280 * d,
+        y: 140 * row,
       },
+      // Explicit dimensions mark nodes as initialized immediately, so edges
+      // render without waiting for ResizeObserver measurement (which stalls
+      // in embedded webviews).
+      width: 180,
+      height: 48,
       data: {
-        label:
-          nodeDef.config.system_prompt ||
-          NODE_TYPE_LABELS[nodeDef.type] ||
-          id,
+        // Canvas label: explicit name wins; otherwise fall back to a short
+        // prompt excerpt so long system prompts don't flood the canvas. The
+        // full prompt stays editable in the config panel.
+        label: nodeLabel(id, nodeDef),
         type: nodeDef.type,
         config: nodeDef.config,
       },

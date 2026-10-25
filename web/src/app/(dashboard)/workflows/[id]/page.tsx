@@ -47,12 +47,32 @@ interface WorkflowData {
   id: string;
   name: string;
   description: string;
-  graph_dsl: GraphDSL;
+  graph_dsl?: GraphDSL;
+  // The detail API nests the current version's DSL under `version`.
+  version?: {
+    version?: number;
+    graph_dsl?: GraphDSL;
+  };
 }
 
 const MAX_HISTORY = 10;
 
-const LAYOUT_KEY = (id: string) => `hecate-layout-${id}`;
+/** Extract the last assistant text from a node result's messages output. */
+function extractAssistantText(node: NodeResult | null | undefined): string {
+  if (!node) return "";
+  const output = node.output as { messages?: { role?: string; content?: unknown }[] } | undefined;
+  const messages = output?.messages;
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role === "assistant" && typeof m.content === "string" && m.content.trim()) {
+      return m.content;
+    }
+  }
+  return "";
+}
+
+const LAYOUT_KEY = (id: string) => `hecate-layout-v2-${id}`;
 
 function saveLayout(workflowId: string, nodes: any[]) {
   const layout: Record<string, { x: number; y: number }> = {};
@@ -111,8 +131,11 @@ export default function WorkflowEditorPage() {
       .get<WorkflowData>(`/api/workflows/${workflowId}`)
       .then((data) => {
         setWorkflow(data);
-        if (data.graph_dsl) {
-          const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(data.graph_dsl);
+        // Accept both flat `graph_dsl` and the version-nested shape the
+        // detail API actually returns (`version.graph_dsl`).
+        const dsl = data.graph_dsl ?? data.version?.graph_dsl;
+        if (dsl) {
+          const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(dsl);
           const savedLayout = loadLayout(workflowId);
           const mergedNodes = savedLayout
             ? rfNodes.map((n) => ({
@@ -207,7 +230,7 @@ export default function WorkflowEditorPage() {
     try {
       const result = await api.post<TestRunData>(
         `/api/workflows/${workflowId}/test-run`,
-        { input_data: { messages: parsedMessages }, mock: true }
+        { input_data: { messages: parsedMessages }, mock: false }
       );
       const withTimestamp = { ...result, timestamp: Date.now() };
       setTestResult(withTimestamp);
@@ -475,6 +498,16 @@ export default function WorkflowEditorPage() {
                 ))}
               </div>
 
+              {(() => {
+                const finalText = extractAssistantText(testResult.nodes[testResult.nodes.length - 1]);
+                return finalText ? (
+                  <div className="mt-2 rounded border bg-background p-2">
+                    <div className="text-xs font-medium text-muted-foreground">Final Output (最后一个节点的产出)</div>
+                    <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap text-xs">{finalText}</pre>
+                  </div>
+                ) : null;
+              })()}
+
               {showLogs && (
                 <div className="mt-2 max-h-32 overflow-y-auto rounded border bg-background p-2 text-xs font-mono">
                   {testResult.nodes.map((n, i) => (
@@ -565,14 +598,23 @@ export default function WorkflowEditorPage() {
                 {selectedNode.output !== undefined && selectedNode.output !== null && (
                   <div>
                     <span className="text-muted-foreground">Output:</span>
-                    <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded border bg-background p-2 text-xs">
-                      {truncate(
-                        typeof selectedNode.output === "string"
-                          ? selectedNode.output
-                          : JSON.stringify(selectedNode.output, null, 2),
-                        1000
-                      )}
-                    </pre>
+                    {(() => {
+                      const text = extractAssistantText(selectedNode);
+                      return text ? (
+                        <pre className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap rounded border bg-background p-2 text-xs">
+                          {truncate(text, 2000)}
+                        </pre>
+                      ) : (
+                        <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded border bg-background p-2 text-xs">
+                          {truncate(
+                            typeof selectedNode.output === "string"
+                              ? selectedNode.output
+                              : JSON.stringify(selectedNode.output, null, 2),
+                            1000
+                          )}
+                        </pre>
+                      );
+                    })()}
                   </div>
                 )}
                 {selectedNode.error_message && (

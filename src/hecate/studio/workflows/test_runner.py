@@ -82,7 +82,7 @@ class _TestWorker(Worker):
             if self._mock:
                 channel_updates = self._mock_execute(node_id, node_type, node_config, channel_snapshot)
             else:
-                channel_updates = self._real_execute(node_id, node_type, node_config, channel_snapshot)
+                channel_updates = await self._real_execute(node_id, node_type, node_config, channel_snapshot)
         except Exception as e:
             error = e
 
@@ -140,14 +140,47 @@ class _TestWorker(Worker):
             }
         return {"messages": [{"role": "assistant", "content": f"Mock response from {node_id}"}]}
 
-    def _real_execute(
+    async def _real_execute(
         self,
         node_id: str,
         node_type: str,
         node_config: dict,
         channel_snapshot: dict,
     ) -> dict[str, Any]:
-        """Produce generic output for non-mock test runs."""
+        """Execute nodes for real in test runs.
+
+        Conversation nodes invoke the configured LLM with the node's
+        system prompt and the accumulated ``messages`` channel, so a
+        test run exercises the same prompts the production path uses.
+        Non-LLM node types keep deterministic outputs.
+        """
+        if node_type == NodeType.CONVERSATION.value:
+            from hecate_llm.service import llm_service
+
+            channel_messages = [
+                m for m in channel_snapshot.get("messages", []) if isinstance(m, dict) and m.get("role") != "system"
+            ]
+            # Downstream nodes receive upstream outputs as assistant-role
+            # messages; models treat a trailing assistant turn as finished and
+            # answer with empty content. Fold upstream outputs into a framed
+            # user turn so the conversation always ends with a user message.
+            upstream = [m["content"] for m in channel_messages if m.get("role") == "assistant"]
+            llm_messages: list[dict[str, Any]] = []
+            if node_config.get("system_prompt"):
+                llm_messages.append({"role": "system", "content": node_config["system_prompt"]})
+            for m in channel_messages:
+                if m.get("role") == "user":
+                    llm_messages.append({"role": "user", "content": m.get("content", "")})
+            if upstream:
+                folded = "\n\n---\n\n".join(str(c) for c in upstream)
+                llm_messages.append(
+                    {"role": "user", "content": f"以下是上游节点的输出:\n\n{folded}\n\n请基于以上内容完成你的任务。"}
+                )
+            response = await llm_service.chat(
+                messages=llm_messages,
+                model=node_config.get("model"),
+            )
+            return {"messages": [{"role": "assistant", "content": response.content}]}
         if node_type == NodeType.KNOWLEDGE_RETRIEVAL.value:
             return {"messages": [{"role": "system", "content": f"Executed knowledge retrieval on {node_id}"}]}
         if node_type == NodeType.VARIABLE_SET.value:
