@@ -136,12 +136,16 @@ class AnnotationService:
         return queue
 
     async def get_queue(self, queue_id: uuid.UUID, workspace_id: uuid.UUID) -> AnnotationQueueModel | None:
+        """Read a live queue with its current assignment and metric rules."""
         result = await self.db.execute(
-            select(AnnotationQueueModel).where(
+            select(AnnotationQueueModel)
+            .where(
                 AnnotationQueueModel.id == queue_id,
                 AnnotationQueueModel.workspace_id == workspace_id,
                 ~AnnotationQueueModel.deleted,
             )
+            # The API precheck may retain this queue with outdated review rules.
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
@@ -484,9 +488,16 @@ class AnnotationService:
         item_id: uuid.UUID,
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        queue_id: uuid.UUID | None = None,
     ) -> AnnotationQueueItemModel:
-        """Claim a pending item for review (assignees only when set)."""
-        item, queue = await self._get_item_or_raise(item_id, workspace_id)
+        """Claim a pending item for review (assignees only when set).
+
+        When the API supplies ``queue_id`` the path binding is rechecked
+        before any mutation, so a binding that changed after the API
+        precheck is rejected instead of written through.
+        """
+        item, queue = await self._get_item_or_raise(item_id, workspace_id, queue_id=queue_id)
         if item.status not in (QueueItemStatus.PENDING.value,):
             raise AnnotationItemStateError(f"item is {item.status}; only pending items can be claimed")
         assigned = [uuid.UUID(str(u)) for u in (queue.assigned_user_ids or [])]
@@ -504,9 +515,15 @@ class AnnotationService:
         item_id: uuid.UUID,
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        queue_id: uuid.UUID | None = None,
     ) -> AnnotationQueueItemModel:
-        """Skip a pending or claimed item without scoring it."""
-        item, _queue = await self._get_item_or_raise(item_id, workspace_id)
+        """Skip a pending or claimed item without scoring it.
+
+        When the API supplies ``queue_id`` the path binding is rechecked
+        before any mutation.
+        """
+        item, _queue = await self._get_item_or_raise(item_id, workspace_id, queue_id=queue_id)
         if item.status not in (QueueItemStatus.PENDING.value, QueueItemStatus.CLAIMED.value):
             raise AnnotationItemStateError(f"item is {item.status}; only pending/claimed items can be skipped")
         item.status = QueueItemStatus.SKIPPED.value
@@ -516,9 +533,19 @@ class AnnotationService:
         await self.db.refresh(item)
         return item
 
-    async def delete_item(self, item_id: uuid.UUID, workspace_id: uuid.UUID) -> None:
-        """Soft-delete an item — only while pending or skipped."""
-        item, _queue = await self._get_item_or_raise(item_id, workspace_id)
+    async def delete_item(
+        self,
+        item_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        *,
+        queue_id: uuid.UUID | None = None,
+    ) -> None:
+        """Soft-delete an item — only while pending or skipped.
+
+        When the API supplies ``queue_id`` the path binding is rechecked
+        before any mutation.
+        """
+        item, _queue = await self._get_item_or_raise(item_id, workspace_id, queue_id=queue_id)
         if item.status not in (QueueItemStatus.PENDING.value, QueueItemStatus.SKIPPED.value):
             raise AnnotationItemStateError(f"item is {item.status}; only pending/skipped items can be deleted")
         item.deleted = True
@@ -531,6 +558,8 @@ class AnnotationService:
         workspace_id: uuid.UUID,
         user_id: uuid.UUID,
         annotations: list[dict[str, Any]],
+        *,
+        queue_id: uuid.UUID | None = None,
     ) -> AnnotationQueueItemModel:
         """Persist annotations as human score rows and complete the item.
 
@@ -539,8 +568,10 @@ class AnnotationService:
         require ``reason_code`` and ``justification`` and must point at an
         automated row of the same target and metric. Resubmission by the
         same annotator for the same (target, metric) upserts their row.
+        When the API supplies ``queue_id`` the path binding is rechecked
+        before any mutation.
         """
-        item, queue = await self._get_item_or_raise(item_id, workspace_id)
+        item, queue = await self._get_item_or_raise(item_id, workspace_id, queue_id=queue_id)
         if item.status not in (QueueItemStatus.PENDING.value, QueueItemStatus.CLAIMED.value):
             raise AnnotationItemStateError(f"item is {item.status}; only pending/claimed items can be submitted")
 
@@ -668,7 +699,13 @@ class AnnotationService:
         reason_code: str | None,
         justification: str | None,
     ) -> EvaluationTaskScoreModel:
-        """Write (or update) the annotator's human row for this target+metric."""
+        """Write (or update) the annotator's human row for this target+metric.
+
+        Upsert scope is the item's workspace: a same annotator/target/metric
+        row in another workspace is never reused or updated — a fresh row is
+        written instead. Rows from other queues in the same workspace do
+        upsert, and automated rows are never touched.
+        """
         existing = (
             await self.db.execute(
                 select(EvaluationTaskScoreModel).where(
@@ -677,6 +714,7 @@ class AnnotationService:
                     EvaluationTaskScoreModel.target_id == item.target_id,
                     EvaluationTaskScoreModel.metric_name == metric_name,
                     EvaluationTaskScoreModel.target_type == item.target_type,
+                    EvaluationTaskScoreModel.workspace_id == item.workspace_id,
                     ~EvaluationTaskScoreModel.deleted,
                 )
             )
