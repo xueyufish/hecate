@@ -12,6 +12,7 @@ from hecate.ops.evaluation.annotation.calibration import (
     CalibrationValidationError,
 )
 from hecate.ops.evaluation.annotation.service import (
+    AnnotationDatasetNotFoundError,
     AnnotationItemStateError,
     AnnotationQueueItemNotFoundError,
     AnnotationQueueNotFoundError,
@@ -20,6 +21,7 @@ from hecate.ops.evaluation.annotation.service import (
 )
 
 __all__ = [
+    "AnnotationDatasetNotFoundError",
     "AnnotationItemStateError",
     "AnnotationQueueNotFoundError",
     "AnnotationQueueItemNotFoundError",
