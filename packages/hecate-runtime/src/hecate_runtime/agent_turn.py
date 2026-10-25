@@ -16,6 +16,7 @@ fact.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -91,8 +92,15 @@ class AgentTurn:
         ownership: DecisionOwnership | None = None,
         context: dict[str, Any] | None = None,
         execution_context: dict[str, Any] | None = None,
+        responder: DecisionResponder | None = None,
+        should_stop: Callable[[], str | None] | None = None,
     ) -> AgentTurnOutcome:
-        """Accept the decision if absent, then dispatch its committed actions."""
+        """Accept the decision if absent, then dispatch its committed actions.
+
+        ``responder`` optionally overrides the constructor's model capability
+        for this invocation only — the loop controller supplies one frozen
+        responder per turn; single-turn callers keep the constructor binding.
+        """
         if not isinstance(run_ref, RunRef):
             raise DecisionValidationError("run_ref must be a RunRef")
         # Reject malformed dispatch inputs before incurring model usage or
@@ -102,7 +110,10 @@ class AgentTurn:
                 raise DecisionValidationError(f"{name} must be a dictionary or None")
         if ownership is not None and not isinstance(ownership, DecisionOwnership):
             raise DecisionValidationError("ownership must be a DecisionOwnership or None")
-        outcome = await self._decision_step.execute(
+        if responder is not None and not isinstance(responder, DecisionResponder):
+            raise DecisionValidationError("responder must be a DecisionResponder or None")
+        decision_step = DecisionStep(self._store, responder) if responder is not None else self._decision_step
+        outcome = await decision_step.execute(
             run_ref=run_ref,
             decision_step_id=decision_step_id,
             input_refs=input_refs,
@@ -115,5 +126,6 @@ class AgentTurn:
             context=context,
             execution_context=execution_context,
             expected_decision_digest=outcome.record.content_digest,
+            should_stop=should_stop,
         )
         return AgentTurnOutcome(outcome.record, outcome.resumed, report)

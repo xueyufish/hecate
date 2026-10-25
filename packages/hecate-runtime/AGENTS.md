@@ -99,6 +99,7 @@ runtime-boundary-pluggability; composition may know all modules.)
 | Extension point | File | Default impl |
 |-----|------|--------------|
 | AcceptedDecisionStore | `accepted_decision.py` | Host-injected SQL/InMemory bridge in `hecate_durable.runtime_hook`; consumer: `DecisionStep` |
+| TurnResponderSource | `agent_controller.py` | `PortTurnResponderSource` (frozen `PortDecisionResponder` snapshots); consumers: platform task dispatcher, runner engine (controller-loop opt-in) |
 | DecisionResponder | `decision_step.py` | Host-injected model capability; scripted contract double; consumer: `DecisionStep` |
 | RuntimePort | `ports.py` | `StubRuntimePort` (test double); production: `core/composition/runtime_port_adapter.py::create_runtime_port` |
 | Worker / WorkerPool | `worker.py` | `AgentWorker` / `DirectWorkerPool` |

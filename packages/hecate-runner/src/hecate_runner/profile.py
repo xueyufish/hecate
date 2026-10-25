@@ -363,6 +363,11 @@ class RunnerConfig:
     # execution-definition digest: it gates result consumption, not admission,
     # so persisted frozen definitions stay valid across upgrades.
     tool_output_schemas: dict[str, dict] = field(default_factory=dict)
+    # Explicit agent-controller-loop opt-in (runner.json ``controller_loop``):
+    # execution drives the shared graph-free controller whose continuation is
+    # the durable accepted-decision chain, instead of the fixed preview graph.
+    # Requires the durable profile; off by default.
+    controller_loop: bool = False
 
 
 @dataclass(frozen=True)
@@ -409,9 +414,10 @@ def _load_json(path: Path, label: str) -> dict:
 
 def _check_local_schema_refs(value: object) -> None:
     if isinstance(value, dict):
-        ref = value.get("$ref")
-        if ref is not None and (not isinstance(ref, str) or not ref.startswith("#")):
-            raise ProfileError("preview tool schemas support internal references only")
+        for keyword in ("$ref", "$dynamicRef"):
+            ref = value.get(keyword)
+            if ref is not None and (not isinstance(ref, str) or not ref.startswith("#")):
+                raise ProfileError("preview tool schemas support internal references only")
         for item in value.values():
             _check_local_schema_refs(item)
     elif isinstance(value, list):
@@ -484,6 +490,9 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
 
     allowlist = data.get("tool_allowlist", [])
     output_schemas = data.get("tool_output_schemas", {})
+    controller_loop = data.get("controller_loop", False)
+    if not isinstance(controller_loop, bool):
+        errors.append("controller_loop must be a boolean")
     if not isinstance(output_schemas, dict) or not all(isinstance(v, dict) for v in output_schemas.values()):
         errors.append("tool_output_schemas must be an object of JSON Schemas")
     if not isinstance(allowlist, list) or any(not isinstance(name, str) or not name for name in allowlist):
@@ -514,6 +523,8 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
     evidence_config = _load_evidence(data, profile_dir)
     if evidence_config is not None and evidence_config.backend == "durable" and durable_config is None:
         raise ProfileError("evidence.backend 'durable' requires the durable profile (durable.database_url)")
+    if controller_loop and durable_config is None:
+        raise ProfileError("controller_loop requires the durable profile (durable.database_url)")
 
     return RunnerConfig(
         durable=durable_config,
@@ -527,6 +538,7 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
         model_auth_env=model_auth_env if isinstance(model_auth_env, str) else None,
         tool_allowlist=tuple(allowlist),
         tool_output_schemas=output_schemas,
+        controller_loop=controller_loop,
         shutdown_token_ref=shutdown_ref,
         max_request_bytes=max_request_bytes,
         max_concurrency=1,
@@ -654,7 +666,7 @@ class Profile:
 
         return canonical_request_digest(
             {
-                "graph_contract": "runner-linear-v1",
+                "graph_contract": "agent-loop/1" if self.config.controller_loop else "runner-linear-v1",
                 "manifest": self.manifest.to_dict(),
                 "tool_allowlist": list(self.config.tool_allowlist),
                 "tool_schemas": self.tool_schemas,

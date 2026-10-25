@@ -15,6 +15,7 @@ waiting facts, action receipts and checkpoints behind admission checks.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -29,6 +30,7 @@ from hecate_durable.contracts.references import BackendRef
 from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_runtime.action_ledger import ActionLedgerHook, tool_arguments_digest
 from hecate_runtime.checkpoint import InMemoryCheckpointStore
+from hecate_runtime.errors import ApprovalWaitSignal
 from hecate_runtime.execution_driver import PregelExecutionDriver
 from hecate_runtime.execution_service import (
     CooperativeCancellationError,
@@ -49,7 +51,7 @@ from hecate_runtime.types import (
     CompiledGraph as CompiledGraphT,
 )
 from hecate_runtime.worker import Worker
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, SchemaError
 
 from .durable import (
     DurableRuntime,
@@ -60,7 +62,7 @@ from .durable import (
 )
 from .evidence import OUTCOME_FAILED, EvidenceStore
 from .managed import MANAGED_ISSUER, LeaseGate, LeaseRefusedError, ManagedIdentity
-from .profile import BUILTIN_TOOL_SCHEMAS, Profile
+from .profile import BUILTIN_TOOL_SCHEMAS, Profile, ProfileError, _check_local_schema_refs
 
 # step7 2.5: dispatch outcome status → governance error category. The four
 # failure classes stay distinguishable in evidence; unknown outcomes never
@@ -208,6 +210,10 @@ class RunState:
     dispatch_denied: bool = False
     model_invocation_id: str | None = None
     local_approval_refs: dict[str, str] = field(default_factory=dict)
+    # Durable event-stream sequence for this run (single writer: this
+    # engine). Seeded from the persisted stream on re-entry so a resumed
+    # run continues the sequence instead of colliding with it.
+    event_seq: int = 0
 
 
 class EvidenceUnavailableError(Exception):
@@ -283,6 +289,11 @@ class ExecutionEngine:
         # host's own database so a restart can resume the SAME attempt from
         # the last superstep; the preview profile keeps the in-memory store.
         self._checkpoint_store = self._build_checkpoint_store()
+        # Explicit opt-in: drive the shared graph-free agent controller
+        # (durable accepted-decision chain as the continuation position)
+        # instead of the fixed preview graph. Requires the durable profile
+        # (validated at load time).
+        self._controller_loop = profile.config.controller_loop
         self._definition_digest = profile.execution_definition_digest(dispatch_binding)
         if self._durable is not None:
             self._durable.execution_definition = self._definition_digest
@@ -332,7 +343,9 @@ class ExecutionEngine:
             return legacy
         return uuid.uuid5(uuid.NAMESPACE_URL, f"runner-attempt:{run_ref.issuer_domain}:{run_ref.id}")
 
-    async def _dispatch_tool(self, state: RunState, tool_name: str, arguments: dict) -> dict:
+    async def _dispatch_tool(
+        self, state: RunState, tool_name: str, arguments: dict, *, accepted_context: dict | None = None
+    ) -> dict:
         """Run one tool with the run's server-verified identity scope.
 
         In the durable profile every dispatch first passes the persistent
@@ -341,6 +354,11 @@ class ExecutionEngine:
         back to the ledger after the business call.
         """
 
+        # Accepted actions already have their decision-scoped authoritative
+        # claim. The legacy runner key (one per tool/run) would create a
+        # second ledger entry and collapse distinct calls to the same tool.
+        ledger_hook = None if accepted_context is not None else state.action_hook
+        invocation_id = accepted_context.get("invocation_id") if accepted_context is not None else None
         if state.cancel_requested:
             raise CooperativeCancellationError
         digest = tool_arguments_digest(arguments)
@@ -356,9 +374,9 @@ class ExecutionEngine:
             state.managed
             and effect is not ToolSideEffectClass.READONLY
             and not (
-                state.action_hook is not None
+                ledger_hook is not None
                 and await is_decided_action(
-                    state.action_hook,
+                    ledger_hook,
                     run_id=action_run_id,
                     tool_name=tool_name,
                     arguments=arguments,
@@ -372,19 +390,19 @@ class ExecutionEngine:
             # action replays from the ledger without a business call, so it
             # skips the gate: consuming the one-shot lease there would
             # starve the attempt's real new dispatch of authorization.
-            refusal = await self._lease_refusal(state, tool_name, arguments)
+            refusal = await self._lease_refusal(state, tool_name, arguments, invocation_id=invocation_id)
             if refusal is not None:
                 state.dispatch_denied = True
                 return refusal
-        if state.action_hook is not None and await is_decided_action(
-            state.action_hook,
+        if ledger_hook is not None and await is_decided_action(
+            ledger_hook,
             run_id=action_run_id,
             tool_name=tool_name,
             arguments=arguments,
             side_effect_class=effect,
         ):
             withheld, blocked = await gate_dispatch_async(
-                state.action_hook,
+                ledger_hook,
                 run_id=action_run_id,
                 tool_name=tool_name,
                 arguments=arguments,
@@ -395,14 +413,17 @@ class ExecutionEngine:
                 self._mark_reconciliation(state, replay)
                 self.record_tool_result(state, tool_name, replay)
                 return replay
-        governance_refusal = await self._governance_refusal(state, tool_name, arguments, effect)
+        governance_refusal = await self._governance_refusal(
+            state, tool_name, arguments, effect, invocation_id=invocation_id
+        )
         if governance_refusal is not None:
             state.dispatch_denied = governance_refusal.get("status") != "awaiting_approval"
             self.record_tool_result(state, tool_name, governance_refusal)
             return governance_refusal
         if (
             tool_name in self._approval_tools
-            and action_key_for(action_run_id, tool_name) not in state.local_approval_refs
+            and not (accepted_context is not None and accepted_context.get("approval_ref"))
+            and (invocation_id or action_key_for(action_run_id, tool_name)) not in state.local_approval_refs
             and not await self._consume_wake_grant(state, tool_name, digest, arguments)
         ):
             # A wait is not an action claim: no business dispatch has begun.
@@ -413,9 +434,9 @@ class ExecutionEngine:
             outcome = {"status": "awaiting_approval", "detail": "parked in waiting_approval; resume to dispatch"}
             self.record_tool_result(state, tool_name, outcome)
             return outcome
-        if state.action_hook is not None:
+        if ledger_hook is not None:
             withheld, claim_blocked = await gate_dispatch_async(
-                state.action_hook,
+                ledger_hook,
                 run_id=action_run_id,
                 tool_name=tool_name,
                 arguments=arguments,
@@ -426,22 +447,22 @@ class ExecutionEngine:
                 self._mark_reconciliation(state, blocked)
                 self.record_tool_result(state, tool_name, blocked)
                 return blocked
-            if effect is not ToolSideEffectClass.READONLY:
-                # SC06 local half: stop new protected actions when the local
-                # evidence store cannot accept writes; the failure carries an
-                # explicit category (unwritable vs over-capacity policy).
-                try:
-                    self._evidence.probe()
-                except OSError as exc:
-                    category = getattr(exc, "category", "unwritable")
-                    self._evidence.record_gate_failure(category, f"local evidence gate: {exc}")
-                    blocked = {
-                        "status": "store_unavailable",
-                        "detail": f"local evidence unavailable ({category}): {exc}",
-                    }
-                    self._mark_reconciliation(state, blocked)
-                    self.record_tool_result(state, tool_name, blocked)
-                    return blocked
+        if (ledger_hook is not None or accepted_context is not None) and effect is not ToolSideEffectClass.READONLY:
+            # SC06 local half: stop new protected actions when the local
+            # evidence store cannot accept writes; the failure carries an
+            # explicit category (unwritable vs over-capacity policy).
+            try:
+                self._evidence.probe()
+            except OSError as exc:
+                category = getattr(exc, "category", "unwritable")
+                self._evidence.record_gate_failure(category, f"local evidence gate: {exc}")
+                blocked = {
+                    "status": "store_unavailable",
+                    "detail": f"local evidence unavailable ({category}): {exc}",
+                }
+                self._mark_reconciliation(state, blocked)
+                self.record_tool_result(state, tool_name, blocked)
+                return blocked
         self._evidence.append("tool_dispatch", state.principal, state.run_id, "started", {"tool": tool_name})
         schema_detail = self._input_schema_violation(tool_name, arguments)
         if schema_detail is not None:
@@ -498,15 +519,15 @@ class ExecutionEngine:
         if category is not None:
             detail["error_category"] = category
         self._evidence.append("tool_result", state.principal, state.run_id, evidence_outcome, detail)
-        if state.action_hook is not None:
+        if ledger_hook is not None:
             await record_outcome_async(
-                state.action_hook,
+                ledger_hook,
                 run_id=action_run_id,
                 tool_name=tool_name,
                 arguments=arguments,
                 outcome=outcome,
             )
-            if getattr(state.action_hook, "has_failed_outcomes", False) or status in (
+            if getattr(ledger_hook, "has_failed_outcomes", False) or status in (
                 "unknown",
                 "reconciliation_required",
                 "store_unavailable",
@@ -515,7 +536,9 @@ class ExecutionEngine:
         self.record_tool_result(state, tool_name, outcome)
         return outcome
 
-    async def _lease_refusal(self, state: RunState, tool_name: str, arguments: dict) -> dict | None:
+    async def _lease_refusal(
+        self, state: RunState, tool_name: str, arguments: dict, *, invocation_id: str | None = None
+    ) -> dict | None:
         """Lease-gate one managed protected dispatch; ``None`` = authorized.
 
         Authorization order (step7 I-Cb): a valid local approval binding
@@ -534,7 +557,7 @@ class ExecutionEngine:
         conservatism — a used lease authorizes nothing further.
         """
 
-        if await self._authorize_via_local_approval(state, tool_name, arguments):
+        if await self._authorize_via_local_approval(state, tool_name, arguments, invocation_id=invocation_id):
             return None
 
         requested_domain = arguments.get("domain")
@@ -574,7 +597,9 @@ class ExecutionEngine:
         self.record_tool_result(state, tool_name, denial)
         return denial
 
-    async def _authorize_via_local_approval(self, state: RunState, tool_name: str, arguments: dict) -> bool:
+    async def _authorize_via_local_approval(
+        self, state: RunState, tool_name: str, arguments: dict, *, invocation_id: str | None = None
+    ) -> bool:
         """True when a valid local approval binding authorizes this dispatch.
 
         The finder locates an unconsumed binding matching the verified
@@ -600,7 +625,7 @@ class ExecutionEngine:
         persisted = self._durable.store.get_task_input(state.task_ref) or {} if self._durable and state.task_ref else {}
         origins = persisted.get("_action_origins") or {}
         request = ActionRequest(
-            invocation_id=action_key_for(origins.get(tool_name, state.run_id), tool_name),
+            invocation_id=invocation_id or action_key_for(origins.get(tool_name, state.run_id), tool_name),
             principal_fingerprint=principal.fingerprint(),
             tool_name=tool_name,
             arguments_digest=digest,
@@ -626,7 +651,9 @@ class ExecutionEngine:
             logger.debug("approval basis evidence failed", exc_info=True)
         return True
 
-    async def _consume_wake_grant(self, state: RunState, tool_name: str, digest: str, arguments: dict) -> bool:
+    async def _consume_wake_grant(
+        self, state: RunState, tool_name: str, digest: str, arguments: dict, *, invocation_id: str | None = None
+    ) -> bool:
         """True when the persisted input carries a matching one-shot grant.
 
         The grant is stamped by the wake application (the recorded decision)
@@ -661,7 +688,7 @@ class ExecutionEngine:
             )
             origins = persisted.get("_action_origins") or {}
             request = ActionRequest(
-                invocation_id=action_key_for(origins.get(tool_name, state.run_id), tool_name),
+                invocation_id=invocation_id or action_key_for(origins.get(tool_name, state.run_id), tool_name),
                 principal_fingerprint=principal.fingerprint(),
                 tool_name=tool_name,
                 arguments_digest=digest,
@@ -685,7 +712,13 @@ class ExecutionEngine:
         return True
 
     async def _governance_refusal(
-        self, state: RunState, tool_name: str, arguments: dict, effect: ToolSideEffectClass
+        self,
+        state: RunState,
+        tool_name: str,
+        arguments: dict,
+        effect: ToolSideEffectClass,
+        *,
+        invocation_id: str | None = None,
     ) -> dict | None:
         """Local governance judgment for one dispatch (step7 5.2).
 
@@ -711,7 +744,7 @@ class ExecutionEngine:
         grant = persisted.get("_wake_grant") or {}
         approval_ref = grant.get("approval_ref") if grant.get("tool") == tool_name else None
         origins = persisted.get("_action_origins") or {}
-        invocation_id = action_key_for(origins.get(tool_name, state.run_id), tool_name)
+        invocation_id = invocation_id or action_key_for(origins.get(tool_name, state.run_id), tool_name)
         approval_ref = state.local_approval_refs.get(invocation_id, approval_ref)
         gov_context = GovContext(
             principal=principal,
@@ -863,7 +896,14 @@ class ExecutionEngine:
         return error.message if error is not None else None
 
     def validate_run_input(self, run_input: dict) -> None:
-        """Validate every scheduled tool before accepting any execution."""
+        """Validate every scheduled tool before accepting any execution.
+
+        The controller-loop binding skips the fixed tool-argument pre-check:
+        the model chooses arguments per turn and the dispatch boundary
+        validates each one against the same schemas (``_dispatch_tool``);
+        pre-validating a caller-supplied argument snapshot would re-impose
+        the fixed-plan admission this binding replaces.
+        """
         if not isinstance(run_input, dict):
             raise ValueError("run request must be an object")
         if any(key.startswith("_") for key in run_input):
@@ -873,6 +913,23 @@ class ExecutionEngine:
         raw = run_input.get("tool_arguments", {})
         if not isinstance(raw, dict):
             raise ValueError("tool_arguments must be an object")
+        if self._controller_loop:
+            from hecate_runtime.agent_controller import ControllerLimits
+
+            schema = run_input.get("output_schema")
+            if schema is not None:
+                if not isinstance(schema, dict):
+                    raise ValueError("output_schema must be an object")
+                try:
+                    Draft202012Validator.check_schema(schema)
+                    _check_local_schema_refs(schema)
+                except (SchemaError, ProfileError, ValueError) as exc:
+                    raise ValueError(f"invalid output_schema: {exc}") from exc
+            controller = run_input.get("controller", {})
+            if not isinstance(controller, dict):
+                raise ValueError("controller must be an object")
+            ControllerLimits(max_turns=controller.get("max_turns", 16), deadline=controller.get("deadline"))
+            return
         for name in self._profile.config.tool_allowlist:
             arguments = raw.get(name) if isinstance(raw.get(name), dict) else raw
             for schema in (BUILTIN_TOOL_SCHEMAS[name], self._profile.tool_schemas[name]):
@@ -1194,10 +1251,11 @@ class ExecutionEngine:
     def _append_event(self, state: RunState, event: dict) -> None:
         if self._durable is not None and state.task_ref is not None and state.run_ref is not None:
             try:
+                state.event_seq += 1
                 self._durable.emit_execution_event(
                     task_ref=state.task_ref,
                     run_ref=state.run_ref,
-                    source_sequence=len(state.events) + 1,
+                    source_sequence=state.event_seq,
                     event_type="tool_result" if event.get("type") == "tool_result" else "engine_event",
                     payload={"event": event},
                 )
@@ -1228,6 +1286,13 @@ class ExecutionEngine:
                 f"resume:{run_id}" if (resume and self._resume_from_checkpoint(state.task_ref, state.run_ref)) else None
             )
             try:
+                if self._controller_loop and state.task_ref is not None:
+                    # Opt-in execution binding: the shared graph-free
+                    # controller over the durable accepted-decision chain.
+                    await self._run_controller(state, run_id, run_input)
+                    if state.wait_request is not None:
+                        self._persist_wait(state, run_id)
+                    return
 
                 def observe(event: dict) -> RuntimeEventDecision:
                     self._append_event(state, event)
@@ -1251,27 +1316,7 @@ class ExecutionEngine:
                     )
                 )
                 if state.wait_request is not None:
-                    # step6c: persist the wait and hold the task — the
-                    # service's UNKNOWN classification is the stop vehicle,
-                    # not the run's truth.
-                    token = self._durable.park_wait(
-                        state.task_ref,
-                        state.run_ref,
-                        wake_kind=state.wait_request["wake_kind"],
-                        contract_ref=state.wait_request["contract_ref"],
-                        expires_at=state.wait_request.get("expires_at"),
-                    )
-                    state.wait_token = token
-                    state.status = (
-                        "waiting_input" if state.wait_request["wake_kind"] == "provide_input" else "waiting_approval"
-                    )
-                    self._evidence.append(
-                        "execution",
-                        state.principal,
-                        run_id,
-                        "waiting",
-                        {"status": state.status, "tool": state.wait_request["contract_ref"].get("tool")},
-                    )
+                    self._persist_wait(state, run_id)
                     return
                 final_status = result.state.value
                 if state.dispatch_denied:
@@ -1342,10 +1387,442 @@ class ExecutionEngine:
     def record_tool_result(self, state: RunState, tool_name: str, outcome: dict) -> None:
         self._append_event(state, {"type": "tool_result", "tool": tool_name, "outcome": outcome})
 
+    def _persist_wait(self, state: RunState, run_id: str) -> None:
+        """step6c: persist the wait and hold the task (shared by both paths)."""
+
+        wait_request = state.wait_request or {}
+        token = self._durable.park_wait(
+            state.task_ref,
+            state.run_ref,
+            wake_kind=wait_request["wake_kind"],
+            contract_ref=wait_request["contract_ref"],
+            expires_at=wait_request.get("expires_at"),
+        )
+        state.wait_token = token
+        state.status = "waiting_input" if wait_request["wake_kind"] == "provide_input" else "waiting_approval"
+        self._evidence.append(
+            "execution",
+            state.principal,
+            run_id,
+            "waiting",
+            {"status": state.status, "tool": (wait_request.get("contract_ref") or {}).get("tool")},
+        )
+
+    def _controller_tool_definitions(self) -> dict[str, dict]:
+        """Function-calling definitions for the allowlisted tools."""
+
+        definitions: dict[str, dict] = {}
+        for name in self._profile.config.tool_allowlist:
+            schema = (
+                self._profile.tool_schemas.get(name)
+                or BUILTIN_TOOL_SCHEMAS.get(name)
+                or {
+                    "type": "object",
+                    "properties": {},
+                }
+            )
+            definitions[name] = {"type": "function", "function": {"name": name, "parameters": schema}}
+        return definitions
+
+    async def _run_controller(self, state: RunState, run_id: str, run_input: dict) -> None:
+        """Drive the shared agent controller for one durable task dispatch.
+
+        The continuation position is the durable accepted-decision chain
+        keyed by the task's stable run; a restart replays committed turns
+        from storage and continues at the first uncommitted one. Dispatch
+        fencing uses a real task-dispatch lease so decision commits and
+        action dispatches validate ownership exactly like the platform
+        path; the lease is released when the dispatch ends. A park-worthy
+        dispatch outcome raises the durable wait signal, which this method
+        converts into ``state.wait_request`` so the shared park flow
+        commits it; the wake re-drives the same replay.
+        """
+
+        import uuid as _uuid
+
+        from hecate_durable.contracts.references import RefKind
+        from hecate_durable.runtime_hook import SqlAcceptedDecisionStore, SqlActionLedgerHook
+        from hecate_durable.storage.lease import task_dispatch_lease_key
+        from hecate_runtime.accepted_decision import DecisionOwnership, RunRef
+        from hecate_runtime.agent_controller import (
+            AgentController,
+            ControllerExecutionDriver,
+            ControllerLimits,
+            ControllerRunSpec,
+            PortTurnResponderSource,
+        )
+        from hecate_runtime.agent_turn import AgentTurn
+        from hecate_runtime.tool_call_executor import ToolCallExecutor
+
+        durable_run = self._durable.store.run_for_task(state.task_ref)
+        controller_run = RunRef(
+            issuer_domain=durable_run.issuer_domain if durable_run else "hecate-runner",
+            run_id=durable_run.id if durable_run else run_id,
+        )
+        # Continue the run's durable event sequence: a re-entry (wake or
+        # crash recovery) must append after the stream it already wrote.
+        cursor, has_more = 0, True
+        while has_more:
+            page = self._durable.read_execution_events(durable_run, cursor=cursor, limit=100) if durable_run else None
+            if page is None:
+                break
+            cursor, has_more = page.next_cursor, page.has_more
+        state.event_seq = cursor
+        lease_key = task_dispatch_lease_key(state.task_ref.issuer_domain, state.task_ref.id)
+        holder = f"runner-controller:{_uuid.uuid4().hex}"
+        handle = self._durable.store.leases.acquire(lease_key, holder, 120)
+        if handle is None:
+            state.status = "failed"
+            state.error = "controller dispatch lease unavailable"
+            return
+        ownership = DecisionOwnership(handle.lease_key, handle.fencing_token, handle.holder)
+        try:
+            hook = SqlActionLedgerHook(
+                self._durable.store,
+                task_ref=state.task_ref,
+                run_ref=BackendRef(RefKind.RUN, controller_run.issuer_domain, controller_run.run_id),
+                holder=handle.holder,
+                lease=handle,
+            )
+            state.action_hook = hook
+            port = _ControllerModelPort(self, state)
+            executor = (
+                ToolCallExecutor(
+                    port=port,
+                    action_hook=hook,
+                    access_policy=_ControllerApprovalPolicy(self),
+                    approval_callback=_ControllerApprovalCallback(self, state),
+                )
+                if self._approval_tools
+                else ToolCallExecutor(port=port, action_hook=hook)
+            )
+            source = PortTurnResponderSource(
+                port,
+                config={"model": self._profile.config.model_backend},
+                tool_definitions=self._controller_tool_definitions(),
+                base_refs={
+                    "definition": self._definition_digest,
+                    "model": self._profile.config.model_backend,
+                    "output_schema": run_input.get("output_schema"),
+                },
+            )
+            prompt = str(
+                (run_input.get("prompt") if isinstance(run_input.get("prompt"), str) else None)
+                or ((run_input.get("input") or {}).get("prompt") if isinstance(run_input.get("input"), dict) else "")
+                or ""
+            )
+            base_messages = [{"role": "user", "content": prompt}] if prompt else []
+            persisted = self._durable.store.get_task_input(state.task_ref) or {}
+            base_messages = base_messages or [
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {key: value for key, value in persisted.items() if not key.startswith("_")},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                }
+            ]
+            controller_options = run_input.get("controller") or {}
+            limits = ControllerLimits(
+                max_turns=controller_options.get("max_turns", 16), deadline=controller_options.get("deadline")
+            )
+            # A consumed provide_input wake merged its fields into the task
+            # input (``provided``) — a durable input revision the loop
+            # surfaces as one user message after the frozen base.
+            provided = run_input.get("provided")
+            pending_input = dict(provided) if isinstance(provided, dict) else None
+            spec = ControllerRunSpec(
+                run_ref=controller_run,
+                base_messages=base_messages,
+                ownership=ownership,
+                limits=limits,
+                pending_input=pending_input,
+                # A durable wait parked mid-turn (input request recorded as
+                # the real outcome) stops the turn's remaining actions
+                # BEFORE their ledger claim and ends the pass for parking.
+                stop_check=lambda: "input_wait_requested" if state.wait_request is not None else None,
+            )
+            initial_refs = {**source.frozen_refs(), "controller": "agent-loop/1", "turn": 1}
+            first_responder = source.responder_for(base_messages, initial_refs)
+            controller = AgentController(
+                AgentTurn(SqlAcceptedDecisionStore(self._durable.store), first_responder, executor),
+                source,
+            )
+            driver = ControllerExecutionDriver(controller, spec, should_cancel=lambda: state.cancel_requested)
+
+            def observe(event: dict) -> RuntimeEventDecision:
+                # Renew the dispatch lease at every turn boundary so a long
+                # multi-turn loop keeps valid fencing (same TTL budget per
+                # turn; a lost lease fences the next turn's writes).
+                self._durable.store.leases.renew(lease_key, holder, 120, fencing_token=handle.fencing_token)
+                self._append_event(state, event)
+                if state.needs_reconciliation or state.dispatch_denied:
+                    return RuntimeEventDecision.STOP_UNKNOWN
+                if state.wait_request is not None:
+                    # An input-required dispatch completed its turn with the
+                    # request as the real recorded outcome; park now instead
+                    # of deciding the next turn without the human input.
+                    return RuntimeEventDecision.STOP_UNKNOWN
+                return RuntimeEventDecision.CONTINUE
+
+            try:
+                result = await runtime_execution_service.execute(
+                    RuntimeExecutionRequest(
+                        runtime=driver,
+                        session_id=_uuid.uuid5(_uuid.NAMESPACE_URL, f"runner-controller:{controller_run.run_id}"),
+                        initial_input={},
+                        observer=observe,
+                        should_cancel=lambda: state.cancel_requested,
+                    )
+                )
+            except ApprovalWaitSignal as signal:
+                # A park-worthy dispatch outcome: record the wait on the
+                # run state; the shared park flow commits the durable wait
+                # and the caller's finally keeps the task non-terminal. The
+                # contract carries the accepted action's real arguments so
+                # the wake's one-shot grant matches them.
+                state.wait_request = {
+                    "wake_kind": signal.context.get("wake_kind", "resume"),
+                    "contract_ref": {
+                        "tool": signal.tool_name,
+                        "arguments_digest": tool_arguments_digest(signal.arguments),
+                        "arguments": dict(signal.arguments or {}),
+                        "invocation_id": signal.context.get("invocation_id"),
+                        "kind": signal.context.get("wait_kind", "approval"),
+                    },
+                }
+                return
+            if state.wait_request is not None:
+                # The observer stopped the stream at the turn boundary after
+                # an input-required outcome was durably recorded; the shared
+                # park flow commits the wait and releases the worker.
+                return
+            if result.state.value == "failed":
+                state.status = "failed"
+                state.error = result.error or "controller execution failed"
+                return
+            if result.state.value in ("unknown", "cancelled"):
+                state.status = "cancelled" if result.state.value == "cancelled" else "unknown"
+                state.error = f"controller execution {result.state.value}"
+                return
+            outcome = driver.outcome
+            if outcome is None:  # pragma: no cover - completed streams carry one
+                state.status = "unknown"
+                state.error = "controller stream ended without an outcome"
+                return
+            if outcome.is_final_answer:
+                schema = run_input.get("output_schema")
+                if schema is not None:
+                    try:
+                        document = json.loads(outcome.final_text or "")
+                        violation = next(Draft202012Validator(schema).iter_errors(document), None)
+                        if violation is not None:
+                            raise ValueError(violation.message)
+                    except Exception as exc:
+                        # The committed final-answer event retains delivery;
+                        # failed or unavailable checks must not grant success.
+                        state.status = "failed"
+                        state.error = f"final answer rejected by output_schema: {exc}"
+                        return
+                state.status = "succeeded"
+                state.result_ref = f"runs/{run_id}/artifacts"
+                self.record_tool_result(state, "controller", {"status": "final_answer", "turns": outcome.turns})
+                return
+            if outcome.reason == "cancel_requested":
+                state.status = "cancelled"
+                return
+            if outcome.reason in {"needs_review", "reconciliation_required", "store_unavailable"}:
+                state.needs_reconciliation = True
+                state.status = "unknown"
+                state.error = f"controller loop stopped: {outcome.reason}"
+                return
+            state.status = "failed"
+            state.error = f"controller loop stopped: {outcome.reason}"
+        finally:
+            self._durable.store.leases.release(lease_key, holder, fencing_token=handle.fencing_token)
+
     def _assemble_runtime(self, state: RunState) -> PregelExecutionDriver:
         from hecate_runtime.pregel import PregelRuntime
 
         return PregelExecutionDriver(PregelRuntime(self._graph, _FanOutWorker(self, state), self._checkpoint_store))
+
+
+class _ControllerApprovalPolicy:
+    """Executor-level access policy mirroring the engine's approval tools.
+
+    The accepted-action stack requires approval BEFORE its authoritative
+    ledger claim (a park after the claim would dangle as an unknown
+    outcome), so the controller executor gates approval-declared tools
+    here instead of inside ``_dispatch_tool``.
+    """
+
+    def __init__(self, engine: ExecutionEngine) -> None:
+        self._engine = engine
+
+    def evaluate(self, tool_meta, rules, eval_context, arguments=None):
+        from hecate_runtime.tool_access import AccessDecision
+
+        if tool_meta["name"] in self._engine._approval_tools:
+            return AccessDecision.REQUIRE_APPROVAL
+        return AccessDecision.EXECUTE
+
+
+class _ControllerApprovalCallback:
+    """Consume the one-shot wake grant, or park via the durable wait signal."""
+
+    def __init__(self, engine: ExecutionEngine, state: RunState) -> None:
+        self._engine = engine
+        self._state = state
+
+    async def request_approval(self, tool_name, arguments, risk_level, context):
+        from hecate_runtime.tool_access import ApprovalDecision
+
+        digest = tool_arguments_digest(arguments)
+        grant = None
+        wait: dict[str, Any] = {}
+        if self._state.task_ref is not None:
+            persisted = self._engine._durable.store.get_task_input(self._state.task_ref) or {}
+            grant = persisted.get("_wake_grant")
+            record = self._engine._durable.store.get_task_state(self._state.task_ref)
+            wait = (record.extra or {}).get("wait") or {} if record else {}
+        invocation_id = context.get("invocation_id")
+        if (
+            isinstance(grant, dict)
+            and invocation_id
+            and wait.get("consumed") is True
+            and (wait.get("contract_ref") or {}).get("invocation_id") == invocation_id
+            and await self._engine._consume_wake_grant(
+                self._state, tool_name, digest, arguments, invocation_id=invocation_id
+            )
+        ):
+            return ApprovalDecision(
+                approved=True, reason="wake grant", approval_ref=str(grant.get("approval_ref") or "wake")
+            )
+        raise ApprovalWaitSignal(tool_name, dict(arguments or {}), context={"invocation_id": invocation_id})
+
+
+class _ControllerModelPort:
+    """Runtime-port-shaped adapter binding the controller loop to the engine.
+
+    Model calls reuse the profile's declared backend: the endpoint backend
+    receives the full rebuilt conversation and tool definitions and may
+    answer with ``tool_calls`` (absent tool calls are a final answer); the
+    stub backend answers deterministically without tools. Tool dispatches
+    route through the engine's governed ``_dispatch_tool`` chain — a
+    park-worthy outcome (``awaiting_approval`` / ``input_required``) raises
+    the durable wait signal instead of becoming a tool result the loop
+    would treat as feedback.
+    """
+
+    def __init__(self, engine: ExecutionEngine, state: RunState) -> None:
+        self._engine = engine
+        self._state = state
+
+    async def create_span(self, name, parent_id=None, attributes=None):
+        """No-op tracing surface the executor's span protocol requires."""
+        return None
+
+    async def end_span(self, span_id, output_data=None, usage=None) -> None:
+        return None
+
+    async def llm_invoke_structured(self, messages: list[dict], config: dict):
+        """Reserve and settle every fresh model attempt through the host budget."""
+        refusal = await self._engine._reserve_model_budget(self._state)
+        if refusal is not None:
+            raise refusal.error or RuntimeError("model budget reservation refused")
+        key = self._state.model_invocation_id
+        gate = self._engine._budget_gate if key else None
+        usage = None
+        output_size = 0
+        try:
+            async for chunk in self._invoke(messages, config):
+                if isinstance(chunk.get("usage"), dict):
+                    usage = chunk["usage"]
+                output_size += len(json.dumps(chunk, ensure_ascii=False))
+                yield chunk
+            if gate is not None:
+                from hecate_governance.usage import SettleStatus, UsageRecord, UsageStatus
+
+                tokens = usage.get("total_tokens") if usage is not None else None
+                actual = type(tokens) is int and tokens >= 0
+                units = tokens if actual else max(1, (len(json.dumps(messages)) + output_size + 3) // 4)
+                settled = await gate.settle(
+                    UsageRecord(key, units, UsageStatus.ACTUAL if actual else UsageStatus.ESTIMATED)
+                )
+                if settled.status is SettleStatus.CONFLICT:
+                    raise RuntimeError("model usage settlement failed")
+        except BaseException:
+            if gate is not None:
+                from hecate_governance.usage import UsageRecord, UsageStatus
+
+                await gate.settle(UsageRecord(key, 0, UsageStatus.UNKNOWN, "controller model attempt interrupted"))
+                await gate._ledger.hold_for_reconciliation(key)
+            raise
+
+    async def _invoke(self, messages: list[dict], config: dict):
+        import json as _json
+
+        backend = self._engine._profile.config
+        if backend.model_backend == "endpoint":
+            headers = {}
+            if backend.model_auth_env:
+                headers["Authorization"] = f"Bearer {os.environ[backend.model_auth_env]}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    backend.model_endpoint,
+                    json={"messages": messages, "tools": config.get("tools") or []},
+                    headers=headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("model endpoint must return an object")
+            tool_calls = payload.get("tool_calls")
+            if tool_calls is not None and not isinstance(tool_calls, list):
+                raise ValueError("model endpoint tool_calls must be an array")
+            content = payload.get("content")
+            if content is not None and not isinstance(content, str):
+                raise ValueError("model endpoint content must be text or null")
+            usage = payload.get("usage")
+            if content:
+                yield {"content": content, "tool_calls": None}
+            yield {
+                "content": None,
+                "tool_calls": tool_calls if isinstance(tool_calls, list) else None,
+                **({"usage": usage} if usage is not None else {}),
+            }
+            return
+        joined = _json.dumps(messages[-1], ensure_ascii=False) if messages else ""
+        yield {"content": f"stub controller answer for {joined[:200]}", "tool_calls": None}
+
+    async def tool_execute(self, name, args, context=None):
+        outcome = await self._engine._dispatch_tool(self._state, name, dict(args or {}), accepted_context=context)
+        status = str(outcome.get("status") or "")
+        if status == "awaiting_approval":
+            # Approval parks happen at the executor's approval boundary —
+            # BEFORE the authoritative ledger claim, so recovery never sees
+            # a dangling claim for a parked action.
+            invocation_id = (context or {}).get("invocation_id")
+            signal = ApprovalWaitSignal(name, dict(args or {}), context={"invocation_id": invocation_id})
+            signal.context["wait_kind"] = "approval"
+            signal.context["wake_kind"] = "resume"
+            raise signal
+        if status == "input_required":
+            # The business interaction completed with a KNOWN result (the
+            # input request; no side effect per the contract). Returning it
+            # lets the executor record that real outcome, the turn completes,
+            # and the loop parks at the turn boundary (the observer watches
+            # ``state.wait_request``) — the wake's provided input then rides
+            # the next fresh turn as a durable input revision.
+            return {"status": "input_required", "detail": outcome}
+        if status != "ok":
+            detail = str(outcome.get("detail") or f"business tool returned {status}")
+            if status in {"unknown", "needs_review", "reconciliation_required", "store_unavailable", "output_invalid"}:
+                self._state.needs_reconciliation = True
+                raise TimeoutError(detail)
+            raise RuntimeError(detail)
+        return outcome
 
 
 class _FanOutWorker(Worker):

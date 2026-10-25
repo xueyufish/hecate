@@ -237,6 +237,7 @@ class DurableRuntime:
         expires_at: str | None = None,
         run_ref: BackendRef | None = None,
         input_validator: Callable[[dict], None] | None = None,
+        keep_run_linkage: bool = False,
     ) -> tuple[ControlCommandRecord, str | None]:
         """Record and atomically apply one wake command (provide_input/resume).
 
@@ -247,8 +248,11 @@ class DurableRuntime:
         ``rejected`` with the reason on the caller — the wait record is
         untouched and nothing dispatches. A valid application consumes the
         wait token, merges the provided input into the task's stored input,
-        requeues the task on a NEW attempt run, and flips the command to
-        ``applied`` — all in the store's single transaction.
+        requeues the task — on a NEW attempt run, or (with
+        ``keep_run_linkage``, the controller-loop profile whose durable
+        decision chain is keyed by the current run) on the same run — and
+        flips the command to ``applied``, all in the store's single
+        transaction.
         """
 
         wake_kind = (
@@ -309,6 +313,7 @@ class DurableRuntime:
                     expires_at=expires_at,
                     run_ref=current_run,
                     input_validator=input_validator,
+                    keep_run_linkage=keep_run_linkage,
                 )
 
         def _reject(reason: str) -> tuple[ControlCommandRecord, str | None]:
@@ -359,6 +364,12 @@ class DurableRuntime:
         tool = contract_ref.get("tool")
         candidate = raw_args.get(tool)
         arguments = candidate if isinstance(candidate, dict) else raw_args
+        # Controller-loop parks carry the accepted action's real arguments
+        # in the wait contract (they come from the committed decision, not
+        # the submitted tool_arguments); the one-shot grant must match them.
+        contract_arguments = contract_ref.get("arguments")
+        if isinstance(contract_arguments, dict):
+            arguments = contract_arguments
         if input_payload is not None:
             if any(key.startswith("_") for key in input_payload):
                 return _reject("internal host fields cannot be supplied")
@@ -399,25 +410,29 @@ class DurableRuntime:
                 input_validator({key: value for key, value in merged.items() if not key.startswith("_")})
             except ValueError as exc:
                 return _reject(str(exc))
-        new_run = BackendRef(RefKind.RUN, ISSUER, f"run-{uuid.uuid4()}")
+        new_run = None if keep_run_linkage else BackendRef(RefKind.RUN, ISSUER, f"run-{uuid.uuid4()}")
         try:
-            # One transaction: requeue on the new attempt run, merge the
-            # provided input, consume the wait token, and flip the command
-            # to applied (the store validates the command's expiry and task
-            # binding inside the same commit).
+            # One transaction: requeue (on the new attempt run, or — for the
+            # controller loop, whose durable decision chain is keyed by the
+            # current run — on the same run linkage), merge the provided
+            # input, consume the wait token, and flip the command to applied
+            # (the store validates the command's expiry and task binding
+            # inside the same commit).
             self.store.apply_task_state(
                 task_ref,
                 TaskLifecycleState.QUEUED,
                 expected_revision=record.revision,
                 input_payload=merged,
-                event_run_ref=new_run,
+                event_run_ref=new_run or current_run,
                 applied_command_id=command_id,
                 extra_update={"wait": {**wait, "consumed": True}},
             )
         except Exception as exc:  # expired command / stale revision in the store
             return _reject(str(exc))
-        # Checkpoints are attempt-scoped: the new Run cannot load the parked
+        # Checkpoints are attempt-scoped: a new Run cannot load the parked
         # attempt's state, even if the process dies immediately after commit.
+        # The controller loop keeps the linkage by design: its continuation
+        # is the accepted-decision chain on that same run.
         receipt = self.store.get(command_id)
         if receipt is None:  # pragma: no cover - recorded above in this call
             raise ValueError(f"wake command {command_id} vanished after apply")
