@@ -12,6 +12,14 @@ projects the trace's session window into ``query`` / ``generated_answer``
 self-contained, machine scores are recorded as provenance
 (``metadata_.backflow``) — never as ``expected_answer`` — and dedup is
 dataset-wide across both paths (see ``trace_dedup``).
+
+Candidate scores and provenance snapshots share one qualification: same
+workspace, same source task, trace-typed, completed, undeleted, non-human,
+and not the error sentinel. A qualifying score never proves trace
+ownership — materialization re-derives it from the session-or-agent
+workspace rule and skips out-of-workspace, deleted, or non-root traces
+before reading any events. Materialized items are written into the rule's
+real workspace explicitly.
 """
 
 from __future__ import annotations
@@ -30,16 +38,27 @@ from hecate.models.evaluation import (
     EvaluationItemModel,
     EvaluationTaskModel,
     EvaluationTaskScoreModel,
+    TaskScoreStatus,
     TaskType,
 )
+from hecate.models.session import SessionModel
 from hecate.ops.evaluation.tasks.trace_input import build_eval_input
 from hecate.ops.evaluation.trace_dedup import dataset_trace_ids
 
 logger = logging.getLogger(__name__)
 
+# Human ledger rows never carry a task id, but the explicit filter keeps
+# seeded or misattributed human rows out of candidates and provenance.
+_HUMAN_SOURCE = "human"
+_TRACE_TARGET_TYPE = "trace"
+
 
 class BackflowRuleNotFoundError(LookupError):
     """Rule with the given id does not exist in the workspace."""
+
+
+class BackflowReferenceNotFoundError(LookupError):
+    """A rule's task or dataset reference is unavailable in the workspace."""
 
 
 class BackflowValidationError(ValueError):
@@ -91,18 +110,22 @@ class BackflowService:
     # -- rule CRUD -----------------------------------------------------------
 
     async def create_rule(self, data: Any, workspace_id: uuid.UUID) -> EvaluationBackflowRuleModel:
-        """Persist a new rule after cross-object validation."""
-        filters = _rule_data_to_filters(data.filters)
+        """Persist a new rule after reference visibility and payload validation.
+
+        Reference visibility (combined not-found) precedes the payload's
+        business validation, mirroring the API precheck order.
+        """
         task = await self._task(data.task_id, workspace_id)
         if task is None:
-            raise BackflowValidationError(f"task {data.task_id} not found in workspace")
+            raise BackflowReferenceNotFoundError("task not found in workspace")
+        dataset = await self._dataset(data.dataset_id, workspace_id)
+        if dataset is None:
+            raise BackflowReferenceNotFoundError("dataset not found in workspace")
+        filters = _rule_data_to_filters(data.filters)
         if task.task_type != TaskType.ONLINE.value:
             raise BackflowValidationError(
                 f"task {data.task_id} is an {task.task_type} task; backflow rules require an online task"
             )
-        dataset = await self._dataset(data.dataset_id, workspace_id)
-        if dataset is None:
-            raise BackflowValidationError(f"dataset {data.dataset_id} not found in workspace")
         name = data.name.strip()
         await self._ensure_name_available(name, workspace_id)
         rule = EvaluationBackflowRuleModel(
@@ -121,11 +144,14 @@ class BackflowService:
 
     async def get_rule(self, rule_id: uuid.UUID, workspace_id: uuid.UUID) -> EvaluationBackflowRuleModel | None:
         result = await self.db.execute(
-            select(EvaluationBackflowRuleModel).where(
+            select(EvaluationBackflowRuleModel)
+            .where(
                 EvaluationBackflowRuleModel.id == rule_id,
                 EvaluationBackflowRuleModel.workspace_id == workspace_id,
                 ~EvaluationBackflowRuleModel.deleted,
             )
+            # The API precheck may retain this rule with outdated bindings.
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
@@ -153,25 +179,36 @@ class BackflowService:
         rule_id: uuid.UUID,
         workspace_id: uuid.UUID,
         data: Any,
+        *,
+        expected_references: tuple[uuid.UUID, uuid.UUID] | None = None,
     ) -> EvaluationBackflowRuleModel:
-        """Apply a partial update; changed references and filters re-validate."""
-        rule = await self._get_rule_or_raise(rule_id, workspace_id)
+        """Apply a partial update after rechecking the rule and effective references.
+
+        The merged-patch effective task and dataset must both be live in
+        the rule's workspace (combined not-found) before business
+        validation — an unchanged reference can expire mid-request too.
+        When supplied by the API, ``expected_references`` fixes the stored
+        binding admitted before the patch. A concurrent rebind is rejected
+        before applying the requested update; the effective task must be online.
+        """
+        rule = await self._get_rule_or_raise(rule_id, workspace_id, expected_references=expected_references)
+        effective_task_id = data.task_id if data.task_id is not None else rule.task_id
+        effective_dataset_id = data.dataset_id if data.dataset_id is not None else rule.dataset_id
+        task = await self._task(effective_task_id, workspace_id)
+        if task is None:
+            raise BackflowReferenceNotFoundError("task not found in workspace")
+        dataset = await self._dataset(effective_dataset_id, workspace_id)
+        if dataset is None:
+            raise BackflowReferenceNotFoundError("dataset not found in workspace")
+        if task.task_type != TaskType.ONLINE.value:
+            raise BackflowValidationError("backflow rules require an online task")
         if data.name is not None:
             name = data.name.strip()
             await self._ensure_name_available(name, workspace_id, exclude_id=rule.id)
             rule.name = name
         if data.task_id is not None:
-            task = await self._task(data.task_id, workspace_id)
-            if task is None:
-                raise BackflowValidationError(f"task {data.task_id} not found in workspace")
-            if task.task_type != TaskType.ONLINE.value:
-                raise BackflowValidationError(
-                    f"task {data.task_id} is an {task.task_type} task; backflow rules require an online task"
-                )
             rule.task_id = data.task_id
         if data.dataset_id is not None:
-            if await self._dataset(data.dataset_id, workspace_id) is None:
-                raise BackflowValidationError(f"dataset {data.dataset_id} not found in workspace")
             rule.dataset_id = data.dataset_id
         if data.filters is not None:
             rule.filters = _rule_data_to_filters(data.filters)
@@ -192,17 +229,30 @@ class BackflowService:
 
     # -- run -----------------------------------------------------------------
 
-    async def run_rule(self, rule_id: uuid.UUID, workspace_id: uuid.UUID) -> dict[str, Any]:
+    async def run_rule(
+        self,
+        rule_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        *,
+        expected_references: tuple[uuid.UUID, uuid.UUID] | None = None,
+    ) -> dict[str, Any]:
         """Materialize the rule's matching traces into its dataset.
 
         Returns ``{created, skipped, dataset_id}``. Re-runs are no-ops for
         traces already materialized into the dataset via either backflow
-        path.
+        path. The rule's currently bound task and dataset are rechecked
+        here — the API precheck's view may be stale. ``expected_references``
+        rejects a concurrent rebind, and the source task must remain online.
         """
-        rule = await self._get_rule_or_raise(rule_id, workspace_id)
+        rule = await self._get_rule_or_raise(rule_id, workspace_id, expected_references=expected_references)
+        task = await self._task(rule.task_id, workspace_id)
+        if task is None:
+            raise BackflowReferenceNotFoundError("task not found in workspace")
         dataset = await self._dataset(rule.dataset_id, workspace_id)
         if dataset is None:
-            raise BackflowValidationError(f"dataset {rule.dataset_id} not found in workspace")
+            raise BackflowReferenceNotFoundError("dataset not found in workspace")
+        if task.task_type != TaskType.ONLINE.value:
+            raise BackflowValidationError("backflow rules require an online task")
 
         candidates = await self._select_candidates(rule)
         snapshots = await self._matched_score_snapshots(rule, candidates)
@@ -230,13 +280,16 @@ class BackflowService:
         return {"created": created, "skipped": skipped, "dataset_id": dataset.id}
 
     async def _select_candidates(self, rule: EvaluationBackflowRuleModel) -> list[uuid.UUID]:
-        """Target ids whose score rows satisfy ALL filters, oldest hit first.
+        """Target ids whose qualifying score rows satisfy ALL filters, oldest first.
 
-        The error sentinel (``value = -1.0``) carries no score and never
-        matches. The walk is not SQL-capped: ``rule.limit`` caps
-        *materializations* in ``run_rule`` (cheap skips don't consume the
-        cap), so newly matched traces surface even when older ones were
-        already materialized by earlier runs.
+        Qualification mirrors ``_matched_score_snapshots``: same workspace,
+        same source task, trace-typed, completed, undeleted, non-human,
+        and not the error sentinel (``value = -1.0`` carries no score).
+        The walk is not SQL-capped: ``rule.limit`` caps *materializations*
+        in ``run_rule`` (cheap skips don't consume the cap), so newly
+        matched traces surface even when older ones were already
+        materialized by earlier runs. Ties on first hit break by target id
+        so repeated runs walk candidates in a stable order.
         """
         first_hit = func.min(EvaluationTaskScoreModel.created_at).label("first_hit")
         query = (
@@ -244,6 +297,9 @@ class BackflowService:
             .where(
                 EvaluationTaskScoreModel.task_id == rule.task_id,
                 EvaluationTaskScoreModel.workspace_id == rule.workspace_id,
+                EvaluationTaskScoreModel.target_type == _TRACE_TARGET_TYPE,
+                EvaluationTaskScoreModel.status == TaskScoreStatus.COMPLETED.value,
+                EvaluationTaskScoreModel.source != _HUMAN_SOURCE,
                 ~EvaluationTaskScoreModel.deleted,
                 EvaluationTaskScoreModel.value != -1.0,
             )
@@ -251,7 +307,7 @@ class BackflowService:
         )
         for entry in rule.filters:
             query = query.having(func.sum(case((_filter_condition(entry), 1), else_=0)) >= 1)
-        rows = await self.db.execute(query.order_by(first_hit.asc()))
+        rows = await self.db.execute(query.order_by(first_hit.asc(), EvaluationTaskScoreModel.target_id.asc()))
         return [row[0] for row in rows.all()]
 
     async def _matched_score_snapshots(
@@ -259,7 +315,11 @@ class BackflowService:
         rule: EvaluationBackflowRuleModel,
         target_ids: list[uuid.UUID],
     ) -> dict[str, list[dict[str, Any]]]:
-        """Per-target snapshot of the score rows that matched any filter."""
+        """Per-target snapshot of the qualifying score rows that matched any filter.
+
+        Qualification matches ``_select_candidates`` so provenance can only
+        ever contain rows that made the candidate eligible.
+        """
         if not target_ids:
             return {}
         matched = _filter_condition(rule.filters[0])
@@ -271,11 +331,14 @@ class BackflowService:
                 EvaluationTaskScoreModel.task_id == rule.task_id,
                 EvaluationTaskScoreModel.target_id.in_(target_ids),
                 EvaluationTaskScoreModel.workspace_id == rule.workspace_id,
+                EvaluationTaskScoreModel.target_type == _TRACE_TARGET_TYPE,
+                EvaluationTaskScoreModel.status == TaskScoreStatus.COMPLETED.value,
+                EvaluationTaskScoreModel.source != _HUMAN_SOURCE,
                 ~EvaluationTaskScoreModel.deleted,
                 EvaluationTaskScoreModel.value != -1.0,
                 matched,
             )
-            .order_by(EvaluationTaskScoreModel.created_at.asc())
+            .order_by(EvaluationTaskScoreModel.created_at.asc(), EvaluationTaskScoreModel.id.asc())
         )
         snapshots: dict[str, list[dict[str, Any]]] = {}
         for row in rows.scalars().all():
@@ -298,12 +361,15 @@ class BackflowService:
     ) -> bool:
         """Project one trace and persist its dataset item.
 
-        Returns ``False`` (counted as skipped) when the trace is gone, its
-        window has no complete user→assistant exchange, or the conversation
-        exceeds the rule's ``max_turns`` bound (skipped rather than truncated
-        mid-conversation, mirroring the projection's oversize semantics).
+        Returns ``False`` (counted as skipped) when the trace is not a
+        live completed root trace visible in the rule's workspace, its
+        window has no complete user→assistant exchange, or the
+        conversation exceeds the rule's ``max_turns`` bound (skipped
+        rather than truncated mid-conversation, mirroring the projection's
+        oversize semantics). Invisible traces are dropped before any
+        event read.
         """
-        trace = await self._load_trace(target_id)
+        trace = await self._workspace_trace(target_id, rule.workspace_id)
         if trace is None or trace.session_id is None:
             return False
         eval_input = await build_eval_input(trace.session_id, trace.start_time, trace.end_time, event_store)
@@ -319,6 +385,7 @@ class BackflowService:
                 generated_answer=eval_input.generated_answer,
                 context=eval_input.retrieved_contexts or None,
                 expected_answer=None,
+                workspace_id=rule.workspace_id,
                 metadata_={
                     "backflow": {
                         "trace_id": str(target_id),
@@ -338,10 +405,19 @@ class BackflowService:
 
     # -- helpers ---------------------------------------------------------------
 
-    async def _get_rule_or_raise(self, rule_id: uuid.UUID, workspace_id: uuid.UUID) -> EvaluationBackflowRuleModel:
+    async def _get_rule_or_raise(
+        self,
+        rule_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        *,
+        expected_references: tuple[uuid.UUID, uuid.UUID] | None = None,
+    ) -> EvaluationBackflowRuleModel:
         rule = await self.get_rule(rule_id, workspace_id)
         if rule is None:
             raise BackflowRuleNotFoundError(str(rule_id))
+        # A fresh ORM row must not silently replace the references admitted by the API.
+        if expected_references is not None and (rule.task_id, rule.dataset_id) != expected_references:
+            raise BackflowReferenceNotFoundError("rule references changed after authorization")
         return rule
 
     async def _ensure_name_available(
@@ -365,11 +441,14 @@ class BackflowService:
 
     async def _task(self, task_id: uuid.UUID, workspace_id: uuid.UUID) -> EvaluationTaskModel | None:
         result = await self.db.execute(
-            select(EvaluationTaskModel).where(
+            select(EvaluationTaskModel)
+            .where(
                 EvaluationTaskModel.id == task_id,
                 EvaluationTaskModel.workspace_id == workspace_id,
                 ~EvaluationTaskModel.deleted,
             )
+            # Revalidation must not reuse an earlier read's task type.
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
@@ -383,10 +462,45 @@ class BackflowService:
         )
         return result.scalar_one_or_none()
 
-    async def _load_trace(self, target_id: uuid.UUID) -> Any | None:
+    async def _workspace_trace(self, target_id: uuid.UUID, workspace_id: uuid.UUID) -> Any | None:
+        """A live completed root trace visible to the workspace.
+
+        Read-side tenant scope mirrors the traces API and the annotation
+        review reads: the trace's session OR its agent belongs to the
+        workspace (orphan traces are invisible). A qualifying score row
+        alone never proves trace ownership, so materialization re-derives
+        it here and never reads events for traces outside the workspace.
+        """
+        from hecate.models.agent import AgentModel
         from hecate.models.trace import TraceModel
 
-        result = await self.db.execute(select(TraceModel).where(TraceModel.id == target_id, ~TraceModel.deleted))
+        session_ws = (
+            select(SessionModel.id)
+            .where(
+                SessionModel.id == TraceModel.session_id,
+                SessionModel.workspace_id == workspace_id,
+                ~SessionModel.deleted,
+            )
+            .exists()
+        )
+        agent_ws = (
+            select(AgentModel.id)
+            .where(
+                AgentModel.id == TraceModel.agent_id,
+                AgentModel.workspace_id == workspace_id,
+                ~AgentModel.deleted,
+            )
+            .exists()
+        )
+        result = await self.db.execute(
+            select(TraceModel).where(
+                TraceModel.id == target_id,
+                TraceModel.type == "trace",
+                TraceModel.status == "completed",
+                ~TraceModel.deleted,
+                session_ws | agent_ws,
+            )
+        )
         return result.scalar_one_or_none()
 
     async def _get_event_store(self) -> Any:

@@ -7,12 +7,14 @@ annotation path (7.4) with shared, dataset-wide trace idempotency.
 """
 
 from hecate.ops.evaluation.backflow.service import (
+    BackflowReferenceNotFoundError,
     BackflowRuleNotFoundError,
     BackflowService,
     BackflowValidationError,
 )
 
 __all__ = [
+    "BackflowReferenceNotFoundError",
     "BackflowRuleNotFoundError",
     "BackflowService",
     "BackflowValidationError",
