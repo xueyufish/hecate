@@ -32,6 +32,8 @@ def write_profile(
     evidence: dict | None = None,
     with_write_tool: bool = False,
     with_approval_tool: bool = False,
+    controller_loop: bool = False,
+    model_backend: dict | None = None,
 ) -> Path:
     """Materialize a valid profile; return its directory.
 
@@ -39,7 +41,9 @@ def write_profile(
     (persistent task/action ledger); ``with_write_tool`` declares the
     builtin ``submit_inventory_update`` write tool, which only the durable
     profile admits; ``with_approval_tool`` declares a manifest-defined
-    approval-required tool (durable waiting, step6c).
+    approval-required tool (durable waiting, step6c). ``controller_loop``
+    opts execution into the shared graph-free agent controller (requires
+    the durable profile); ``model_backend`` overrides the model block.
     """
 
     tools = allowlist if allowlist is not None else ["query_inventory"]
@@ -88,12 +92,14 @@ def write_profile(
         "host": "127.0.0.1",
         "port": 0,
         "evidence_dir": "evidence",
-        "model": {"backend": "stub"},
+        "model": model_backend or {"backend": "stub"},
         "tool_allowlist": tools,
         "shutdown_token_ref": "env:RUNNER_SHUTDOWN_TOKEN",
     }
     if durable is not None:
         config["durable"] = durable
+    if controller_loop:
+        config["controller_loop"] = True
     if evidence is not None:
         config["evidence"] = evidence
     (profile / "runner.json").write_text(json.dumps(config), encoding="utf-8")

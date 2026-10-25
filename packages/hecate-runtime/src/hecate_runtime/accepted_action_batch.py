@@ -10,6 +10,7 @@ replanning — its report speaks only for the actions it processed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -73,6 +74,7 @@ class AcceptedActionBatch:
         context: dict[str, Any] | None = None,
         execution_context: dict[str, Any] | None = None,
         expected_decision_digest: str | None = None,
+        should_stop: Callable[[], str | None] | None = None,
     ) -> AcceptedActionBatchReport:
         """Dispatch the committed actions in order until a terminal outcome.
 
@@ -89,6 +91,16 @@ class AcceptedActionBatch:
             raise DecisionConflictError(decision_step_id, expected_decision_digest, record.content_digest or "")
         outcomes: list[AcceptedActionOutcome] = []
         for action in record.actions:
+            reason = should_stop() if should_stop is not None else None
+            if reason is not None:
+                outcomes.append(
+                    AcceptedActionOutcome(
+                        "stopped",
+                        execution_id_for_action(run_ref, decision_step_id, action.action_key),
+                        stop_reason=reason,
+                    )
+                )
+                break
             try:
                 outcome = await self._step.dispatch(
                     run_ref=run_ref,

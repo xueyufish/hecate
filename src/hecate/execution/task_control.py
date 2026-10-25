@@ -258,6 +258,24 @@ class TaskControlService:
         messages = input.get("messages")
         if not isinstance(messages, list) or not messages:
             raise TaskControlValidationError("input.messages must be a non-empty list")
+        if input.get("controller_loop") is True:
+            from hecate_runtime.agent_controller import ControllerLimits
+
+            from hecate.core.output_schema import check_output_schema
+
+            options = input.get("controller", {})
+            if not isinstance(options, dict):
+                raise TaskControlValidationError("input.controller must be an object")
+            try:
+                ControllerLimits(max_turns=options.get("max_turns", 16), deadline=options.get("deadline"))
+                schema = input.get("output_schema")
+                if schema is not None:
+                    if not isinstance(schema, dict):
+                        raise ValueError("output_schema must be an object")
+                    check_output_schema(schema)
+                self._validate_acceptance_declaration(input.get("acceptance"))
+            except ValueError as exc:
+                raise TaskControlValidationError(str(exc)) from exc
         agent = await self._db.get(AgentModel, agent_id)
         if agent is None or agent.deleted or agent.workspace_id != workspace_id:
             raise TaskControlNotFoundError(f"agent {agent_id} not found in workspace")
@@ -304,6 +322,18 @@ class TaskControlService:
             # step5e: durable approval wait opt-in — the dispatch assembly
             # parks on a policy-required approval instead of asking inline.
             "approval_wait": input.get("approval_wait") is True,
+            # Agent-controller loop opt-in: an explicit execution binding.
+            # The durable decision chain (keyed by this task's run) becomes
+            # the continuation position; re-dispatches replay it instead of
+            # minting attempt runs.
+            "controller_loop": input.get("controller_loop") is True,
+            "controller": input.get("controller") if isinstance(input.get("controller"), dict) else None,
+            "output_schema": input.get("output_schema") if isinstance(input.get("output_schema"), dict) else None,
+            # Versioned acceptance declaration: the goal/standard version
+            # this task runs under plus its deterministic required checks.
+            # The dispatcher freezes the references into every decision and
+            # gates task success on the recorded acceptance evaluation.
+            "acceptance": input.get("acceptance") if isinstance(input.get("acceptance"), dict) else None,
         }
         key = IdempotencyKey(
             key=idempotency_key or f"auto:{minted_task}",
@@ -360,6 +390,43 @@ class TaskControlService:
             lifecycle_state=await self._lifecycle_state(t_ref),
             replayed=False,
         )
+
+    @staticmethod
+    def _validate_acceptance_declaration(acceptance: Any) -> None:
+        """Fail fast on a malformed acceptance declaration at submission.
+
+        Supported required-check kinds: ``output_schema`` (a JSON Schema)
+        and ``content_contains`` (a substring). An unknown kind is an
+        authoring error, not an ``unverified`` verdict — unavailability is
+        reserved for evaluation-time gaps this validator cannot see.
+        """
+
+        if acceptance is None:
+            return
+        if not isinstance(acceptance, dict):
+            raise ValueError("acceptance must be an object")
+        version = acceptance.get("version", 1)
+        if type(version) is not int or version < 1:
+            raise ValueError("acceptance.version must be a positive integer")
+        checks = acceptance.get("required_checks", [])
+        if not isinstance(checks, list):
+            raise ValueError("acceptance.required_checks must be an array")
+        for check in checks:
+            if not isinstance(check, dict):
+                raise ValueError("each acceptance required check must be an object")
+            kind = check.get("kind")
+            if kind == "output_schema":
+                from hecate.core.output_schema import check_output_schema
+
+                schema = check.get("schema")
+                if not isinstance(schema, dict):
+                    raise ValueError("output_schema check requires a schema object")
+                check_output_schema(schema)
+            elif kind == "content_contains":
+                if not isinstance(check.get("value"), str) or not check["value"]:
+                    raise ValueError("content_contains check requires a nonempty value")
+            else:
+                raise ValueError(f"unsupported acceptance check kind {kind!r}")
 
     async def _dispatch_now(self, t_ref: BackendRef, *, db: AsyncSession | None = None) -> None:
         """Dispatch one task synchronously (the ``wait`` submission view)."""

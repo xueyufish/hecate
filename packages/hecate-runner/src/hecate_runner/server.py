@@ -351,6 +351,11 @@ class RunnerServer:
                         approval_ref=body.get("approval_ref"),
                         expires_at=body.get("expires_at"),
                         input_validator=server._engine.validate_run_input,
+                        # The controller loop's continuation is the durable
+                        # decision chain keyed by the current run — its
+                        # wakes keep the run linkage instead of rebinding
+                        # to a new attempt run.
+                        keep_run_linkage=bool(getattr(server._engine, "_controller_loop", False)),
                     )
 
                 try:

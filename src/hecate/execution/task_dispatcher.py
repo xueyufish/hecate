@@ -135,6 +135,17 @@ class _DispatchContext:
     workflow_step: dict[str, Any] | None = None
     # step5e: durable approval wait opt-in from the task input payload.
     approval_wait: bool = False
+    # Agent-controller loop opt-in: the durable decision chain is the
+    # continuation position, so re-dispatches continue the SAME run instead
+    # of minting attempt runs or resuming a Pregel engine session.
+    controller_loop: bool = False
+    controller_max_turns: int | None = None
+    controller_deadline: str | None = None
+    output_schema: dict[str, Any] | None = None
+    platform_run_id: str | None = None
+    # Versioned acceptance declaration: the goal/standard version plus the
+    # deterministic required checks that gate task success.
+    acceptance: dict[str, Any] | None = None
 
 
 class PlatformTaskDispatcher:
@@ -258,6 +269,15 @@ class PlatformTaskDispatcher:
 
         if record.revision == 0 and latest is not None and not (latest.projection or {}):
             run = latest  # the attempt minted at submit; never executed
+        elif context.controller_loop and latest is not None:
+            # The controller's continuation position is the durable
+            # accepted-decision chain keyed by the task's stable run, not a
+            # Pregel engine session: re-dispatches (crash recovery, retry,
+            # approval/input wake) continue the SAME run and replay the
+            # chain from storage. Admission was re-validated above.
+            run = latest
+            engine_session = self._engine_session_of(latest)
+            resume_interrupted = True
         elif approval_wake and latest is not None:
             # An authorized approval wake continues the parked attempt
             # NATIVELY (same run / engine session): the action ledger's
@@ -320,6 +340,17 @@ class PlatformTaskDispatcher:
         try:
             if context.workflow_plan is not None:
                 outcome = await self._execute_workflow(db, context, task_ref=task_ref, lease=lease)
+            elif context.controller_loop:
+                outcome = await self._execute_controller(
+                    db,
+                    context,
+                    engine_session=engine_session,
+                    task_ref=task_ref,
+                    run_ref=r_ref,
+                    lease=lease,
+                    resume_interrupted=resume_interrupted,
+                    run=run,
+                )
             else:
                 outcome = await self._execute(
                     db,
@@ -627,6 +658,7 @@ class PlatformTaskDispatcher:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             raise ValueError(f"task {task_ref.id} input payload has no messages list")
+        controller = payload.get("controller") if isinstance(payload.get("controller"), dict) else {}
         return _DispatchContext(
             task_id=uuid.UUID(task_ref.id),
             workspace_id=workspace_id,
@@ -641,6 +673,12 @@ class PlatformTaskDispatcher:
             workflow_parent=(payload["workflow_parent"] if isinstance(payload.get("workflow_parent"), dict) else None),
             workflow_step=payload.get("workflow_step"),
             approval_wait=payload.get("approval_wait") is True,
+            controller_loop=payload.get("controller_loop") is True,
+            controller_max_turns=controller.get("max_turns") if isinstance(controller.get("max_turns"), int) else None,
+            controller_deadline=controller.get("deadline") if isinstance(controller.get("deadline"), str) else None,
+            output_schema=payload.get("output_schema") if isinstance(payload.get("output_schema"), dict) else None,
+            platform_run_id=payload.get("platform_run_id") if isinstance(payload.get("platform_run_id"), str) else None,
+            acceptance=payload.get("acceptance") if isinstance(payload.get("acceptance"), dict) else None,
         )
 
     @staticmethod
@@ -927,6 +965,303 @@ class PlatformTaskDispatcher:
         if not isinstance(result, dict):
             raise ValueError(f"unexpected entry result type {type(result)}")
         return self._child_result(result, context)
+
+    async def _execute_controller(
+        self,
+        db: AsyncSession,
+        context: _DispatchContext,
+        *,
+        engine_session: uuid.UUID,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        lease: Any = None,
+        resume_interrupted: bool = False,
+        run: RunModel | None = None,
+    ) -> dict[str, Any]:
+        """Run the opt-in agent-controller loop over the shared assembly.
+
+        Same assembly as the entry-service path (frozen agent version,
+        resolved tools, guardrail bundle, runtime port, durable action
+        hook); the execution mechanism is the graph-free controller whose
+        continuation is the durable accepted-decision chain keyed by the
+        task's stable run. A durable approval wait propagates its signal
+        to the caller's park path; the final answer is delivery-checked
+        against the task's declared output schema before the task may
+        succeed — an accepted answer is never by itself a completion fact.
+        """
+
+        from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+        from hecate_llm.service import llm_service
+        from hecate_runtime.accepted_decision import DecisionOwnership, RunRef
+        from hecate_runtime.agent_controller import (
+            AgentController,
+            ControllerExecutionDriver,
+            ControllerLimits,
+            ControllerRunSpec,
+            PortTurnResponderSource,
+        )
+        from hecate_runtime.agent_turn import AgentTurn
+        from hecate_runtime.execution_service import RuntimeExecutionRequest, runtime_execution_service
+        from hecate_runtime.tool_call_executor import ToolCallExecutor
+
+        from hecate.core.composition.entry_assembly import (
+            build_tool_registry,
+            get_shared_event_store,
+            load_agent_tools,
+        )
+        from hecate.core.composition.guardrail_platform import assemble_guardrails
+        from hecate.core.composition.runtime_port_adapter import create_runtime_port
+        from hecate.models.agent_version import AgentVersionModel
+
+        agent = await db.get(AgentModel, context.agent_id)
+        if agent is None:
+            raise ValueError(f"agent {context.agent_id} no longer resolves for task {task_ref.id}")
+        run = await TaskRunRegistry(db).get_run(uuid.UUID(run_ref.id), context.workspace_id)
+        snapshot = run.execution_snapshot or {}
+        version = await db.get(AgentVersionModel, uuid.UUID(snapshot["agent_version_id"]))
+        if version is None or version.deleted:
+            raise ValueError("the frozen agent version no longer resolves")
+        config = snapshot.get("config_snapshot") or {}
+        tool_refs = config.get("tools") or []
+        event_store = None
+        tool_registry = None
+        effective_tools: list[dict[str, Any]] = []
+        bundle = None
+        if tool_refs:
+            event_store = get_shared_event_store()
+            tool_registry = build_tool_registry(db, workspace_id=context.workspace_id)
+            effective_tools = await load_agent_tools(db, tool_refs, workspace_id=context.workspace_id)
+            if effective_tools:
+                bundle = await assemble_guardrails(
+                    db,
+                    workspace_id=context.workspace_id,
+                    agent_id=agent.id,
+                    guardrail_config=config.get("guardrail_config"),
+                    event_store=event_store,
+                    session_id=engine_session,
+                    user_id=context.user_id,
+                    dlp_scanner=None,
+                )
+        await self._wire_approval_backend(db, context, bundle, resume_interrupted=resume_interrupted)
+
+        port = create_runtime_port(
+            db,
+            llm_service,
+            tool_registry=tool_registry,
+            workspace_id=context.workspace_id,
+            agent_id=agent.id,
+            identity={
+                "actor": str(context.user_id) if context.user_id else f"agent:{agent.id}",
+                "agent_principal": str(agent.id),
+                "task_scope": str(context.task_id) if context.approval_wait else None,
+            },
+        )
+        hook = None
+        if hasattr(self._store, "claim_ex"):
+            from hecate_durable.runtime_hook import SqlActionLedgerHook
+
+            hook = SqlActionLedgerHook(
+                self._store,
+                task_ref=task_ref,
+                run_ref=run_ref,
+                holder=lease.holder if lease is not None else "platform-inline",
+                lease=lease,
+            )
+        if context.platform_run_id is None:
+            raise ValueError("controller tasks require the platform run stamped at submission")
+        controller_run = RunRef(issuer_domain=PLATFORM_ISSUER, run_id=context.platform_run_id)
+        ownership = (
+            DecisionOwnership(lease_key=lease.lease_key, fence_token=lease.fencing_token, holder=lease.holder)
+            if lease is not None
+            else None
+        )
+        model_name = context.model or (config.get("model_config") or {}).get("model", "gpt-4o")
+        tool_definitions = {
+            definition["function"]["name"]: definition
+            for definition in effective_tools
+            if isinstance(definition, dict) and isinstance(definition.get("function"), dict)
+        }
+        base_refs = {
+            "task": str(context.task_id),
+            "agent_version": str(version.id),
+            "agent_version_no": version.version,
+            "model": model_name,
+            "tools": sorted(tool_definitions),
+            # Frozen goal/acceptance references: every committed decision
+            # pins the goal digest and acceptance version it ran under, so
+            # a re-presented chain under a different standard conflicts.
+            "goal": context.goal,
+            "acceptance_version": (context.acceptance or {}).get("version"),
+        }
+        store = SqlAcceptedDecisionStore(self._store)
+        executor = ToolCallExecutor(
+            port=port,
+            event_store=event_store,
+            access_policy=bundle.access_policy if bundle else None,
+            approval_callback=bundle.approval_callback if bundle else None,
+            tool_rules=bundle.rules if bundle else None,
+            middleware_chains=bundle.middleware_chains if bundle else None,
+            denial_tracker=bundle.denial_tracker if bundle else None,
+            action_hook=hook,
+        )
+        source = PortTurnResponderSource(
+            port,
+            config={**(config.get("model_config") or {}), "model": model_name},
+            tool_definitions=tool_definitions,
+            base_refs=base_refs,
+        )
+        limits = ControllerLimits(
+            max_turns=context.controller_max_turns or 16,
+            deadline=context.controller_deadline,
+        )
+        provided = context.provided
+        if context.approval_wait and isinstance(provided, dict):
+            # Approval references are control data, not a new model input
+            # that can rewrite the base of an already accepted chain.
+            provided = {key: value for key, value in provided.items() if key != "approval_ref"} or None
+        messages = [
+            {"role": "system", "content": config.get("persona") or "You are a helpful assistant."},
+            *(
+                [
+                    {
+                        "role": "system",
+                        "content": "Return final output as JSON satisfying this schema: "
+                        + json.dumps(context.output_schema),
+                    }
+                ]
+                if context.output_schema is not None
+                else []
+            ),
+            *context.messages,
+        ]
+        spec = ControllerRunSpec(
+            run_ref=controller_run,
+            base_messages=messages,
+            ownership=ownership,
+            limits=limits,
+            execution_context={
+                "session_id": str(engine_session),
+                "agent_id": str(agent.id),
+                "workspace_id": str(context.workspace_id),
+                "on_behalf_of_user": str(context.user_id) if context.user_id else None,
+            },
+            # Consumed input wakes ride as a durable revision at the tail —
+            # never folded into the frozen base.
+            pending_input=provided,
+        )
+        first_responder = source.responder_for(messages, {**base_refs, "controller": "agent-loop/1", "turn": 1})
+        controller = AgentController(AgentTurn(store, first_responder, executor), source)
+
+        def should_cancel() -> bool:
+            current = self._store.get_task_state(task_ref)
+            return current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING
+
+        driver = ControllerExecutionDriver(controller, spec, should_cancel=should_cancel)
+        result = await runtime_execution_service.execute(
+            RuntimeExecutionRequest(
+                runtime=driver, session_id=engine_session, initial_input={}, should_cancel=should_cancel
+            )
+        )
+        if result.state.value == "failed":
+            raise RuntimeError(result.error or "controller execution failed")
+        if result.state.value in ("unknown", "cancelled"):
+            return {"status": "unknown", "content": "", "error": f"controller execution {result.state.value}"}
+        outcome = driver.outcome
+        if outcome is None:  # pragma: no cover - a completed stream always carries one
+            return {"status": "unknown", "content": "", "error": "controller stream ended without an outcome"}
+        if outcome.is_final_answer:
+            return self._evaluate_delivery(outcome.final_text or "", context)
+        if outcome.reason == "cancel_requested":
+            return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
+        return {
+            "status": "failed",
+            "content": "",
+            "error": f"controller loop stopped: {outcome.reason}",
+            "error_category": f"controller_{outcome.reason}",
+        }
+
+    @staticmethod
+    def _declared_checks(context: _DispatchContext) -> tuple[int, list[dict[str, Any]]]:
+        """The acceptance version and deterministic checks this task declared.
+
+        A bare ``output_schema`` (no acceptance block) stays supported and
+        evaluates as one output-schema check under version 1.
+        """
+
+        acceptance = context.acceptance
+        if acceptance is not None:
+            checks = list(acceptance.get("required_checks") or [])
+            return int(acceptance.get("version", 1)), checks
+        if context.output_schema is not None:
+            return 1, [{"kind": "output_schema", "schema": context.output_schema}]
+        return 1, []
+
+    @classmethod
+    def _evaluate_delivery(cls, text: str, context: _DispatchContext) -> dict[str, Any]:
+        """Delivery gate: execution, delivery and acceptance stay separate facts.
+
+        An accepted final answer is the delivered content; it submits the
+        task as succeeded only when every declared required check passes
+        under the declared acceptance version. The evaluation itself is
+        recorded (version, per-check status, content digest) on the task
+        result — the minimal durable acceptance record. A failed or
+        unverified check keeps the delivered content visible and never
+        grants success.
+        """
+
+        import hashlib
+
+        version, checks = cls._declared_checks(context)
+        results: list[dict[str, Any]] = []
+        status: str = "passed"
+        problem: tuple[str, str] | None = None
+        for check in checks:
+            kind = str(check.get("kind") or "")
+            if kind == "output_schema":
+                detail = cls._output_schema_problem(text, check.get("schema"))
+            elif kind == "content_contains":
+                value = str(check.get("value") or "")
+                detail = None if (value and value in text) else f"delivered content does not contain {value!r}"
+            else:
+                # Unknown-to-this-dispatcher check: unavailable, not passed.
+                detail = f"required check {kind!r} is not available"
+            if detail is None:
+                results.append({"kind": kind, "status": "passed"})
+                continue
+            failed_status = "unverified" if kind not in {"output_schema", "content_contains"} else "failed"
+            results.append({"kind": kind, "status": failed_status, "detail": detail})
+            if problem is None:
+                status = "acceptance_unverified" if failed_status == "unverified" else "acceptance_failed"
+                problem = (status, detail)
+        acceptance_record = {
+            "version": version,
+            "status": "passed" if problem is None else problem[0],
+            "checks": results,
+            "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
+        if problem is None:
+            return {"status": "succeeded", "content": text, "acceptance": acceptance_record}
+        return {
+            "status": "failed",
+            "content": text,
+            "error": problem[1],
+            "error_category": problem[0],
+            "acceptance": acceptance_record,
+        }
+
+    @staticmethod
+    def _output_schema_problem(text: str, schema: Any) -> str | None:
+        """First schema violation of the delivered text, or None when absent."""
+        if not isinstance(schema, dict):
+            return "the declared output schema is unavailable"
+        from hecate.core.output_schema import output_schema_error
+
+        try:
+            document = json.loads(text)
+        except json.JSONDecodeError as exc:
+            return f"final answer is not valid JSON: {exc.msg}"
+        error = output_schema_error(document, schema)
+        return f"final answer violates the declared output schema: {error}" if error is not None else None
 
     @staticmethod
     def _child_result(result: dict[str, Any], context: _DispatchContext) -> dict[str, Any]:
