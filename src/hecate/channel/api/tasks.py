@@ -19,6 +19,11 @@ Task lifecycle surface over :class:`TaskControlService`:
   ``GET /api/commands/{command_id}`` — control-command receipts. An HTTP
   success here records a request; it never claims the command was
   applied.
+- ``POST /api/tasks/{id}/workflow-callback`` — the verified workflow
+  child-outcome callback. Same two-level write gate as the command
+  entries (parent visibility, then the server-side EDITOR floor) ahead
+  of any replay, verification or receipt write; trusted internal
+  callers consume the service directly without this REST role gate.
 - ``GET /api/tasks/{id}/commands`` — read-only paged receipts of one
   task's commands, recorded states verbatim (no lazy expiry here).
 - ``GET /api/reconciliation/pending`` — the pending-reconciliation view.
@@ -303,9 +308,24 @@ async def workflow_callback(
     rejected without consuming the wait token. A settled ``command_id``
     replays its receipt idempotently.
     """
+    # Write gate before any callback replay, verification or receipt write:
+    # workspace requirement, then parent visibility (foreign, missing and
+    # soft-deleted tasks are indistinguishable), then the server-side EDITOR
+    # floor. The wait token and a known command_id are facts about the task,
+    # never substitutes for write permission; trusted internal callers reach
+    # the service directly and do not pass through this role gate.
+    workspace_id = _workspace_id(ctx)
+    try:
+        await service.assert_task_visible(workspace_id=workspace_id, task_id=task_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
     try:
         issued = await service.submit_workflow_callback(
-            workspace_id=_workspace_id(ctx),
+            workspace_id=workspace_id,
             task_id=task_id,
             command_id=body.command_id,
             wait_token=body.wait_token,
