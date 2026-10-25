@@ -354,8 +354,10 @@ class RunnerServer:
                         # The controller loop's continuation is the durable
                         # decision chain keyed by the current run — its
                         # wakes keep the run linkage instead of rebinding
-                        # to a new attempt run.
+                        # to a new attempt run, and its input wakes record
+                        # immutable revisions instead of snapshot merges.
                         keep_run_linkage=bool(getattr(server._engine, "_controller_loop", False)),
+                        controller_loop=bool(getattr(server._engine, "_controller_loop", False)),
                     )
 
                 try:

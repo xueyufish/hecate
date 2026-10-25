@@ -144,16 +144,16 @@ class DurableWorker:
         handle = await asyncio.to_thread(self._leases.acquire, key, self._claim_holder(), self._lease_ttl)
         if handle is None:
             return False  # another worker instance owns the dispatch
-        record = await asyncio.to_thread(self._store.get_task_state, task_ref)
-        if (
-            record is None
-            or record.lifecycle_state is not TaskLifecycleState.QUEUED
-            or not self._due(record)
-            or handle.fencing_token != self._leases.current_token(key)
-        ):
-            await self._release(handle)
-            return False  # moved on concurrently, or the lease was taken over
         try:
+            record = await asyncio.to_thread(self._store.get_task_state, task_ref)
+            if (
+                record is None
+                or record.lifecycle_state is not TaskLifecycleState.QUEUED
+                or not self._due(record)
+                or handle.fencing_token != self._leases.current_token(key)
+            ):
+                await self._release(handle)
+                return False  # moved on concurrently, or the lease was taken over
             await asyncio.to_thread(
                 self._store.apply_task_state,
                 task_ref,
@@ -165,6 +165,13 @@ class DurableWorker:
         except (InvalidTaskTransitionError, ValueError, StaleFenceError):
             await self._release(handle)
             return False  # cancelled or otherwise moved between read and claim
+        except BaseException:
+            # Storage errors (a busy shared file, an unreachable database)
+            # must not leak the claimed lease: release it so the next
+            # dispatch attempt — this worker's reconcile cycle or the
+            # caller's retry — starts clean instead of waiting out the TTL.
+            await self._release(handle)
+            raise
         self._inflight.add(key)
         heartbeat = asyncio.create_task(self._heartbeat(key, handle))
         self._heartbeat_tasks.add(heartbeat)
