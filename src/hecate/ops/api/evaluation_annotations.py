@@ -38,6 +38,13 @@ endpoints resolve the queue through the read boundary first, from-task
 intake additionally requires the source task to be live in the queue's
 real workspace before the editor floor, and the intake itself only
 accepts traces the queue's workspace can see.
+
+Item workflow writes (claim, skip, submit, delete) sit behind the same
+write boundary: the item resolves through the item read boundary first
+(existence, soft-delete state, workspace ownership, URL queue binding,
+and parent-child workspace consistency before the role check), then an
+editor floor applies and the write runs in the item's real workspace with
+the service rechecking the path binding before any mutation.
 """
 
 from __future__ import annotations
@@ -453,10 +460,22 @@ async def claim_item(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Claim a pending item for review (assignees only when the queue has them)."""
+    """Claim a pending item for review (assignees only when the queue has them).
+
+    Scoped behind the annotation write boundary: the item and its queue
+    resolve through the item read boundary first (ownership and path
+    binding before the role check), then an editor floor applies and the
+    claim runs in the item's real workspace with the path binding
+    rechecked by the service.
+    """
+    item, _queue = await _get_item_for_read(ctx, queue_id, item_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
-        item = await svc.claim_item(item_id, workspace_id=ctx.workspace_id, user_id=ctx.user_id)
+        item = await svc.claim_item(item_id, workspace_id=item.workspace_id, user_id=ctx.user_id, queue_id=queue_id)
     except AnnotationQueueItemNotFoundError as exc:
         raise _not_found("Annotation queue item not found") from exc
     except AnnotationItemStateError as exc:
@@ -473,10 +492,21 @@ async def skip_item(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Skip a pending or claimed item without scoring it."""
+    """Skip a pending or claimed item without scoring it.
+
+    Scoped behind the annotation write boundary: the item and its queue
+    resolve through the item read boundary first, then an editor floor
+    applies and the skip runs in the item's real workspace with the path
+    binding rechecked by the service.
+    """
+    item, _queue = await _get_item_for_read(ctx, queue_id, item_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
-        item = await svc.skip_item(item_id, workspace_id=ctx.workspace_id, user_id=ctx.user_id)
+        item = await svc.skip_item(item_id, workspace_id=item.workspace_id, user_id=ctx.user_id, queue_id=queue_id)
     except AnnotationQueueItemNotFoundError as exc:
         raise _not_found("Annotation queue item not found") from exc
     except AnnotationItemStateError as exc:
@@ -492,14 +522,26 @@ async def submit_item(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
-    """Submit annotations; human score rows land in the shared score ledger."""
+    """Submit annotations; human score rows land in the shared score ledger.
+
+    Scoped behind the annotation write boundary: the item and its queue
+    resolve through the item read boundary first, then an editor floor
+    applies and the submission runs in the item's real workspace with the
+    path binding rechecked by the service.
+    """
+    item, _queue = await _get_item_for_read(ctx, queue_id, item_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
         item = await svc.submit_item(
             item_id,
-            workspace_id=ctx.workspace_id,
+            workspace_id=item.workspace_id,
             user_id=ctx.user_id,
             annotations=[a.model_dump() for a in data.annotations],
+            queue_id=queue_id,
         )
     except AnnotationQueueItemNotFoundError as exc:
         raise _not_found("Annotation queue item not found") from exc
@@ -517,10 +559,21 @@ async def delete_item(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
-    """Remove a pending or skipped item from the queue."""
+    """Remove a pending or skipped item from the queue.
+
+    Scoped behind the annotation write boundary: the item and its queue
+    resolve through the item read boundary first, then an editor floor
+    applies and the soft delete runs in the item's real workspace with the
+    path binding rechecked by the service.
+    """
+    item, _queue = await _get_item_for_read(ctx, queue_id, item_id, db)
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as e:
+        raise _forbidden(e) from e
     svc = AnnotationService(db)
     try:
-        await svc.delete_item(item_id, workspace_id=ctx.workspace_id)
+        await svc.delete_item(item_id, workspace_id=item.workspace_id, queue_id=queue_id)
     except AnnotationQueueItemNotFoundError as exc:
         raise _not_found("Annotation queue item not found") from exc
     except AnnotationItemStateError as exc:

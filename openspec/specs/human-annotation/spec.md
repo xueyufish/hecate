@@ -144,7 +144,9 @@ Re-enqueueing a trace whose prior trace-typed item row is soft-deleted SHALL be 
 - **THEN** neither intake endpoint SHALL treat that item as a trace duplicate, and the non-trace row SHALL remain unchanged
 
 ### Requirement: Queue item workflow (claim / submit / skip)
-A queue item SHALL move through `pending → claimed → completed | skipped`. `POST .../items/{item_id}/claim` SHALL record `claimed_by` and `claimed_at`; when the queue has a non-empty `assigned_user_ids`, only assigned users MAY claim, otherwise any workspace member MAY claim. `POST .../items/{item_id}/submit` SHALL carry one annotation entry per queue metric (`metric_name`, `value`, optional `overrides_score_id`, optional `reason_code`, optional `justification`), validate each `value` against the metric definition's domain, and persist the entries as human score records (see "Human scores in the shared ledger"); the item SHALL become `completed` with `completed_by`/`completed_at`. `POST .../items/{item_id}/skip` SHALL mark the item `skipped`. Submitting or claiming a completed or skipped item SHALL be rejected. Deleting an item SHALL only be allowed in `pending` or `skipped` state.
+A queue item SHALL move through `pending → claimed → completed | skipped`. `POST .../items/{item_id}/claim` SHALL record `claimed_by` and `claimed_at`; when the queue has a non-empty `assigned_user_ids`, only assigned users MAY claim, otherwise any workspace member holding at least an editor role MAY claim. `POST .../items/{item_id}/submit` SHALL carry one annotation entry per queue metric (`metric_name`, `value`, optional `overrides_score_id`, optional `reason_code`, optional `justification`), validate each `value` against the metric definition's domain, and persist the entries as human score records (see "Human scores in the shared ledger"); the item SHALL become `completed` with `completed_by`/`completed_at`. `POST .../items/{item_id}/skip` SHALL mark the item `skipped`. Submitting or claiming a completed or skipped item SHALL be rejected. Deleting an item SHALL only be allowed in `pending` or `skipped` state.
+
+The four item workflow writes (`claim`, `submit`, `skip`, and `DELETE .../items/{item_id}`) SHALL sit behind the annotation write boundary. The item and its parent queue SHALL resolve through the item read boundary first — existence, soft-delete state, workspace ownership, URL queue binding, and parent-child workspace consistency, all before the role check — with missing, soft-deleted, foreign-workspace, wrongly-bound, and parent-child-inconsistent items surfacing as the same identifier-free 404 for every identity, and a workspace-less non-system identity denied before any query. Non-system callers SHALL hold at least an editor role, denied before the workflow service runs any state, assigned-list, or score validation. The service SHALL recheck the URL queue binding and fresh row state before writing, so a binding or row that changed after the API precheck is rejected with the same 404 instead of written through the precheck's cached object. Explicit system scope SHALL retain its role exemption and MAY operate on a live item by its explicit id without an active workspace; the write SHALL run in the item's real workspace, and system scope SHALL NOT bypass the path binding, soft deletes, parent-child consistency, state transitions, or the assigned-list rule. Request schema shape violations keep their 422 behavior, and denied writes SHALL NOT modify queue, item, or score data.
 
 #### Scenario: Claim and submit complete an item
 - **WHEN** an assigned reviewer claims a pending item, then submits `{"annotations": [{"metric_name": "helpfulness", "value": 0.8, "overrides_score_id": "...", "reason_code": "judge_too_harsh", "justification": "answer was correct"}]}`
@@ -162,6 +164,30 @@ A queue item SHALL move through `pending → claimed → completed | skipped`. `
 - **WHEN** a reviewer skips a claimed item
 - **THEN** the item SHALL become `skipped` and no score records SHALL be written
 
+#### Scenario: Item writes resolve visibility before role
+- **WHEN** any identity — system scope included — sends a workflow write for a missing or soft-deleted item, an item whose URL queue id is not its owning queue, an item whose parent queue is soft-deleted, or an item whose workspace differs from its parent queue's
+- **THEN** the API SHALL return the same identifier-free item 404 before the role check and before any write; a non-system identity additionally receives that 404 for another workspace's item
+
+#### Scenario: Workspace-less identity denied before any query
+- **WHEN** an authenticated non-system identity without an active workspace sends any workflow write
+- **THEN** the API SHALL return the identifier-free item 404 before any database query
+
+#### Scenario: Editor floor on the item workflow
+- **WHEN** a viewer or role-less member of the owning workspace claims, skips, submits, or deletes a live item
+- **THEN** the API SHALL return 403 `FORBIDDEN` before the workflow service runs, even when the item state or annotation payload would also fail a business rule, and no item or score SHALL change
+
+#### Scenario: System scope writes through the real workspace
+- **WHEN** an explicit system-scope identity without an active workspace claims, skips, submits, or deletes a live item by its explicit id
+- **THEN** the write SHALL succeed in the item's real workspace with the usual attribution and state rules, while a wrongly-bound path, a soft-deleted resource, or a business rule violation SHALL still be rejected
+
+#### Scenario: Binding and row state are rechecked before writing
+- **WHEN** an item's queue binding changes or the row is soft-deleted after the API precheck and before the service write
+- **THEN** the service SHALL reject the write before any mutation and the API SHALL map it to the same identifier-free item 404
+
+#### Scenario: Current parent queue rules are rechecked before writing
+- **WHEN** the parent queue's assigned users or metric definitions change after the API precheck and before the service reads the queue
+- **THEN** the service SHALL refresh the queue's rules before validating the claim or submission, for non-system and system identities alike, and invalid requests SHALL return 400 without changing the item or scores
+
 ### Requirement: Item detail with trace projection and machine-score prefill
 `GET .../items/{item_id}` SHALL return the item state plus the review context: the conversation projected from the session event log within the trace's time window (user/assistant messages and tool calls, the same read-side projection the online scorer consumes), and for each queue metric the latest automated score for that trace as a read-only `suggestion` (with its `source`, `value`, and `reasoning`). The projection SHALL NOT modify the trace or events.
 
@@ -170,7 +196,7 @@ A queue item SHALL move through `pending → claimed → completed | skipped`. `
 - **THEN** the item detail returns the 4 messages and the tool call, and `suggestions` include `{metric_name: "helpfulness", value: 0.35, source: "llm_judge"}`
 
 ### Requirement: Human scores in the shared ledger
-Submitted annotations SHALL be persisted in the target-typed score store with `source="human"`, `task_id=NULL`, `annotator_id` set to the submitting user, and `session_id`/`agent_id` denormalized from the target trace. Human rows SHALL coexist with automated rows (no automated row is modified or deleted by annotation). Resubmission by the same annotator for the same `(target_id, metric_name)` SHALL upsert that annotator's previous human row instead of creating a duplicate.
+Submitted annotations SHALL be persisted in the target-typed score store with `source="human"`, `task_id=NULL`, `annotator_id` set to the submitting user, and `session_id`/`agent_id` denormalized from the target trace. Human rows SHALL coexist with automated rows (no automated row is modified or deleted by annotation). Resubmission by the same annotator for the same `(target_id, metric_name)` SHALL upsert that annotator's previous human row instead of creating a duplicate; the upsert scope SHALL be the item's workspace — a same annotator/target/metric row in another workspace SHALL be neither reused nor updated, a fresh row SHALL be written in the item's workspace instead, and rows of other queues in the same workspace SHALL keep upserting. Override targets SHALL be validated against the item's real workspace.
 
 #### Scenario: Submission creates coexisting human row
 - **WHEN** a reviewer submits an annotation for metric `helpfulness` on a trace that already has an automated score of 0.35
@@ -179,6 +205,10 @@ Submitted annotations SHALL be persisted in the target-typed score store with `s
 #### Scenario: Annotator resubmission is an upsert
 - **WHEN** the same annotator submits a new value for the same trace and metric (via another queue)
 - **THEN** their previous human row SHALL be updated to the new value and no second row SHALL be created
+
+#### Scenario: Upserts never cross workspaces
+- **WHEN** the same annotator already has a human row for the same target and metric in another workspace, and submits again from this workspace
+- **THEN** the foreign row SHALL remain unchanged and a separate row SHALL be written in this workspace
 
 ### Requirement: Override semantics
 An annotation entry MAY reference `overrides_score_id` — the identifier of an existing automated score row (`source` != `human`) for the same `target_id` and `metric_name`. For an override entry, `reason_code` (non-empty, at most 50 characters) and `justification` SHALL be required; a mismatched target or metric reference SHALL be rejected. The referenced automated row SHALL remain remain; reconciliation (see the report dashboard capability) reads the human value in place of the overridden automated value. Multiple overrides of the same automated row SHALL be allowed and the latest by creation time SHALL win in reconciliation.
