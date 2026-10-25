@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**The enterprise-grade agent operating system for enterprise intelligent applications — high-code + low-code, self-hosted, MIT-licensed, secured by default.**
+**A self-hosted, MIT-licensed platform for enterprise agents and workflows — Python APIs, a visual canvas, and execution governance.**
 
 [![CI](https://github.com/xueyufish/hecate/actions/workflows/ci.yml/badge.svg)](https://github.com/xueyufish/hecate/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -23,14 +23,14 @@
 
 ## Why Hecate?
 
-Hecate is the **enterprise-grade agent operating system** for enterprises building intelligent applications — combining high-code with low-code , secured by enterprise-grade capabilities out of the box:
+Hecate brings agent execution, workflow design, and enterprise management into a modular platform for building intelligent applications:
 
 - **High-code + low-code, one workflow** — Python API for engineers; drag-and-drop visual canvas for business users. Bidirectional JSON graph DSL sync — what you build visually is the same code-defined workflow.
-- **Event-sourced execution (Log-as-Truth)** — Append-only event log + durable checkpoints + time-travel replay. Debug any session via `GET /api/sessions/{id}/replay`.
-- **Production-grade long-running** — Durable retry, resume, controlled interruption, HITL approval. Multiple built-in tools including sandboxed headless Chromium with per-environment domain allow-lists.
-- **Enterprise-grade security by default** — Multi-tenant Org → Workspace → RBAC, SSO (OIDC/SAML/LDAP) + SCIM v2, audit trail, PII redaction, sandboxed execution. Compliance-ready, not bolt-on.
+- **Event-sourced execution (Log-as-Truth)** — Execution event logs, configurable checkpoint storage, and time-travel replay. Inspect recorded session timelines via `GET /api/sessions/{id}/replay`.
+- **Recoverable agent execution** — An opt-in autonomous controller persists accepted decisions and reuses recorded action results across restarts. Durable retry, waiting, and approval support depend on the execution path and configured storage.
+- **Enterprise governance capabilities** — Multi-tenant Org → Workspace → RBAC, SSO (OIDC/SAML/LDAP) + SCIM v2, audit trails, PII redaction, and sandbox integrations. Install and configure the capabilities required by your deployment.
 - **Protocol-native** — MCP (server + client) + A2A (server + client) + OpenAI-compatible API. Wire-compatible with existing OpenAI clients.
-- **Self-hosted, your data stays** — Deploy on your infrastructure. Prompts and completions go directly to your LLM provider (cloud or local); Hecate itself stores nothing by default.
+- **Self-hosted storage and service choices** — Run Hecate on your infrastructure and choose cloud or local models. Conversation state, execution records, and evidence may be retained by configured stores; external model and tool calls follow the selected providers' data policies.
 
 ---
 
@@ -40,6 +40,19 @@ Hecate is the **enterprise-grade agent operating system** for enterprises buildi
 
 <sub>For the comprehensive L1 architecture with sub-components, see [architecture.md](docs/design/architecture.md).</sub>
 
+### Current delivery and deployment options
+
+Hecate remains **alpha**. The recoverable Agent Controller and the Pregel workflow executor are separate execution mechanisms that share execution and action components. Enable the controller with `"controller_loop": true` in a platform task's input or a Runner's `runner.json`; the Runner also requires its durable profile. Existing direct chat and graph paths remain in use; controller delivery does not switch all API entry points to the new loop.
+
+| Component | Current scope |
+|---|---|
+| [Management platform](src/hecate/) | FastAPI APIs, Studio, tenant administration, and Task/Run submission, control, and observation |
+| [hecate-runtime](packages/hecate-runtime/) | Independently consumable kernel with the Agent Controller, Pregel executor, and shared execution assembly |
+| [hecate-durable](packages/hecate-durable/) | Persistent task, accepted-decision, action, lease, and event storage used by execution hosts |
+| [hecate-runner](packages/hecate-runner/) | Standalone execution host that starts without platform management tables; technical preview with optional durable and managed profiles |
+
+Development defaults use in-memory session/event stores and a stub durable backend. Configure persistent storage, identity, governance, and isolation for the execution path you use. Production support depends on the deployment profile and its verification evidence; see the [platform evolution plan](docs/refactor/enterprise-agent-platform-evolution-plan.md) for acceptance boundaries.
+
 ---
 
 ## How does Hecate compare?
@@ -48,7 +61,7 @@ Hecate is the **enterprise-grade agent operating system** for enterprises buildi
 |---|---|---|---|---|---|
 | **Deployment** | Self-hosted OSS (MIT) | Cloud + self-host | OSS library | Cloud + self-host (Fair-code) | Cloud + enterprise |
 | **Primary UX** | Code (Python) + Visual | Visual-first | Code (Python) | Visual + code | Code + Visual |
-| **Engine** | Self-developed **Pregel/BSP** + event-sourced execution state | DAG-based | Pregel (Google) inspired | DAG-based | Custom |
+| **Engine** | Opt-in recoverable Agent Controller + **Pregel/BSP** workflows | DAG-based | Pregel (Google) inspired | DAG-based | Custom |
 | **MCP server + client** | ✅ Bidirectional (latest spec) | ✅ Client only | Partial | ✅ | ✅ |
 | **A2A protocol** | ✅ (server + client) | ❌ | ❌ | ❌ | Partial |
 | **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ |
@@ -84,11 +97,12 @@ Hecate is the **enterprise-grade agent operating system** for enterprises buildi
 | Goal | Where to start |
 |---|---|
 | 🧑‍💻 Build an agent runtime (Python API) | [One-command install](#one-command-install-recommended) below |
-| 🎨 Compose agents visually (no code) | After install, open [web/](web/) (the visual canvas) |
+| 🎨 Compose workflows visually | [Start the visual dashboard](#start-the-visual-dashboard) after starting the backend |
+| 📦 Embed an execution service in a business application | [Standalone Runner](packages/hecate-runner/) — technical preview |
 | 🔌 Add MCP / A2A integration | [Enable MCP Server](docs/how-to/enable-mcp-server.md) · [Enable A2A Server](docs/how-to/enable-a2a-server.md) |
 | 🏢 Deploy to production (K8s / multi-tenant) | [Deploy to production](docs/how-to/deploy-production.md) |
 
-Get Hecate running in **~5 minutes**. **Prerequisites**: Docker, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and an LLM API key (OpenAI, Anthropic, DeepSeek, Qwen, GLM, Ollama, or any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers)). **System requirements**: 2 CPU cores, 4 GB RAM (8 GB recommended), 10 GB disk. macOS, Linux, and WSL2 supported; native Windows is experimental. Full guide: [Quickstart](docs/getting-started/quickstart.md).
+**Prerequisites**: Docker, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and credentials for your chosen LLM provider (OpenAI, Anthropic, DeepSeek, Qwen, GLM, Ollama, or any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers)); local providers may not require an API key. The visual dashboard also requires Node.js 20+ and npm. **System requirements**: 2 CPU cores, 4 GB RAM (8 GB recommended), 10 GB disk. macOS, Linux, and WSL2 supported; native Windows is experimental. Full guide: [Quickstart](docs/getting-started/quickstart.md).
 
 ### One-command install (recommended)
 
@@ -169,7 +183,7 @@ curl -N -X POST http://localhost:8000/v1/chat/completions \
   -d '{"model": "zai/glm-4.7-flash", "stream": true, "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-`-N `disables curl buffering; tokens stream as they are generated.
+`-N` disables curl buffering; tokens stream as they are generated.
 
 #### Step 4 — Or use any OpenAI client (drop-in)
 
@@ -198,6 +212,19 @@ print(resp.choices[0].message.content)
 
 Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-index` — any client that speaks OpenAI's wire protocol.
 
+### Start the visual dashboard
+
+Keep the backend running, then open another terminal from the repository root:
+
+```bash
+cd web
+cp .env.example .env.local
+npm ci
+npm run dev
+```
+
+`NEXT_PUBLIC_API_URL` in `web/.env.local` selects the backend and defaults to `http://localhost:8000`. Open [http://localhost:3000](http://localhost:3000), register an account or sign in, then open **Workflows** to create or edit a workflow on the visual canvas. See the [visual canvas tutorial](docs/tutorials/11-visual-canvas.md) for workflow design.
+
 ### Troubleshooting
 
 | Symptom | First thing to check |
@@ -213,7 +240,7 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 **Tutorials** — feature-focused walkthroughs:
 
 - [Build your first agent](docs/tutorials/01-first-agent.md) — code-first Python walkthrough
-- [Add a knowledge base](docs/tutorials/02-knowledge-base.md) — RAG in 10 minutes
+- [Add a knowledge base](docs/tutorials/02-knowledge-base.md) — RAG walkthrough
 - [Connect an MCP server](docs/tutorials/03-mcp-integration.md) — extend with external tools
 - [A2A Protocol](docs/tutorials/09-a2a-protocol.md) — cross-agent orchestration
 - [OpenAI SDK compatibility](docs/tutorials/10-openai-compatibility.md) — use Hecate as a drop-in for OpenAI
@@ -231,7 +258,7 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 
 ### Built-in tools
 
-Every Hecate agent can use these immediately — no extra install required:
+Hecate includes the following tool implementations. Availability depends on the agent's tool configuration, installed optional dependencies, and the selected execution environment:
 
 | Tool | Risk | Purpose |
 |---|---|---|
@@ -249,9 +276,9 @@ Every Hecate agent can use these immediately — no extra install required:
 
 Browser tools run inside a dedicated Docker sandbox with per-environment domain allow-lists enforced fail-closed. See [Browser automation guide](docs/how-to/browser-automation.md).
 
-### Collaboration patterns
+### Graph collaboration patterns
 
-Ship multi-agent workflows as graph templates:
+Compose multi-agent workflows with graph templates. These patterns run on the workflow executor; the autonomous controller can advance without building a graph:
 
 | Pattern | When |
 |---|---|
@@ -259,8 +286,8 @@ Ship multi-agent workflows as graph templates:
 | **Parallel** | Fan-out / fan-in: independent tasks merged at the end |
 | **Handoff** | Agent decides who handles the next turn |
 | **Broadcast** | Multiple agents read/write a shared topic channel |
-| **Negotiation** | 2 agents negotiate until a condition resolves |
-| **Debate** | 2+ agents argue in rounds until a winner emerges |
+| **Negotiation** | Agents negotiate until a condition resolves |
+| **Debate** | Agents argue in rounds until a winner emerges |
 | **Dynamic** | A COORDINATOR node emits a TaskDAG at runtime |
 
 ### Engine extension interfaces and plugin SPI types
@@ -281,17 +308,18 @@ Organized by layer:
 
 ### Engine layer
 
-- **Graph-First Engine** — Self-built Pregel/BSP runtime with many engine extension interfaces and multiple plugin SPI types. Zero external framework dependencies for the engine.
-- **Engine-Level Guardrails** — Four hook types (Pre/Post LLM/Tool) at every LLM and Tool boundary; the same hooks power PII masking, audit logging, and human-in-the-loop flows.
+- **Agent Controller and Workflow Executor** — The opt-in controller drives a recoverable model/action loop without graph compilation. Pregel/BSP executes explicit workflow graphs. Both use shared execution components; existing chat routes retain their configured execution paths.
+- **Execution Guardrails** — Pre/post LLM and tool hooks support PII masking, audit logging, and human-in-the-loop flows. Coverage and enforcement depend on the selected execution path and configured policies.
 - **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
-- **Execution Replay** — Trace-partitioned timelines and time-travel state inspection over the event-sourced execution log (Log-as-Truth, [ADR-030](docs/design/adr/030-event-sourced-execution-state.md)); debug any session via `GET /api/sessions/{id}/replay`.
-- **Sandboxed Tool Execution** — Docker-isolated runtime with explicit permission scopes per agent. Browser tools run in a dedicated Chromium sandbox with per-environment domain allow-lists.
+- **Execution Replay** — Trace-partitioned timelines and time-travel state inspection over recorded execution events (Log-as-Truth, [ADR-030](docs/design/adr/030-event-sourced-execution-state.md)) via `GET /api/sessions/{id}/replay`. Timeline retention depends on the configured event store.
+- **Sandbox Integrations** — Configurable local or Docker agent environments with permission scopes; browser tools use a dedicated Chromium sandbox with per-environment domain allow-lists. General agent environments default to the local backend.
+- **Task/Run Control** — Task submission, run observation, control commands, and reconciliation APIs connect execution facts to the platform. Durable hosts retain accepted decisions and action results for recovery; a model's final answer is distinct from task acceptance.
 
 ### Platform layer
 
 - **Multi-Tenant** — Organization → Workspace → RBAC with `workspace_id` on **many data models** for tenant isolation. SSO via OIDC/SAML/LDAP, SCIM v2 provisioning.
 - **Visual Canvas** — Drag-and-drop workflow editor in `web/` (React Flow + Next.js). Bidirectional sync with the JSON graph DSL — what you build visually is the same code-defined workflow.
-- **Multi-Agent Orchestration** — Seven collaboration patterns (see above) unified as Graph templates.
+- **Multi-Agent Orchestration** — Static collaboration templates and dynamic TaskDAG orchestration on the workflow executor (see above).
 - **Plugin System** — Multiple plugin types (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) with hot-reload, declared permissions, and versioned manifests.
 - **Embeddable Web Widget** — Drop an agent chat into any web page via the `/embed/chat` iframe ([ADR-031](docs/design/adr/031-web-widget-iframe-architecture.md)), reusing the dashboard chat components with existing JWT auth.
 
@@ -299,46 +327,45 @@ Organized by layer:
 
 - **IM Channels** — Reach Hecate agents from Feishu (Lark) and Slack via inbound webhooks. Mandatory Bound Identity model ensures every IM user is bound to a Hecate user before any conversation starts. See [Configure Feishu and Slack](docs/how-to/configure-feishu-slack.md).
 - **Webhooks** — Trigger workflows from external systems. See [Set up webhooks](docs/how-to/set-up-webhooks.md).
-- **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). Many ADRs and many archived changes document the architecture.
 
 ---
 
 ## Engineering Approach
 
-Hecate's design follows three disciplines common to serious agent platforms:
+Hecate's execution design combines these disciplines:
 
-- **Harness engineering** — the runtime is the harness. Every LLM call passes through the Pregel superstep loop, with durable checkpoints, retry policies, and many engine extension interfaces providing observability and control at every boundary.
-- **Loop engineering** — agent control loops are first-class. The superstep iteration is complemented by `interrupt()`/`Command()` for human-in-the-loop, `RetryStrategy` for failure recovery, and multi-agent delegation patterns where each subgraph runs its own execution loop.
-- **Graph engineering** — workflows are graphs. A JSON DSL describes nodes and edges; the compiler validates, optimizes, and emits an executable `CompiledGraph`. Six multi-agent collaboration patterns ship as static graph templates; a seventh — Dynamic Orchestration — is emitted at runtime as a TaskDAG.
+- **Harness engineering** — context assembly, model invocation, tool selection, and policy hooks support execution. Their composition follows the selected execution path.
+- **Loop engineering** — the Agent Controller rebuilds continuation from persisted accepted decisions and recorded action results. It stops on a final answer, a wait, or explicit limits; the host owns task lifecycle and acceptance. Legacy chat loops remain available during entry-point migration.
+- **Graph engineering** — a JSON DSL describes workflow nodes and edges; the compiler emits an executable `CompiledGraph` for Pregel. Static collaboration templates and runtime-generated TaskDAGs provide structured orchestration strategies.
 
 ---
 
 ## Trust & Security
 
-Built for on-premises and regulated deployments:
+Hecate provides security and governance components for private deployments. Their guarantees depend on the enabled policies, adapters, storage, and isolation profile:
 
-- **PII masking and data isolation** — guardrail hooks redact sensitive content before it leaves your network
-- **Audit trail** — every LLM call, tool invocation, and checkpoint is logged to your own PostgreSQL
-- **Sandboxed tool execution** — Docker-isolated runtime with explicit permission scopes per agent
-- **No external data retention** — prompts and completions go directly to your LLM provider; Hecate does not store them
+- **PII masking and tenant isolation** — configured guardrails redact sensitive content; workspace and identity checks scope access to platform resources.
+- **Audit and execution evidence** — audit records, event logs, checkpoints, and action results have distinct storage and retention settings. Development defaults do not persist every execution record to PostgreSQL.
+- **Execution isolation and governance** — configure Docker environments and sandbox enforcement where required. The general environment defaults to local execution, sandbox enforcement defaults off, and the governance mode defaults to audit.
+- **Data retention and external services** — Hecate can store conversation state, accepted model decisions, tool results, and evidence. Self-hosting gives you control of those stores; cloud models and external tools may still receive business data under their own policies.
 
 ---
 
 ## CLI Tools
 
-Hecate ships three console-script entry points:
+The platform package ships these console-script entry points:
 
 - **`hecate`** — the main CLI for managing agents, sessions, knowledge bases, workflows, and other resources. See [`docs/reference/cli.md`](docs/reference/cli.md) for the full command list.
 - **`hecate-migrate`** — standalone migration runner. Designed for one-shot use as a Docker Compose init service, a Kubernetes init container, or a Helm pre-install hook — runs Alembic migrations without booting the full web application.
 - **`hecate-flag-audit`** — CI tool that scans the source tree for stale or orphaned `ENABLE_*` feature flags. See [`docs/reference/cli.md#hecate-flag-audit--feature-flag-audits`](docs/reference/cli.md#hecate-flag-audit--feature-flag-audits).
 
-After synchronizing the [development environment](docs/how-to/openspec-workflow.md#development-commands), all three commands are available on your `PATH`.
+The optional [hecate-runner](packages/hecate-runner/) package adds the **`hecate-runner`** command for its standalone execution host. After synchronizing the [development environment](docs/how-to/openspec-workflow.md#development-commands), these commands are available in the worktree's virtual environment.
 
 ---
 
 ## Documentation
 
-- **[Getting Started](docs/getting-started/)** — install Hecate locally and send your first chat request in ~5 minutes.
+- **[Getting Started](docs/getting-started/)** — install Hecate locally and send your first chat request.
 - **[Tutorials](docs/tutorials/)** — many end-to-end tutorials (first agent, knowledge base, MCP, multi-agent, A2A, OpenAI SDK, visual canvas, plus use cases).
 - **[How-to Guides](docs/how-to/)** — many task-oriented recipes (LLM providers, deployment, MCP, A2A, SSO, backups, webhooks, troubleshooting).
 - **[Concepts](docs/concepts/)** — many explanatory articles that help you understand Hecate's core ideas before building.
@@ -361,7 +388,7 @@ Hecate builds on the shoulders of giants: [LangGraph](https://github.com/langcha
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, coding conventions, and how to file issues. Every feature ships through the [OpenSpec](openspec/) workflow with requirements, scenarios, and design docs.
+Contributions are welcome. Develop directly in an isolated worktree, with affected tests, shared checks, and PR review. OpenSpec is an optional workflow activated by an explicit request. See [AGENTS.md](AGENTS.md) for repository rules, the [development workflow](docs/how-to/openspec-workflow.md) for commands and optional OpenSpec actions, and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance.
 
 ---
 
