@@ -378,6 +378,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         event_run_ref: BackendRef | None = None,
         terminal_payload: dict[str, Any] | None = None,
         applied_command_id: str | None = None,
+        input_revision: dict[str, Any] | None = None,
     ) -> TaskStateRecord:
         recorded = recorded_at or self._clock()
         with self._session() as session, session.begin():
@@ -461,6 +462,13 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                         event_type="run_terminal",
                         payload=terminal_payload,
                     )
+            new_revision_id: str | None = None
+            if input_revision is not None:
+                # Same transaction as the state CAS and the command flip:
+                # the revision, the consumed wait and the applied receipt
+                # commit together — a crash between them is impossible, and
+                # the durable worker can never miss an accepted input.
+                new_revision_id = self._insert_input_revision(session, task_ref, run_ref, input_revision, recorded)
             if applied_command_id is not None:
                 command = session.execute(
                     select(CommandRow).where(CommandRow.command_id == applied_command_id).with_for_update()
@@ -482,6 +490,13 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                     command.extra = {
                         **(command.extra or {}),
                         "effect_run_ref": run_ref.to_dict(),
+                    }
+                if new_revision_id is not None:
+                    # Receipt correlation: the applied command names the input
+                    # revision it created (idempotent replays re-read it).
+                    command.extra = {
+                        **(command.extra or {}),
+                        "input_revision": new_revision_id,
                     }
                 if run_ref is not None:
                     self.events.emit(
@@ -505,6 +520,246 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         if row is None or row[0] is None or row[1] is None:
             return None
         return _run_ref(row[0], row[1])
+
+    def _insert_input_revision(
+        self,
+        session: Session,
+        task_ref: BackendRef,
+        run_ref: BackendRef | None,
+        revision: dict[str, Any],
+        recorded: str,
+    ) -> str:
+        """Idempotently insert one input revision inside the caller's transaction.
+
+        The unique (task, source_ref) key arbitrates concurrent or replayed
+        acceptance of the same command: the first insert wins and replays
+        return the original revision identity. A digest mismatch on the same
+        source_ref is a conflicting command, not a second revision.
+        """
+
+        import json as _json
+        import uuid as _uuid
+        from hashlib import sha256
+
+        from .models import AcceptedDecisionRow, InputRevisionRow
+
+        source = revision.get("source")
+        source_ref = revision.get("source_ref")
+        content = revision.get("content")
+        effective_turn = revision.get("effective_turn")
+        if not isinstance(source, str) or not source.strip() or len(source) > 32:
+            raise ValueError("input revision source must be a nonblank string")
+        if not isinstance(source_ref, str) or not source_ref.strip() or len(source_ref) > 256:
+            raise ValueError("input revision source_ref must be a nonblank string of at most 256 characters")
+        if not isinstance(content, dict):
+            raise ValueError("input revision content must be a JSON object")
+        if effective_turn is not None and (type(effective_turn) is not int or not 1 <= effective_turn <= 10**6):
+            raise ValueError("input revision effective_turn must be a positive integer")
+        if run_ref is None:
+            raise ValueError("input revision requires a linked Run")
+        digest = sha256(
+            _json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        existing = session.execute(
+            select(InputRevisionRow).where(
+                InputRevisionRow.task_issuer == task_ref.issuer_domain,
+                InputRevisionRow.task_id == task_ref.id,
+                InputRevisionRow.source_ref == source_ref,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.content_sha256 != digest or (
+                existing.source,
+                existing.effective_turn,
+                existing.wait_token,
+                existing.run_issuer,
+                existing.run_id,
+            ) != (
+                source,
+                existing.effective_turn if effective_turn is None else effective_turn,
+                revision.get("wait_token"),
+                run_ref.issuer_domain,
+                run_ref.id,
+            ):
+                raise ValueError("input revision command is bound to different content")
+            return existing.revision_id
+        if effective_turn is None:
+            # The task row is locked by apply_task_state: boundary selection
+            # and accepted input/receipt publication use this transaction.
+            effective_turn = (
+                int(
+                    session.execute(
+                        select(func.count()).where(
+                            AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                            AcceptedDecisionRow.run_id == run_ref.id,
+                        )
+                    ).scalar()
+                    or 0
+                )
+                + 1
+            )
+        seq = (
+            session.execute(
+                select(func.max(InputRevisionRow.seq)).where(
+                    InputRevisionRow.task_issuer == task_ref.issuer_domain,
+                    InputRevisionRow.task_id == task_ref.id,
+                )
+            ).scalar()
+            or 0
+        ) + 1
+        revision_id = revision.get("revision_id")
+        if not isinstance(revision_id, str) or not revision_id.strip():
+            revision_id = f"rev-{_uuid.uuid4().hex}"
+        if len(revision_id) > 64 or revision_id.strip() != revision_id:
+            raise ValueError("input revision identity must be trimmed and at most 64 characters")
+        wait_token = revision.get("wait_token")
+        if wait_token is not None and (not isinstance(wait_token, str) or len(wait_token) > 256):
+            raise ValueError("input revision wait_token must be a string of at most 256 characters")
+        session.add(
+            InputRevisionRow(
+                revision_id=revision_id,
+                task_issuer=task_ref.issuer_domain,
+                task_id=task_ref.id,
+                run_issuer=run_ref.issuer_domain if run_ref is not None else "",
+                run_id=run_ref.id if run_ref is not None else "",
+                seq=seq,
+                source=source[:32],
+                source_ref=source_ref[:256],
+                content=dict(content),
+                content_sha256=digest,
+                wait_token=wait_token,
+                effective_turn=effective_turn,
+                created_at=recorded,
+            )
+        )
+        if run_ref is not None:
+            self.events.emit(
+                session,
+                task_ref=task_ref,
+                run_ref=run_ref,
+                event_type="input_revision",
+                payload={
+                    "revision_id": revision_id,
+                    "source": source[:32],
+                    "effective_turn": effective_turn,
+                    "seq": seq,
+                },
+            )
+        return revision_id
+
+    def list_input_revisions(self, task_ref: BackendRef, run_ref: BackendRef | None = None) -> list[dict[str, Any]]:
+        """The task's immutable input history in causal order (oldest first).
+
+        Order is (effective_turn, seq) — the same order replay folds into
+        the rebuilt conversation. A stored digest mismatch is corruption:
+        surfaced as an explicit error, never silently reserialized.
+        """
+
+        import json as _json
+        from hashlib import sha256
+
+        from .models import AcceptedDecisionRow, InputRevisionRow
+
+        with self._session() as session:
+            rows = (
+                session.execute(
+                    select(InputRevisionRow)
+                    .where(
+                        InputRevisionRow.task_issuer == task_ref.issuer_domain,
+                        InputRevisionRow.task_id == task_ref.id,
+                    )
+                    .order_by(InputRevisionRow.effective_turn, InputRevisionRow.seq)
+                )
+                .scalars()
+                .all()
+            )
+            # Applied receipts and accepted decisions are independent durable
+            # references to the history. An empty result after row loss must
+            # not look like a run that never received human input.
+            required_ids = {
+                extra["input_revision"]
+                for extra in session.execute(
+                    select(CommandRow.extra).where(
+                        CommandRow.task_issuer == task_ref.issuer_domain,
+                        CommandRow.task_id == task_ref.id,
+                        CommandRow.state == CommandState.APPLIED.value,
+                    )
+                ).scalars()
+                if isinstance(extra, dict) and extra.get("input_revision")
+            }
+            current_run = run_ref or self._run_linkage(session, task_ref)
+            if current_run is not None:
+                for refs in session.execute(
+                    select(AcceptedDecisionRow.input_refs).where(
+                        AcceptedDecisionRow.issuer_domain == current_run.issuer_domain,
+                        AcceptedDecisionRow.run_id == current_run.id,
+                    )
+                ).scalars():
+                    required_ids.update(refs.get("inputs") or [])
+            if not required_ids.issubset({row.revision_id for row in rows}):
+                raise ValueError("input revision history is incomplete")
+            if sorted(row.seq for row in rows) != list(range(1, len(rows) + 1)):
+                raise ValueError("input revision history sequence is incomplete or duplicated")
+        revisions: list[dict[str, Any]] = []
+        for row in rows:
+            if run_ref is not None and (row.run_issuer, row.run_id) != (run_ref.issuer_domain, run_ref.id):
+                raise ValueError("input revision history is bound to another Run")
+            if (
+                not isinstance(row.revision_id, str)
+                or not row.revision_id.strip()
+                or row.revision_id.strip() != row.revision_id
+                or len(row.revision_id) > 64
+                or not isinstance(row.content, dict)
+                or type(row.effective_turn) is not int
+                or not 1 <= row.effective_turn <= 10**6
+                or type(row.seq) is not int
+                or row.seq < 1
+            ):
+                raise ValueError("input revision history has invalid content or causal metadata")
+            digest = sha256(
+                _json.dumps(
+                    row.content, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+                ).encode("utf-8")
+            ).hexdigest()
+            if digest != row.content_sha256:
+                raise ValueError(f"input revision {row.revision_id} content digest mismatch; refusing to replay")
+            revisions.append(
+                {
+                    "revision_id": row.revision_id,
+                    "seq": row.seq,
+                    "source": row.source,
+                    "source_ref": row.source_ref,
+                    "content": dict(row.content),
+                    "wait_token": row.wait_token,
+                    "effective_turn": row.effective_turn,
+                    "created_at": row.created_at,
+                    "run_ref": {"issuer_domain": row.run_issuer, "run_id": row.run_id},
+                }
+            )
+        return revisions
+
+    def count_accepted_decisions(self, run_ref: BackendRef) -> int:
+        """Committed decision count of one run — the input-revision boundary.
+
+        Both issuer and run id define the decision namespace. Another
+        issuer's same-named run must never move this run's input boundary.
+        """
+
+        from .models import AcceptedDecisionRow
+
+        require_kind(run_ref, RefKind.RUN)
+        with self._session() as session:
+            return int(
+                session.execute(
+                    select(func.count()).where(
+                        AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                        AcceptedDecisionRow.run_id == run_ref.id,
+                    )
+                ).scalar()
+                or 0
+            )
 
     def get_task_state(self, task_ref: BackendRef) -> TaskStateRecord | None:
         with self._session() as session:

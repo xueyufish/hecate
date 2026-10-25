@@ -218,11 +218,23 @@ class _ApprovalParkStub:
 @pytest.fixture
 async def harness(tmp_path):
     db_file = tmp_path / "approval_wait.db"
-    async_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}", connect_args={"timeout": 30})
 
     @event.listens_for(async_engine.sync_engine, "connect")
-    def _wal_async(dbapi_conn, _record):
-        dbapi_conn.execute("PRAGMA journal_mode=WAL")
+    def _busy_async(dbapi_conn, _record):
+        # The sync durable engine and this engine share the file; both must
+        # wait on SQLite's busy timeout instead of failing under contention.
+        dbapi_conn.execute("PRAGMA busy_timeout=30000")
+
+    # Switch the shared file to WAL once, deterministically, before any
+    # engine connection exists: a per-connection journal_mode pragma races
+    # with concurrent access (a failed switch silently stays in DELETE
+    # mode, where one engine's open write transaction blocks the other's
+    # reads and writes for the full busy timeout).
+    import sqlite3 as _sqlite3
+
+    with _sqlite3.connect(db_file) as raw:
+        raw.execute("PRAGMA journal_mode=WAL")
 
     from hecate_durable.storage import SqlDurableStore
 
@@ -230,10 +242,6 @@ async def harness(tmp_path):
 
     store = SqlDurableStore(f"sqlite:///{db_file}", source="platform")
     store.create_schema()
-
-    @event.listens_for(store.engine, "connect")
-    def _wal_sync(dbapi_conn, _record):
-        dbapi_conn.execute("PRAGMA journal_mode=WAL")
 
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -331,12 +339,14 @@ async def _submit(harness, db: AsyncSession, service: TaskControlService, **over
     return await service.submit(**kwargs)
 
 
-async def _wait_for_state(harness, t_ref, *states: str, timeout: float = 20.0) -> str:
+async def _wait_for_state(harness, t_ref, *states: str, timeout: float = 20.0, worker: Any | None = None) -> str:
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         record = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
         if record is not None and record.lifecycle_state.value in states:
             return record.lifecycle_state.value
+        if worker is not None and record is not None and record.lifecycle_state is TaskLifecycleState.QUEUED:
+            await worker.dispatch_once(t_ref)
         await asyncio.sleep(0.05)
     record = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
     raise AssertionError(f"task never reached {states}; last={record.lifecycle_state.value if record else None}")
@@ -472,7 +482,7 @@ async def test_crash_window_waiting_approval_without_contract_fails_closed(harne
     )
     async with harness["session_factory"]() as db:
         await _service(harness, db, worker=worker)._dispatch_now(t_ref)
-    assert await _wait_for_state(harness, t_ref, "failed") == "failed"
+    assert await _wait_for_state(harness, t_ref, "failed", worker=worker) == "failed"
     assert "wait contract" in str((await _task_result(harness, t_ref)).get("error"))
 
 
@@ -497,6 +507,40 @@ async def test_authorized_wake_resumes_same_attempt_and_succeeds(harness) -> Non
     # session-keyed action-ledger recovery stays valid (design D4).
     assert final["runs"][-1]["run_id"] == first_run
     assert stub.calls[-1]["resume_interrupted"] is True
+
+
+async def test_controller_approval_wake_retains_authority_control_payload(harness, monkeypatch) -> None:
+    """Controller input history must not drop the approval consumer's reference."""
+    from hecate_durable.worker import DurableWorker
+
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    stub = _ApprovalParkStub()
+    monkeypatch.setattr(PlatformTaskDispatcher, "_execute_controller", stub._execute)
+    worker = DurableWorker(harness["store"], _dispatcher(harness), leases=harness["store"].leases)
+    async with harness["session_factory"]() as db:
+        result = await _submit(
+            harness,
+            db,
+            _service(harness, db, worker=worker),
+            input={
+                "messages": [{"role": "user", "content": "create the ticket"}],
+                "approval_wait": True,
+                "controller_loop": True,
+            },
+        )
+    task_uuid = uuid.UUID(result.task_ref.id)
+    task_ref = task_ref_of(task_uuid)
+    await _wait_for_state(harness, task_ref, "waiting_approval")
+    detail = await _task_detail(harness, task_uuid)
+    wait = detail["wait"]
+    reference = wait["contract_ref"]["approval_ref"]
+    await _decide(harness, reference, approved=True, reason="approved")
+    receipt = await _issue_resume(harness, task_uuid, wait["wait_token"], worker)
+    assert receipt.record.state is CommandState.APPLIED
+    payload = await asyncio.to_thread(harness["store"].get_task_input, task_ref)
+    assert payload["provided"]["approval_ref"] == reference
+    assert await asyncio.to_thread(harness["store"].list_input_revisions, task_ref) == []
 
 
 async def test_pending_decision_refuses_wake_without_consuming_token(harness) -> None:

@@ -8,6 +8,7 @@ durability guarantee and must never back a production profile.
 
 from __future__ import annotations
 
+import copy
 import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -29,6 +30,7 @@ from .contracts.durable import (
     SubmissionAssociation,
     TaskLifecycleState,
     TaskStateRecord,
+    canonical_request_digest,
     may_auto_replay,
     validate_command_transition,
     validate_task_transition,
@@ -42,6 +44,7 @@ class InMemoryDurableTaskStore(DurableTaskStore):
     def __init__(self) -> None:
         self._states: dict[str, TaskStateRecord] = {}
         self._submissions: dict[str, SubmissionAssociation] = {}
+        self._input_revisions: dict[tuple[str, str, str], dict] = {}
         self._lock = threading.Lock()
 
     def record_submission(
@@ -67,6 +70,7 @@ class InMemoryDurableTaskStore(DurableTaskStore):
         recorded_at: str = "",
         extra_update: dict | None = None,
         input_payload: dict | None = None,
+        input_revision: dict | None = None,
     ) -> TaskStateRecord:
         with self._lock:
             current = self._states.get(task_ref.id)
@@ -87,6 +91,9 @@ class InMemoryDurableTaskStore(DurableTaskStore):
                 extra = dict(extra_update or {})
                 if input_payload is not None:
                     extra["input_payload"] = input_payload
+            if input_revision is not None:
+                # Validation/CAS failures above must leave no input facts.
+                self._apply_input_revision(task_ref, input_revision)
             record = TaskStateRecord(
                 task_ref=task_ref,
                 lifecycle_state=target,
@@ -100,6 +107,59 @@ class InMemoryDurableTaskStore(DurableTaskStore):
     def get_task_state(self, task_ref: BackendRef) -> TaskStateRecord | None:
         with self._lock:
             return self._states.get(task_ref.id)
+
+    def _apply_input_revision(self, task_ref: BackendRef, revision: dict) -> str:
+        source_ref = revision.get("source_ref")
+        content = revision.get("content")
+        if not isinstance(source_ref, str) or not source_ref.strip():
+            raise ValueError("input revision source_ref must be a nonblank string")
+        if not isinstance(content, dict):
+            raise ValueError("input revision content must be a JSON object")
+        key = (task_ref.issuer_domain, task_ref.id, source_ref)
+        existing = self._input_revisions.get(key)
+        if existing is not None:
+            if canonical_request_digest(existing["content"]) != canonical_request_digest(content) or (
+                existing["effective_turn"],
+                existing["source"],
+                existing["wait_token"],
+            ) != (revision.get("effective_turn", 1), revision.get("source"), revision.get("wait_token")):
+                raise ValueError("input revision command is bound to different content")
+            return str(existing["revision_id"])
+        seq = (
+            sum(
+                1
+                for (issuer, task_id, _) in self._input_revisions
+                if issuer == task_ref.issuer_domain and task_id == task_ref.id
+            )
+            + 1
+        )
+        revision_id = revision.get("revision_id") or f"rev-{seq}"
+        self._input_revisions[key] = {
+            "revision_id": revision_id,
+            "seq": seq,
+            "source": revision.get("source"),
+            "source_ref": source_ref,
+            "content": copy.deepcopy(content),
+            "wait_token": revision.get("wait_token"),
+            "effective_turn": revision.get("effective_turn", 1),
+            "created_at": "",
+            "run_ref": {"issuer_domain": "", "run_id": ""},
+        }
+        return revision_id
+
+    def list_input_revisions(self, task_ref: BackendRef, run_ref: BackendRef | None = None) -> list[dict]:
+        with self._lock:
+            rows = [
+                row
+                for (issuer, task_id, _), row in self._input_revisions.items()
+                if issuer == task_ref.issuer_domain and task_id == task_ref.id
+            ]
+        return copy.deepcopy(sorted(rows, key=lambda row: (int(row.get("effective_turn", 1)), int(row.get("seq", 1)))))
+
+    def count_accepted_decisions(self, run_ref: BackendRef) -> int:
+        # The stub keeps no accepted decisions: zero committed decisions is
+        # the honest boundary for the in-memory contract surface.
+        return 0
 
     def submit_task(
         self,

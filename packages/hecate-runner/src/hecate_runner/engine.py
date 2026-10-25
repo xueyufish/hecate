@@ -1429,13 +1429,17 @@ class ExecutionEngine:
 
         The continuation position is the durable accepted-decision chain
         keyed by the task's stable run; a restart replays committed turns
-        from storage and continues at the first uncommitted one. Dispatch
-        fencing uses a real task-dispatch lease so decision commits and
-        action dispatches validate ownership exactly like the platform
-        path; the lease is released when the dispatch ends. A park-worthy
-        dispatch outcome raises the durable wait signal, which this method
-        converts into ``state.wait_request`` so the shared park flow
-        commits it; the wake re-drives the same replay.
+        from storage and continues at the first uncommitted one. Input
+        history is the run's durable revision records: each consumed input
+        wake folds at its causal turn boundary and every decision pins the
+        revisions it saw, so multiple waits and inputs recover in their
+        true order. Dispatch fencing uses a real task-dispatch lease so
+        decision commits and action dispatches validate ownership exactly
+        like the platform path; the lease is released when the dispatch
+        ends. A park-worthy dispatch outcome raises the durable wait
+        signal, which this method converts into ``state.wait_request`` so
+        the shared park flow commits it; the wake re-drives the same
+        replay.
         """
 
         import uuid as _uuid
@@ -1527,17 +1531,15 @@ class ExecutionEngine:
             limits = ControllerLimits(
                 max_turns=controller_options.get("max_turns", 16), deadline=controller_options.get("deadline")
             )
-            # A consumed provide_input wake merged its fields into the task
-            # input (``provided``) — a durable input revision the loop
-            # surfaces as one user message after the frozen base.
-            provided = run_input.get("provided")
-            pending_input = dict(provided) if isinstance(provided, dict) else None
+            revisions = await self._controller_input_revisions(state, run_input, durable_run)
+            if revisions is None:
+                return
             spec = ControllerRunSpec(
                 run_ref=controller_run,
                 base_messages=base_messages,
                 ownership=ownership,
                 limits=limits,
-                pending_input=pending_input,
+                input_revisions=revisions,
                 # A durable wait parked mid-turn (input request recorded as
                 # the real outcome) stops the turn's remaining actions
                 # BEFORE their ledger claim and ends the pass for parking.
@@ -1641,6 +1643,39 @@ class ExecutionEngine:
             state.error = f"controller loop stopped: {outcome.reason}"
         finally:
             self._durable.store.leases.release(lease_key, holder, fencing_token=handle.fencing_token)
+
+    async def _controller_input_revisions(
+        self, state: RunState, run_input: dict, durable_run: Any
+    ) -> tuple[Any, ...] | None:
+        """The run's durable input history, or ``None`` after an explicit stop.
+
+        Recorded revisions are the authority: replay folds each one at its
+        causal turn boundary and the decisions pin what they consumed. A
+        Business data in ``provided`` is pre-revision history without its
+        own causal binding, even if later revision rows exist. Stop for
+        reconciliation rather than inventing or dropping that input.
+        """
+
+        from hecate_runtime.agent_controller import ControllerInputRevision
+
+        try:
+            rows = await asyncio.to_thread(self._durable.store.list_input_revisions, state.task_ref, durable_run)
+        except Exception:
+            state.status = "unknown"
+            state.needs_reconciliation = True
+            state.error = "input revision history is unreadable; refusing to replay without it"
+            return None
+        provided = run_input.get("provided")
+        content = {k: v for k, v in provided.items() if k != "approval_ref"} if isinstance(provided, dict) else {}
+        if content:
+            state.status = "unknown"
+            state.needs_reconciliation = True
+            state.error = "legacy provided input has no causal revision binding; manual reconciliation required"
+            return None
+        return tuple(
+            ControllerInputRevision(row["revision_id"], dict(row["content"]), int(row["effective_turn"]))
+            for row in rows
+        )
 
     def _assemble_runtime(self, state: RunState) -> PregelExecutionDriver:
         from hecate_runtime.pregel import PregelRuntime

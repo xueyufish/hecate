@@ -569,3 +569,154 @@ async def test_driver_cancel_callback_stops_remaining_actions_in_a_turn() -> Non
     assert result.succeeded
     assert driver.outcome is not None and driver.outcome.reason == "cancel_requested"
     assert len(port.calls) == 1
+
+
+def _provided_positions(messages: list[dict[str, Any]]) -> list[int]:
+    """Indexes of injected input-revision user messages, in order."""
+    return [
+        index
+        for index, message in enumerate(messages)
+        if message.get("role") == "user" and "provided_input" in str(message.get("content"))
+    ]
+
+
+def _tool_positions(messages: list[dict[str, Any]]) -> list[int]:
+    return [index for index, message in enumerate(messages) if message.get("role") == "tool"]
+
+
+class _RecordingSource(LoopScriptedSource):
+    """Capture each turn's rebuilt messages and the refs it pins."""
+
+    def __init__(self, script):
+        super().__init__(script)
+        self.seen: list[tuple[list[dict[str, Any]], dict[str, Any]]] = []
+
+    def responder_for(self, messages, input_refs):
+        self.seen.append((json.loads(json.dumps(messages)), dict(input_refs)))
+        return super().responder_for(messages, input_refs)
+
+
+async def test_input_revisions_fold_at_causal_boundaries_and_pin_visible_ids() -> None:
+    """A revision enters only at its boundary; decisions pin what they saw."""
+    from hecate_runtime.agent_controller import ControllerInputRevision
+
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    source = _RecordingSource(
+        {
+            (0, ""): _actions(("a1", "memory_add", {"q": 1})),
+            (1, _RESULT_OK): _actions(("a2", "web_search", {"q": 2})),
+            (2, _RESULT_SEARCH): _final("the answer"),
+        }
+    )
+    revisions = (
+        ControllerInputRevision("rev-early", {"region": "EU"}, 1),
+        ControllerInputRevision("rev-late", {"tier": "gold"}, 3),
+    )
+    outcome = await _controller(store, source, port).run(_spec(input_revisions=revisions))
+    assert outcome.is_final_answer
+
+    turn1_messages, turn1_refs = source.seen[0]
+    assert turn1_refs["inputs"] == ["rev-early"]
+    assert _provided_positions(turn1_messages) == [1]  # base + [rev-early]
+    assert json.loads(turn1_messages[1]["content"]) == {"provided_input": {"region": "EU"}}
+
+    turn2_messages, turn2_refs = source.seen[1]
+    assert turn2_refs["inputs"] == ["rev-early"]
+    assert _provided_positions(turn2_messages) == [1]  # base + [rev], then proj(1)
+    assert _tool_positions(turn2_messages) == [3]
+
+    turn3_messages, turn3_refs = source.seen[2]
+    assert turn3_refs["inputs"] == ["rev-early", "rev-late"]
+    # Causal order: rev-early(1) < tool-1(3) < tool-2(5) < rev-late(6).
+    # The revision that arrived later sits after the earlier turns'
+    # results, never before them.
+    provided, tools = _provided_positions(turn3_messages), _tool_positions(turn3_messages)
+    assert provided == [1, 6] and tools == [3, 5]
+    assert json.loads(turn3_messages[6]["content"]) == {"provided_input": {"tier": "gold"}}
+
+
+async def test_no_visible_revision_leaves_refs_without_inputs_key() -> None:
+    """Chains that see no revision keep the pre-revision refs shape."""
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    source = _RecordingSource({(0, ""): _final("done")})
+    await _controller(store, source, port).run(_spec())
+    assert "inputs" not in source.seen[0][1]
+
+
+async def test_late_revision_continues_committed_chain_without_ref_conflict() -> None:
+    """Turns committed before a revision replay unchanged; later turns bind it."""
+    from hecate_runtime.agent_controller import ControllerInputRevision
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    script = {
+        (0, ""): _actions(("a1", "memory_add", {"q": 1})),
+        (1, _RESULT_OK): _actions(("a2", "web_search", {"q": 2})),
+    }
+    first = await _controller(store, LoopScriptedSource(script), port, ledger).run(
+        _spec(run_ref, limits=ControllerLimits(max_turns=2))
+    )
+    assert first.reason == "turn_limit"
+
+    fresh_port = StubToolPort()
+    second = _RecordingSource(
+        {
+            (0, ""): _actions(("a1", "memory_add", {"q": 1})),
+            (1, _RESULT_OK_REPLAY): _actions(("a2", "web_search", {"q": 2})),
+            (2, _RESULT_SEARCH_REPLAY): _final("continued with input"),
+        }
+    )
+    late = (ControllerInputRevision("rev-after-park", {"region": "EU"}, 3),)
+    outcome = await _controller(store, second, fresh_port, ledger).run(_spec(run_ref, input_revisions=late))
+    assert outcome.is_final_answer and outcome.final_text == "continued with input"
+    assert second.model_asks == [decision_step_id_for_turn("agent-turn", 3)]
+    assert fresh_port.calls == []
+    # Committed turns replay with their original (input-free) refs; the
+    # fresh turn pins the revision it consumes.
+    assert "inputs" not in second.seen[0][1]
+    assert "inputs" not in second.seen[1][1]
+    assert second.seen[2][1]["inputs"] == ["rev-after-park"]
+    provided, tools = _provided_positions(second.seen[2][0]), _tool_positions(second.seen[2][0])
+    assert tools[1] < provided[0]  # the input sits after the earlier turns
+
+
+def test_input_revision_validation_rejects_unstable_identities() -> None:
+    from hecate_runtime.agent_controller import ControllerInputRevision
+
+    with pytest.raises(DecisionValidationError):
+        ControllerInputRevision(" ", {"a": 1}, 1)
+    with pytest.raises(DecisionValidationError):
+        ControllerInputRevision("rev-1", "not-a-dict", 1)
+    with pytest.raises(DecisionValidationError):
+        ControllerInputRevision("rev-1", {"a": 1}, 0)
+    with pytest.raises(DecisionValidationError):
+        ControllerInputRevision("rev-1", {"a": 1}, "2")
+
+    async def scenario(revisions) -> None:
+        store, port = InMemoryDecisionStore(), StubToolPort()
+        await _controller(store, LoopScriptedSource({(0, ""): _final("x")}), port).run(_spec(input_revisions=revisions))
+
+    import asyncio
+
+    duplicate = (
+        ControllerInputRevision("rev-1", {"a": 1}, 1),
+        ControllerInputRevision("rev-1", {"b": 2}, 2),
+    )
+    with pytest.raises(DecisionValidationError):
+        asyncio.run(scenario(duplicate))
+
+
+async def test_same_revision_identity_cannot_rewrite_consumed_content() -> None:
+    """An unchanged id cannot conceal a different payload on recovery."""
+    from hecate_runtime.agent_controller import ControllerInputRevision
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    first = (ControllerInputRevision("rev-fixed", {"region": "EU"}, 1),)
+    await _controller(store, LoopScriptedSource({(0, ""): _final("original")}), port, ledger).run(
+        _spec(run_ref, input_revisions=first)
+    )
+    changed = (ControllerInputRevision("rev-fixed", {"region": "US"}, 1),)
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, LoopScriptedSource({}), port, ledger).run(_spec(run_ref, input_revisions=changed))
+    assert port.calls == []

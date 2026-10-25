@@ -238,6 +238,7 @@ class DurableRuntime:
         run_ref: BackendRef | None = None,
         input_validator: Callable[[dict], None] | None = None,
         keep_run_linkage: bool = False,
+        controller_loop: bool = False,
     ) -> tuple[ControlCommandRecord, str | None]:
         """Record and atomically apply one wake command (provide_input/resume).
 
@@ -247,12 +248,13 @@ class DurableRuntime:
         resumes its application. Validation failures move the receipt to
         ``rejected`` with the reason on the caller — the wait record is
         untouched and nothing dispatches. A valid application consumes the
-        wait token, merges the provided input into the task's stored input,
-        requeues the task — on a NEW attempt run, or (with
-        ``keep_run_linkage``, the controller-loop profile whose durable
-        decision chain is keyed by the current run) on the same run — and
-        flips the command to ``applied``, all in the store's single
-        transaction.
+        wait token, merges the provided input into the task's stored input
+        — or, for the controller loop (``controller_loop``, whose durable
+        decision chain is keyed by the current run, kept with
+        ``keep_run_linkage``), records an immutable input revision at the
+        committed chain boundary instead of overwriting the latest
+        snapshot — requeues the task on the same run, and flips the
+        command to ``applied``, all in the store's single transaction.
         """
 
         wake_kind = (
@@ -314,6 +316,7 @@ class DurableRuntime:
                     run_ref=current_run,
                     input_validator=input_validator,
                     keep_run_linkage=keep_run_linkage,
+                    controller_loop=controller_loop,
                 )
 
         def _reject(reason: str) -> tuple[ControlCommandRecord, str | None]:
@@ -370,6 +373,8 @@ class DurableRuntime:
         contract_arguments = contract_ref.get("arguments")
         if isinstance(contract_arguments, dict):
             arguments = contract_arguments
+        controller_loop = controller_loop or persisted.get("controller_loop") is True
+        input_revision: dict[str, Any] | None = None
         if input_payload is not None:
             if any(key.startswith("_") for key in input_payload):
                 return _reject("internal host fields cannot be supplied")
@@ -382,8 +387,23 @@ class DurableRuntime:
                 raw_args[tool] = arguments
             else:
                 raw_args = arguments
-            merged["tool_arguments"] = raw_args
-            merged["provided"] = input_payload
+            if not (controller_loop and wake_kind is ControlCommandKind.PROVIDE_INPUT):
+                merged["tool_arguments"] = raw_args
+            # Controller input waits record an immutable revision instead of
+            # overwriting the latest provided snapshot; approval (resume)
+            # wakes keep ``provided`` as the pure control transport the
+            # approval-resume path reads, and never reach the model.
+            if controller_loop and wake_kind is ControlCommandKind.PROVIDE_INPUT:
+                revision_content = {k: v for k, v in input_payload.items() if k != "approval_ref"}
+                if revision_content:
+                    input_revision = {
+                        "source": "provide_input",
+                        "source_ref": command_id,
+                        "content": revision_content,
+                        "wait_token": wait_token,
+                    }
+            else:
+                merged["provided"] = input_payload
         origins = dict(persisted.get("_action_origins") or {})
         for action in self.store.list_run_actions(current_run):
             name = (action.get("intent") or {}).get("action_name")
@@ -415,9 +435,9 @@ class DurableRuntime:
             # One transaction: requeue (on the new attempt run, or — for the
             # controller loop, whose durable decision chain is keyed by the
             # current run — on the same run linkage), merge the provided
-            # input, consume the wait token, and flip the command to applied
-            # (the store validates the command's expiry and task binding
-            # inside the same commit).
+            # input (or record its immutable revision), consume the wait
+            # token, and flip the command to applied (the store validates
+            # the command's expiry and task binding inside the same commit).
             self.store.apply_task_state(
                 task_ref,
                 TaskLifecycleState.QUEUED,
@@ -426,6 +446,7 @@ class DurableRuntime:
                 event_run_ref=new_run or current_run,
                 applied_command_id=command_id,
                 extra_update={"wait": {**wait, "consumed": True}},
+                input_revision=input_revision,
             )
         except Exception as exc:  # expired command / stale revision in the store
             return _reject(str(exc))

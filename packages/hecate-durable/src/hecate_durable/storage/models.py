@@ -334,3 +334,34 @@ class AcceptedDecisionRow(Base):
     fence_holder: Mapped[str | None] = mapped_column(String(256))
     fence_token: Mapped[int] = mapped_column(Integer, default=0)
     accepted_at: Mapped[str] = mapped_column(String(64))
+
+
+class InputRevisionRow(Base):
+    """One accepted human input revision with its causal turn boundary.
+
+    Controller-loop input history: immutable once written (old inputs are
+    never overwritten by the newest snapshot). ``effective_turn`` is one
+    past the committed decision-chain length at acceptance, so replay
+    rebuilds the true causal order — earlier decisions and tool results,
+    then the inputs accepted at that point, then later decisions. Unique
+    per (task, source command) for idempotent wake replays; the content
+    digest detects corruption on read instead of guessing history.
+    """
+
+    __tablename__ = "durable_input_revision"
+
+    __table_args__ = (UniqueConstraint("task_issuer", "task_id", "source_ref"),)
+
+    revision_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_issuer: Mapped[str] = mapped_column(String(256))
+    task_id: Mapped[str] = mapped_column(String(256))
+    run_issuer: Mapped[str] = mapped_column(String(256))
+    run_id: Mapped[str] = mapped_column(String(256))
+    seq: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(32))
+    source_ref: Mapped[str] = mapped_column(String(256))
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    content_sha256: Mapped[str] = mapped_column(String(128))
+    wait_token: Mapped[str | None] = mapped_column(String(256))
+    effective_turn: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[str] = mapped_column(String(64))

@@ -1136,7 +1136,34 @@ class TaskControlService:
             if gate.fact:
                 wake_payload.update(gate.fact)
         base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
-        merged_input = {**base_input, "provided": wake_payload}
+        controller_loop = base_input.get("controller_loop") is True
+        input_revision: dict[str, Any] | None = None
+        if controller_loop:
+            # Controller input wakes record an immutable revision (never a
+            # latest-snapshot overwrite); approval-resume wakes keep
+            # ``provided`` as the pure control transport the approval
+            # consumer reads, and it never reaches the model.
+            merged_input = dict(base_input)
+            if expected_state is TaskLifecycleState.WAITING_INPUT:
+                revision_content = {k: v for k, v in wake_payload.items() if k != "approval_ref"}
+                if revision_content:
+                    run_for_task = getattr(self._store, "run_for_task", None)
+                    linkage = await asyncio.to_thread(run_for_task, t_ref) if run_for_task else None
+                    if linkage is None:
+                        await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                        return "controller task has no run linkage; input revision rejected"
+                    input_revision = {
+                        "source": "provide_input",
+                        "source_ref": record.command_id,
+                        "content": revision_content,
+                        "wait_token": token,
+                    }
+            else:
+                # The approval consumer still needs the authority reference;
+                # it is control data and must never become an input revision.
+                merged_input["provided"] = wake_payload
+        else:
+            merged_input = {**base_input, "provided": wake_payload}
         extra_update = {"wait": {**wait, "consumed": True}}
         if record.detail_ns.get("callback_digest") and "step_index" in wake_payload:
             callbacks = dict((current.extra or {}).get("_workflow_callbacks") or {})
@@ -1159,6 +1186,7 @@ class TaskControlService:
                 else current.revision,
                 extra_update=extra_update,
                 input_payload=merged_input,
+                input_revision=input_revision,
                 **({"applied_command_id": record.command_id} if hasattr(self._store, "engine") else {}),
             )
         except (InvalidTaskTransitionError, ValueError):

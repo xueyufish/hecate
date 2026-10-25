@@ -1114,11 +1114,14 @@ class PlatformTaskDispatcher:
             max_turns=context.controller_max_turns or 16,
             deadline=context.controller_deadline,
         )
-        provided = context.provided
-        if context.approval_wait and isinstance(provided, dict):
-            # Approval references are control data, not a new model input
-            # that can rewrite the base of an already accepted chain.
-            provided = {key: value for key, value in provided.items() if key != "approval_ref"} or None
+        revisions, revisions_error = await self._controller_input_revisions(context, task_ref, controller_run)
+        if revisions_error is not None:
+            return {
+                "status": "awaiting_reconciliation",
+                "content": "",
+                "error": revisions_error,
+                "error_category": "input_history_unavailable",
+            }
         messages = [
             {"role": "system", "content": config.get("persona") or "You are a helpful assistant."},
             *(
@@ -1145,9 +1148,10 @@ class PlatformTaskDispatcher:
                 "workspace_id": str(context.workspace_id),
                 "on_behalf_of_user": str(context.user_id) if context.user_id else None,
             },
-            # Consumed input wakes ride as a durable revision at the tail —
-            # never folded into the frozen base.
-            pending_input=provided,
+            # Consumed input wakes ride as durable revisions at their causal
+            # turn boundaries — never folded into the frozen base, and every
+            # decision pins the revision ids it consumed.
+            input_revisions=revisions,
         )
         first_responder = source.responder_for(messages, {**base_refs, "controller": "agent-loop/1", "turn": 1})
         controller = AgentController(AgentTurn(store, first_responder, executor), source)
@@ -1179,6 +1183,37 @@ class PlatformTaskDispatcher:
             "error": f"controller loop stopped: {outcome.reason}",
             "error_category": f"controller_{outcome.reason}",
         }
+
+    async def _controller_input_revisions(
+        self, context: _DispatchContext, task_ref: BackendRef, controller_run: Any
+    ) -> tuple[tuple[Any, ...], str | None]:
+        """The task's durable input history, or an explicit-stop reason.
+
+        Recorded revisions are the authority: replay folds each one at its
+        causal turn boundary and committed decisions restore by the revision
+        ids they pinned. Business data in ``provided`` is pre-revision
+        history without its own causal binding, even if later revision
+        rows exist. Refuse to fabricate or silently drop that history.
+        """
+
+        from hecate_runtime.agent_controller import ControllerInputRevision
+
+        try:
+            rows = await asyncio.to_thread(
+                self._store.list_input_revisions,
+                task_ref,
+                BackendRef(RefKind.RUN, controller_run.issuer_domain, controller_run.run_id),
+            )
+        except Exception:
+            return (), "input revision history is unreadable; manual reconciliation required"
+        provided = context.provided
+        content = {k: v for k, v in provided.items() if k != "approval_ref"} if isinstance(provided, dict) else {}
+        if content:
+            return (), "legacy provided input has no causal revision binding; manual reconciliation required"
+        return tuple(
+            ControllerInputRevision(row["revision_id"], dict(row["content"]), int(row["effective_turn"]))
+            for row in rows
+        ), None
 
     @staticmethod
     def _declared_checks(context: _DispatchContext) -> tuple[int, list[dict[str, Any]]]:
