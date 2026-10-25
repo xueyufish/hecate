@@ -207,9 +207,9 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 
 | 已有资产 | 当前边界与后续责任 |
 |---|---|
-| `packages/hecate-runtime`、共享执行应用服务与 `hecate-runner` | 已有独立 wheel、共享装配及宿主；共享服务消费 `ExecutionDriver`，builtin/Runner 仍装配 Pregel 驱动，聊天执行仍有图专属调用。无图的 `AgentTurn` 可恢复动作或无工具最终回答，已提供成功动作回合到下一轮输入的投影；完整多轮 Controller 与入口接入待交付 |
+| `packages/hecate-runtime`、共享执行应用服务与 `hecate-runner` | 已有独立 wheel、共享装配及宿主；共享服务消费 `ExecutionDriver`，builtin/Runner 仍装配 Pregel 驱动，聊天执行仍有图专属调用。无图的 `AgentTurn` 可恢复动作或无工具最终回答，已提供成功动作回合到下一轮输入的投影；多轮 `AgentController` 已按 `ExecutionDriver` 交付并在平台与 Runner 装配同一实现，输入修订在因果回合边界折叠且决策固定所消费的修订版本；Harness 语义组合层仍待交付 |
 | 平台 builtin、`EntryExecutionService` 与聊天路径 | 多个入口已迁移，直接工具循环与图执行仍并存；step5d/G3 收口入口、事件与兼容性，不另造一套生命周期 |
-| `packages/hecate-durable` 与平台任务控制 | step6a—6f、决策接受、受控单动作/串行动作集合及最终回答的单回合恢复已交付；成功动作结果可显式续接模型输入，账本回填已补输出治理。完整循环、Plan Revision、通用 Child Run、任务验收及生产治理仍待增量验证 |
+| `packages/hecate-durable` 与平台任务控制 | step6a—6f、决策接受、受控单动作/串行动作集合及最终回答的单回合恢复已交付；成功动作结果可显式续接模型输入，账本回填已补输出治理。显式启用的 Controller 已接入共享循环、声明式输出 Schema 与平台版本化验收门禁；持久输入修订与跨进程唤醒已有技术验证（修订行与唤醒 CAS/回执同事务，权威写入方唯一）。完整任务验收、Plan Revision、通用 Child Run 及生产治理仍待增量验证 |
 | 语言中立执行契约、Deployment/Task/Run 模型 | 已有草案、隔离互操作和登记模型；登记成功不等于部署获准执行或取得治理等级 |
 | MemoryProvider、Knowledge/RAG、Sandbox、工具 Gateway、评估与观测 | 复用已有接口和实现；评估 Run/评分/报告、数据集/版本/样本、任务管理与触发、合成、Workflow 评测触发、标注读取/队列管理/入队及 calibration 已有分段权限加固，报告页面已有查询状态修正。整体服务替换、ACL/删除、隔离及独立升级按 step7—step10/16 验证 |
 | 功能清单及生成工具、分层测试 | ADR-037、定位、架构、主 specs 与规划数据已完成目标职责对齐；继续保护历史 Feature ID 和证据，新切片按所属步骤同步，不将目标文档视为 Controller 实现 |
@@ -237,8 +237,8 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | step2 | ADR-037、定位/架构、相关主 specs 与规划数据对齐已交付；移除整项“待同步”，后续只同步新增切片 |
 | step3 | 补记 `ExecutionDriver` 与内部决策/动作接缝；目标/验收、文件及通用子执行契约继续开放 |
 | step4 | 身份、Deployment、Task/Run 登记沿用；登记不等于受管准入或完整目标/验收版本模型 |
-| step5 | 复用无图单回合、最终回答与成功回合输入投影；完整 Controller/Harness、自动调度、入口与 Runner 接入仍待交付 |
-| step6 | 决策接受、模型 responder、受控派发、串行恢复及 `AgentTurn` 已交付；补记最终回答接受/恢复及显式双回合续接，持久继续位置和完整循环仍开放 |
+| step5 | 无图单回合与输入投影沿用；显式启用的 Controller 已接入共享自动循环、平台任务与 Runner 及持久输入修订；Harness 语义组合层与完整入口收敛仍待交付 |
+| step6 | 决策接受、模型 responder、受控派发、串行恢复及 `AgentTurn` 已交付；显式启用的 Controller 已接入持久继续位置（接受决策链）、输入等待/唤醒与持久输入修订；共同语义的生产认证仍开放 |
 | step7 | 无图 `ToolCallExecutor` 已交付，补记账本回填的 PostTool 输出治理；保留治理 profile、旁路、预算和跨执行方式完整认证 |
 | step8 | 继续撤销，不恢复外部 Runtime 接入任务 |
 | step9 | 沿用 Memory/Knowledge 分段替换；已有 provider/向量 adapter 不等于完整绑定、迁移和删除认证 |
@@ -403,7 +403,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 | step5b：独立发行包 | 已交付 | `hecate-runtime` wheel、依赖闭包、配置注入、兼容转发与干净安装；不反向依赖完整 Hecate |
 | step5c：独立宿主 | 预览范围已交付 | Runner 与 builtin 共享执行应用服务；公开请求/回执/事件契约、本地制品与身份校验、SC01/SC02 只读场景。固定工具计划与 Stub/endpoint 不能证明自主工具选择 |
 | step5d：平台入口收敛 | 部分完成 | HTTP/MCP/IM/评估/A2A/定时 Agent 已迁移，workspace 路由与会话亲缘、OpenAI/SSE 兼容和分层守卫已交付；剩余项如下 |
-| step5e：内置自主执行收敛与验证 | 既有技术切片、动作/最终回答单回合及成功回合输入投影已实现，完整 Controller 待交付 | 双路径停止/结构化输出与 Workflow 子任务契约已有证据；真实模型基线、限定断连及持久审批 worker 重启恢复已记录，延迟/成本与生产退出门槛、独立 Runner 自主选择仍开放。见[原技术复核](../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md)、[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)与[审批续跑复核](../../openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md) |
+| step5e：内置自主执行收敛与验证 | 既有技术切片、动作/最终回答单回合及成功回合输入投影已实现，显式启用的 Controller 共享循环与持久输入修订已实现 | 双路径停止/结构化输出与 Workflow 子任务契约已有证据；真实模型基线、限定断连及持久审批 worker 重启恢复已记录，延迟/成本与生产退出门槛、独立 Runner 自主选择仍开放。见[原技术复核](../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md)、[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)与[审批续跑复核](../../openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md) |
 
 **step5d 剩余项：**
 
@@ -420,9 +420,9 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 `step5e-durable-approval-continuation` 已为显式启用持久审批的内置任务记录 PostgreSQL worker 重启续跑证据：等待与 pending 绑定持久化，合法决定后在原 Run/会话继续，原审批与稳定动作 ID 保留；覆盖停车前成功写入、消费后领取前崩溃及相同参数新动作的再次审批，模型收到真实回执。跨进程时钟锚须由在线 SQL 权威重新核验，不延长原批准期限。真实模型补采保留原记录，gate=false、成本未知。审批决定经可信服务边界注入；新增企业审批 HTTP/UI、控制面进程重启、离线时钟信任及任意故障组合仍未认证。见[审批续跑复核](../../openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md)。
 
 - [x] 共享应用服务的驱动解耦、无图模型 responder、共享工具执行及可靠单回合组件已交付；详见 step3/6/7。`PortDecisionResponder` 已支持动作集合或无工具的非空最终回答，`AgentTurn` 接受并恢复对应输出；`project_turn_messages` 与 `for_turn_messages` 可显式续接成功动作回合，仍一次只处理指定决策步骤，不自动提交 Task 成功。
-- [ ] 基于上述组件实现完整 Runtime Agent Controller：自动推进多轮观察/决策、消费最终回答、持久等待/唤醒和完成控制，平台与 Runner 装配同一实现；补齐 Context/Harness 与输入快照衔接，按 `ExecutionDriver` 接入。旧直连循环不因迁移而自动获得可靠性认证。
+- [x] 基于上述组件实现显式启用的 Runtime Agent Controller 多轮执行切片：自动推进多轮观察/决策、消费最终回答、持久等待/唤醒和声明式输出检查，平台任务与 Runner 装配同一实现，按 `ExecutionDriver` 接入；旧直连循环不因迁移而自动获得可靠性认证。输入等待/唤醒经持久输入修订闭环：修订与唤醒 CAS、等待消费及命令回执同事务提交，重放按真实因果顺序折叠且每个决策固定所消费的修订版本，跨多次等待/补充/重启不丢失、不重复、不重问；历史记录缺失或损坏时显式停止待对账，不用最新快照猜测历史。Harness 语义组合层与输入快照衔接仍待交付。
 - [ ] 形成 Harness 语义组合层，复用已有 ContextEngine、processor、压缩、Skill、Memory 和 Middleware；规划、模型策略及语义扩展可配置，不把一套 Planner/Evaluator 或 Todo 固定为所有 Agent 必经步骤。上下文投影不删除恢复事实，模型能力提升后可替换或移除不再必要的策略。
-- [ ] 复用 step6/7 已交付的决策/动作持久化、真实回执与单回合恢复，继续打通跨回合继续位置、持久等待/唤醒及完整循环；再递增计划与组合能力，不将普通内存 while 视为新执行内核。
+- [x] 复用 step6/7 已交付的决策/动作持久化、真实回执与单回合恢复，打通跨回合继续位置、持久等待/唤醒及共享 Controller 循环技术切片（含输入修订历史与恢复绑定 `agent-loop/1`，不重新解释已有决策摘要）；再递增计划与组合能力，不将普通内存 while 视为新执行内核。
 - [ ] 在单 Agent 首次闭环加入最小交付与完成控制：依据当前目标/标准、真实结果和产物版本判断完成、需要输入或资源/策略停止；无进展检测结合新证据、产物和业务状态，不把合法轮询等同死循环。Goal Evaluator 可选，不能仅由模型自报成功推进 Task。
 - [ ] 自动续跑记录触发原因、次数、进度依据及继续位置，沿用 Task 累计预算和原期限；评估调用本身计入用量。重启不清零，取消/撤权后不得由 evaluator 重新激活；最小状态接口可观察续跑，不将内部控制消息冒充用户新指令。
 - [ ] 保留 TaskDAG→Pregel 作为结构化执行策略；直接行动、Todo、局部依赖计划及已发布 Workflow 可按任务选用，不强制每轮生成完整 DAG。计划修订须处理已完成、运行中、未派发和结果未知的工作，不能改 ID 绕过待对账动作。

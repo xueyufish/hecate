@@ -337,6 +337,46 @@ async def test_exhausted_budget_blocks_controller_model_request(loop_profile) ->
         await model.stop()
 
 
+@pytest.mark.parametrize("failure", ["corrupt", "unavailable", "legacy", "legacy-with-new-revision"])
+async def test_unrecoverable_input_history_parks_before_any_model_or_action(loop_profile, monkeypatch, failure) -> None:
+    """Missing authority stops recovery without model calls or business effects."""
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, "done")
+    await model.start()
+    try:
+        path = loop_profile / "runner.json"
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        path.write_text(json.dumps(config), encoding="utf-8")
+        api = _BusinessApi()
+        harness = _Harness(loop_profile, api)
+        if failure in {"corrupt", "unavailable"}:
+
+            def unreadable(*args):
+                error = ValueError if failure == "corrupt" else RuntimeError
+                raise error("history cannot be loaded")
+
+            monkeypatch.setattr(harness.durable.store, "list_input_revisions", unreadable)
+        elif failure == "legacy-with-new-revision":
+            monkeypatch.setattr(
+                harness.durable.store,
+                "list_input_revisions",
+                lambda *args: [{"revision_id": "later-input", "content": {"tier": "gold"}, "effective_turn": 1}],
+            )
+        run_input = {"input": {"prompt": "check stock"}}
+        if failure.startswith("legacy"):
+            run_input["provided"] = {"region": "EU"}
+        run_id, state = await harness.engine.submit("app-reader", run_input, ("domain_a",))
+        assert state is not None
+        final = await harness.engine.wait_for(run_id)
+        assert final.status == "reconciliation_required" and final.needs_reconciliation
+        assert harness.durable.store.get_task_state(final.task_ref).lifecycle_state is (
+            TaskLifecycleState.RECONCILIATION_REQUIRED
+        )
+        assert model.requests == [] and api.calls == []
+    finally:
+        await model.stop()
+
+
 async def test_repeated_tool_calls_have_distinct_decision_scoped_ledger_entries(loop_profile) -> None:
     """Two uses of one tool are distinct actions, with exactly one ledger each."""
     model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "STOCK"}, "done", tool_turns=2)
@@ -633,6 +673,7 @@ async def test_input_park_records_outcome_and_wake_continues_chain(tmp_path) -> 
             wait_token=wait["wait_token"],
             input_payload={"region": "EU"},
             keep_run_linkage=True,
+            controller_loop=True,
         )
         assert reason is None and receipt.state.value == "applied"
         assert engine.resume(task_ref, harness.durable.store.run_for_task(task_ref), {}) is not None
@@ -654,5 +695,225 @@ async def test_input_park_records_outcome_and_wake_continues_chain(tmp_path) -> 
         # Turn 1 replayed from storage on the wake: the model was asked
         # exactly twice fresh (region call + final answer).
         assert len(model.requests) == 3
+    finally:
+        await model.stop()
+
+
+class _TwoWakeBusinessApi:
+    """Needs region first, then tier; both must ride real business calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def __call__(self, tool_name: str, arguments: dict, principal: str, domains: list[str]) -> dict:
+        self.calls.append(dict(arguments))
+        if "region" not in arguments:
+            return {"status": "input_required", "contract": {"fields": ["region"]}}
+        if "tier" not in arguments:
+            return {"status": "input_required", "contract": {"fields": ["tier"]}}
+        return {"status": "ok", "result": "complete"}
+
+
+def _provided_indexes(messages: list[dict]) -> list[int]:
+    return [
+        index
+        for index, message in enumerate(messages)
+        if isinstance(message, dict)
+        and message.get("role") == "user"
+        and "provided_input" in str(message.get("content"))
+    ]
+
+
+def _tool_indexes(messages: list[dict]) -> list[int]:
+    return [
+        index for index, message in enumerate(messages) if isinstance(message, dict) and message.get("role") == "tool"
+    ]
+
+
+@pytest.mark.parametrize("with_prompt", [True, False], ids=["prompt", "structured-input"])
+async def test_two_input_wakes_preserve_history_order_and_effects(tmp_path, with_prompt) -> None:
+    """Two waits, two wakes: both values reach the model in causal order."""
+    profile_dir = write_profile(
+        tmp_path,
+        durable={"database_url": f"sqlite:///{tmp_path / 'controller-two-wake.db'}", "workspace": "ws-a"},
+        controller_loop=True,
+    )
+    api = _TwoWakeBusinessApi()
+
+    class _TwoWakeModel(_ScriptedModelServer):
+        def __init__(self) -> None:
+            super().__init__("query_inventory", {}, "unused")
+
+        async def _serve(self, reader, writer):
+            try:
+                await reader.readline()
+                headers: dict[str, str] = {}
+                while True:
+                    header = await reader.readline()
+                    if header in (b"\r\n", b"\n", b""):
+                        break
+                    name, _, value = header.decode("latin-1").partition(":")
+                    headers[name.strip().lower()] = value.strip()
+                body = await reader.readexactly(int(headers.get("content-length", "0")))
+                request = json.loads(body.decode("utf-8"))
+                self.requests.append(request)
+                messages = request.get("messages") or []
+                tools = [m for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
+                provided = [
+                    m
+                    for m in messages
+                    if isinstance(m, dict) and m.get("role") == "user" and "provided_input" in str(m.get("content"))
+                ]
+                if len(tools) == 0:
+                    arguments: dict | None = {"domain": "domain_a", "sku": "S-2"}
+                elif len(tools) == 1 and len(provided) == 1:
+                    region = json.loads(provided[0]["content"])["provided_input"]["region"]
+                    arguments = {"domain": "domain_a", "sku": "S-2", "region": region}
+                elif len(tools) == 2 and len(provided) == 2:
+                    arguments = {
+                        "domain": "domain_a",
+                        "sku": "S-2",
+                        "region": json.loads(provided[0]["content"])["provided_input"]["region"],
+                        "tier": json.loads(provided[1]["content"])["provided_input"]["tier"],
+                    }
+                else:
+                    arguments = None
+                if arguments is not None:
+                    answer = {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": f"c{len(tools) + 1}",
+                                "type": "function",
+                                "function": {
+                                    "name": "query_inventory",
+                                    "arguments": json.dumps(arguments),
+                                },
+                            }
+                        ],
+                    }
+                else:
+                    answer = {"content": "region and tier applied"}
+                payload = json.dumps(answer).encode("utf-8")
+                writer.write(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                    + f"Content-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode()
+                    + payload
+                )
+                await writer.drain()
+            except Exception:  # noqa: BLE001, S110 — connection-level failures end the exchange
+                pass
+            finally:
+                writer.close()
+
+    model = _TwoWakeModel()
+    await model.start()
+    try:
+        config = json.loads((profile_dir / "runner.json").read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        (profile_dir / "runner.json").write_text(json.dumps(config), encoding="utf-8")
+        harness = _Harness(profile_dir, api)
+        engine = harness.engine
+        submitted_input = {"input": {"prompt" if with_prompt else "task": "regional tier stock"}}
+        run_id, state = await engine.submit("app-reader", submitted_input, ("domain_a",))
+        assert state is not None
+
+        async def _terminal() -> object:
+            async with asyncio.timeout(20):
+                while True:
+                    candidate = engine.get_state(run_id)
+                    if candidate is not None and candidate.status in {"succeeded", "failed", "unknown"}:
+                        return candidate
+                    await asyncio.sleep(0.05)
+            raise AssertionError("unreachable")
+
+        async def _waiting(exclude_token: str) -> tuple[object, dict]:
+            async with asyncio.timeout(20):
+                while True:
+                    candidate = engine.get_state(run_id)
+                    if (
+                        candidate is not None
+                        and candidate.status == "waiting_input"
+                        and candidate.wait_token
+                        and candidate.wait_token != exclude_token
+                    ):
+                        break
+                    await asyncio.sleep(0.05)
+            task_ref = candidate.task_ref
+            record = harness.durable.store.get_task_state(task_ref)
+            wait = (record.extra or {}).get("wait") or {}
+            return candidate, wait
+
+        parked1, wait1 = await _waiting("")
+        assert parked1.status == "waiting_input"
+        task_ref = parked1.task_ref
+        first_run = harness.durable.store.run_for_task(task_ref)
+
+        wake1_id = f"wake-1-{uuid.uuid4()}"
+        receipt, reason = harness.durable.apply_wake(
+            command_id=wake1_id,
+            kind="provide_input",
+            issuer="app-reader",
+            task_ref=task_ref,
+            wait_token=wait1["wait_token"],
+            input_payload={"region": "EU"},
+            keep_run_linkage=True,
+            controller_loop=True,
+        )
+        assert reason is None and receipt.state.value == "applied"
+        # Duplicate command replay: idempotent, no second revision, no requeue.
+        replay, replay_reason = harness.durable.apply_wake(
+            command_id=wake1_id,
+            kind="provide_input",
+            issuer="app-reader",
+            task_ref=task_ref,
+            wait_token=wait1["wait_token"],
+            input_payload={"region": "EU"},
+            keep_run_linkage=True,
+            controller_loop=True,
+        )
+        assert replay_reason is None and replay.state.value == "applied"
+        assert len(harness.durable.store.list_input_revisions(task_ref)) == 1
+        assert engine.resume(task_ref, harness.durable.store.run_for_task(task_ref), {}) is not None
+
+        parked2, wait2 = await _waiting(wait1["wait_token"])
+        assert parked2.status == "waiting_input"
+        revisions = harness.durable.store.list_input_revisions(task_ref)
+        assert [row["effective_turn"] for row in revisions] == [2]
+        assert harness.durable.store.run_for_task(task_ref).id == first_run.id  # same run, no new attempt
+
+        receipt2, reason2 = harness.durable.apply_wake(
+            command_id=f"wake-2-{uuid.uuid4()}",
+            kind="provide_input",
+            issuer="app-reader",
+            task_ref=task_ref,
+            wait_token=wait2["wait_token"],
+            input_payload={"tier": "gold"},
+            keep_run_linkage=True,
+            controller_loop=True,
+        )
+        assert reason2 is None and receipt2.state.value == "applied"
+        assert engine.resume(task_ref, harness.durable.store.run_for_task(task_ref), {}) is not None
+
+        final = await _terminal()
+        assert final.status == "succeeded", final.error
+        revisions = harness.durable.store.list_input_revisions(task_ref)
+        assert [row["effective_turn"] for row in revisions] == [2, 3]
+        assert [row["content"] for row in revisions] == [{"region": "EU"}, {"tier": "gold"}]
+        assert harness.durable.store.run_for_task(task_ref).id == first_run.id
+        # Every business call carried exactly the inputs accepted so far —
+        # no call repeated, none executed with a value it could not have seen.
+        assert api.calls == [
+            {"domain": "domain_a", "sku": "S-2"},
+            {"domain": "domain_a", "sku": "S-2", "region": "EU"},
+            {"domain": "domain_a", "sku": "S-2", "region": "EU", "tier": "gold"},
+        ]
+        # The last model ask saw BOTH revisions in causal order: the first
+        # input before the second turn's result, the second input after it.
+        last_messages = model.requests[-1]["messages"]
+        provided, tools = _provided_indexes(last_messages), _tool_indexes(last_messages)
+        assert len(provided) == 2 and len(tools) == 3
+        assert tools[0] < provided[0] < tools[1] < provided[1] < tools[2]
+        assert len(model.requests) == 4  # each turn asked exactly once, replays asked nothing
     finally:
         await model.stop()

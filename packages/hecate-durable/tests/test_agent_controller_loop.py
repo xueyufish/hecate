@@ -178,3 +178,103 @@ async def test_crash_after_feedback_before_next_decision_recovers(database, tmp_
     assert result["state"] == "final_answer"
     assert result["asks"] == ["agent-turn-000002", "agent-turn-000003"]
     assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]
+
+
+def _accept_input(backend, wake_id: str, content: dict) -> None:
+    """The single wake writer: park, then accept the revision atomically.
+
+    Mirrors the host sequence (claim → wait → wake) and fixes the causal
+    boundary from the committed decision chain, exactly like the platform
+    and runner wake paths do.
+    """
+    from hecate_durable.contracts.durable import TaskLifecycleState
+
+    backend.apply_task_state(SQL_TASK, TaskLifecycleState.RUNNING)
+    backend.apply_task_state(
+        SQL_TASK,
+        TaskLifecycleState.WAITING_INPUT,
+        extra_update={"wait": {"wait_token": wake_id, "consumed": False}},
+    )
+    backend.apply_task_state(
+        SQL_TASK,
+        TaskLifecycleState.QUEUED,
+        extra_update={"wait": {"wait_token": wake_id, "consumed": True}},
+        input_revision={
+            "source": "provide_input",
+            "source_ref": wake_id,
+            "content": content,
+            "wait_token": wake_id,
+            "effective_turn": backend.count_accepted_decisions(SQL_RUN) + 1,
+        },
+    )
+
+
+async def test_two_input_revisions_recover_in_true_causal_order(database, tmp_path) -> None:
+    """Two waits, two wakes, three processes — order and effects preserved."""
+    backend, _clock, _url = database
+    owner = prepare_decision_run(backend, RUN)
+    effect = tmp_path / "input-effects.txt"
+
+    # Process 1: turn 1 commits, then the run dies parked awaiting input.
+    parked = _run_probe(_config(backend, owner), "input-park-1", effect)
+    assert parked.returncode == 9, parked.stderr
+    assert _effects(effect) == ["effect-loop-a1"]
+    assert await SqlAcceptedDecisionStore(backend).lookup(RUN, "agent-turn-000002") is None
+
+    # Wake 1: the revision's boundary is one past the committed chain (turn 2).
+    _accept_input(backend, "wake-1", {"region": "EU"})
+    revisions = backend.list_input_revisions(SQL_TASK)
+    assert [row["effective_turn"] for row in revisions] == [2]
+
+    # Process 2: replays turn 1, decides turn 2 with the revision at the
+    # causal tail, executes its action, dies parked again before turn 3.
+    resumed = _run_probe(_config(backend, owner), "input-resume", effect)
+    assert resumed.returncode == 9, resumed.stderr
+    assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]
+
+    # Wake 2: the second revision lands after the now two-turn chain (turn 3).
+    _accept_input(backend, "wake-2", {"tier": "gold"})
+    revisions = backend.list_input_revisions(SQL_TASK)
+    assert [row["effective_turn"] for row in revisions] == [2, 3]
+    assert [row["content"] for row in revisions] == [{"region": "EU"}, {"tier": "gold"}]
+
+    # Process 3: turns 1-2 replay with zero model calls and zero effects;
+    # turn 3 answers with BOTH input values in their true causal order.
+    finished = _run_probe(_config(backend, owner), "input-resume-final", effect)
+    assert finished.returncode == 0, finished.stderr
+    result = json.loads(finished.stdout)
+    assert result["state"] == "final_answer"
+    assert result["final_text"] == "the loop answer region=EU tier=gold"
+    assert result["asks"] == ["agent-turn-000003"]
+    assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]
+    assert len(backend.list_run_actions(SQL_RUN)) == 2
+
+
+async def test_duplicate_wake_command_keeps_one_revision(database, tmp_path) -> None:
+    """Replaying the same wake command is idempotent at every boundary."""
+    backend, _clock, _url = database
+    owner = prepare_decision_run(backend, RUN)
+    effect = tmp_path / "dup-effects.txt"
+    parked = _run_probe(_config(backend, owner), "input-park-1", effect)
+    assert parked.returncode == 9, parked.stderr
+
+    _accept_input(backend, "wake-dup", {"region": "EU"})
+    from hecate_durable.contracts.durable import TaskLifecycleState
+
+    # The same command replays after the wait is consumed: same revision,
+    # no second row, no requeue loop (the transition itself stays valid).
+    replay = backend.apply_task_state(
+        SQL_TASK,
+        TaskLifecycleState.QUEUED,
+        extra_update={"wait": {"wait_token": "wake-dup", "consumed": True}},
+        input_revision={
+            "source": "provide_input",
+            "source_ref": "wake-dup",
+            "content": {"region": "EU"},
+            "wait_token": "wake-dup",
+            "effective_turn": 2,
+        },
+    )
+    assert replay is not None
+    revisions = backend.list_input_revisions(SQL_TASK)
+    assert len(revisions) == 1 and revisions[0]["source_ref"] == "wake-dup"

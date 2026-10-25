@@ -15,6 +15,17 @@ cannot reset the turn budget, re-ask an accepted decision or re-execute a
 confirmed action; there is no second action ledger and no in-memory-only
 cursor. The outcome speaks only for the loop: a final answer is an
 accepted model output, never a Task completion or acceptance decision.
+
+Input revisions extend the same projection: each accepted human input is
+an immutable revision with its causal turn boundary (``effective_turn``).
+A revision rides between the projections of the turns that already
+committed when it was accepted and the first turn that may consume it —
+never before earlier turns — and every decision pins the ordered revision
+ids it can see in ``input_refs["inputs"]`` and binds their content and causal
+boundaries with ``input_refs["input_digests"]``. Committed decisions therefore
+restore by their original references no matter how many revisions arrive
+later; the key is absent while a turn sees no revision, which keeps
+pre-revision ``agent-loop/1`` chains replayable byte-for-byte.
 """
 
 from __future__ import annotations
@@ -45,6 +56,7 @@ __all__ = [
     "AgentController",
     "AgentControllerOutcome",
     "ControllerExecutionDriver",
+    "ControllerInputRevision",
     "ControllerLimits",
     "ControllerRunSpec",
     "PortTurnResponderSource",
@@ -102,16 +114,46 @@ class ControllerLimits:
 
 
 @dataclass(frozen=True)
+class ControllerInputRevision:
+    """One accepted human input with its causal turn boundary.
+
+    ``revision_id`` is the durable identity the wake transaction recorded;
+    ``content`` is the model-visible payload (never approval control
+    data); ``effective_turn`` is the first turn that may consume it — the
+    host records it as one past the committed chain length at acceptance,
+    so the revision can never move before turns that already decided.
+    """
+
+    revision_id: str
+    content: dict[str, Any]
+    effective_turn: int
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.revision_id, str)
+            or not self.revision_id.strip()
+            or self.revision_id.strip() != self.revision_id
+            or len(self.revision_id) > 256
+        ):
+            raise DecisionValidationError("revision_id must be a nonblank, trimmed string of at most 256 characters")
+        if not isinstance(self.content, dict):
+            raise DecisionValidationError("revision content must be a JSON object")
+        if type(self.effective_turn) is not int or self.effective_turn < 1 or self.effective_turn > 10**6:
+            raise DecisionValidationError("effective_turn must be a positive integer")
+        canonical_json(self.content)
+
+
+@dataclass(frozen=True)
 class ControllerRunSpec:
     """One controller invocation's host-bound facts.
 
-    ``pending_input`` carries a durable input revision (e.g. a consumed
-    ``provide_input`` wake's provided fields) as one user message appended
-    AFTER the frozen base — never folded into it. The base digest and the
-    committed turns' references stay valid across the revision, the
-    rebuild stays deterministic (the host re-reads the same durable
-    payload on every re-entry), and the injected message sits at the
-    conversation tail so later turn projections append after it.
+    ``input_revisions`` carries the durable, ordered input history of the
+    run (see :class:`ControllerInputRevision`). Each revision becomes one
+    user message at its causal boundary — after the projections of the
+    turns committed before its acceptance, before the first turn that may
+    consume it — never folded into the frozen base, and each decision pins
+    the visible revision ids and content/boundary digests so a later input
+    can neither rewrite committed references nor reorder history.
     """
 
     run_ref: RunRef
@@ -122,7 +164,7 @@ class ControllerRunSpec:
     context: dict[str, Any] | None = None
     execution_context: dict[str, Any] | None = None
     clock: Callable[[], datetime] | None = None
-    pending_input: dict[str, Any] | None = None
+    input_revisions: tuple[ControllerInputRevision, ...] = ()
     # Host-level stop reasons consulted between actions (before any claim)
     # and between turns; host reasons take precedence over the loop's own
     # cancel/deadline classification. Example: a durable input wait parked
@@ -306,20 +348,23 @@ class AgentController:
 
         frozen = json_copy(self._source.frozen_refs())
         frozen["base_input"] = hashlib.sha256(canonical_json(base_messages).encode()).hexdigest()
+        # Stable causal order: by effective boundary, then given (durable
+        # seq) order inside one boundary. Ids are unique — two revisions
+        # can share a boundary, never an identity.
+        revisions = sorted(
+            (
+                ControllerInputRevision(item.revision_id, json_copy(item.content), item.effective_turn)
+                for item in spec.input_revisions
+            ),
+            key=lambda item: item.effective_turn,
+        )
+        seen_ids: set[str] = set()
+        for revision in revisions:
+            if revision.revision_id in seen_ids:
+                raise DecisionValidationError(f"duplicate input revision id {revision.revision_id!r}")
+            seen_ids.add(revision.revision_id)
+        pending_revisions = list(revisions)
         messages = base_messages
-        if spec.pending_input is not None:
-            if not isinstance(spec.pending_input, dict):
-                raise DecisionValidationError("pending_input must be a JSON object or None")
-            # The durable input revision rides at the conversation tail:
-            # outside the frozen base (committed references stay valid),
-            # before every later turn projection (natural user-message
-            # order), rebuilt identically from durable state on re-entry.
-            messages = base_messages + [
-                {
-                    "role": "user",
-                    "content": json.dumps({"provided_input": spec.pending_input}, ensure_ascii=False),
-                }
-            ]
         committed: list[str] = []
         turn_index = 1
         while True:
@@ -335,8 +380,34 @@ class AgentController:
             if turn_index > spec.limits.max_turns:
                 yield self._terminal(_STOPPED, committed, turn_index - 1, reason="turn_limit")
                 return
+            # Revisions enter at their causal boundary: after the turns that
+            # committed before acceptance, before this turn's ask. A later
+            # input can never move before an earlier turn's projection.
+            while pending_revisions and pending_revisions[0].effective_turn <= turn_index:
+                revision = pending_revisions.pop(0)
+                messages = messages + [
+                    {
+                        "role": "user",
+                        "content": json.dumps({"provided_input": revision.content}, ensure_ascii=False),
+                    }
+                ]
             step_id = decision_step_id_for_turn(spec.decision_prefix, turn_index)
             input_refs = {**frozen, "controller": CONTROLLER_LOOP_MARKER, "turn": turn_index}
+            visible_inputs = [item.revision_id for item in revisions if item.effective_turn <= turn_index]
+            if visible_inputs:
+                # The revision binding is identifiable per decision: only
+                # present when this turn actually sees a revision, so
+                # pre-revision agent-loop/1 chains replay byte-for-byte.
+                input_refs["inputs"] = visible_inputs
+                input_refs["input_digests"] = [
+                    hashlib.sha256(
+                        canonical_json(
+                            {"id": item.revision_id, "content": item.content, "effective_turn": item.effective_turn}
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    for item in revisions
+                    if item.effective_turn <= turn_index
+                ]
             yield {
                 "type": _TURN_STARTED,
                 "turn": turn_index,
