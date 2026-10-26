@@ -15,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Upload, Globe } from "lucide-react";
+import { Upload, Globe, Trash2 } from "lucide-react";
 
 interface Document {
   id: string;
@@ -57,10 +57,10 @@ export default function KnowledgeDetailPage() {
 
   const loadDocs = async () => {
     try {
-      const kbData = await api.get<{ documents?: Document[] }>(
-        `/api/knowledge-bases/${kbId}`
+      const data = await api.get<{ items?: Document[] }>(
+        `/api/knowledge-bases/${kbId}/documents?page_size=100`
       );
-      setDocs(kbData.documents || []);
+      setDocs(data.items || []);
     } catch {
       setDocs([]);
     }
@@ -74,10 +74,22 @@ export default function KnowledgeDetailPage() {
         await api.upload(`/api/knowledge-bases/${kbId}/upload`, file);
       }
       await loadDocs();
-    } catch {
-      alert("Upload failed");
+    } catch (err) {
+      const apiErr = err as { error?: { message?: string } };
+      alert("Upload failed: " + (apiErr.error?.message || "Unknown error"));
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDelete = async (docId: string) => {
+    if (!confirm("Delete this document? Its indexed chunks will be removed.")) return;
+    try {
+      await api.delete(`/api/knowledge-bases/${kbId}/documents/${docId}`);
+      await loadDocs();
+    } catch (err) {
+      const apiErr = err as { error?: { message?: string } };
+      alert("Delete failed: " + (apiErr.error?.message || "Unknown error"));
     }
   };
 
@@ -176,6 +188,7 @@ export default function KnowledgeDetailPage() {
               <TableHead>Size</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Chunks</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -192,6 +205,16 @@ export default function KnowledgeDetailPage() {
                   )}
                 </TableCell>
                 <TableCell>{doc.chunk_count}</TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDelete(doc.id)}
+                    title="Delete document"
+                  >
+                    <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

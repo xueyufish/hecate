@@ -9,12 +9,14 @@ Provides operations for knowledge bases:
 
 from __future__ import annotations
 
+import tempfile
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel as PydanticBase
 from pydantic import Field
 from sqlalchemy import func, select
@@ -31,6 +33,8 @@ from hecate.models.knowledge import (
     KnowledgeBaseReadSchema,
 )
 from hecate_memory.rag.crawler import web_crawler
+from hecate_memory.rag.factory import get_vector_store
+from hecate_memory.rag.parser import SUPPORTED_EXTENSIONS, DocumentParser
 from hecate_memory.rag.service import knowledge_base_service
 
 router = APIRouter()
@@ -102,10 +106,50 @@ async def list_knowledge_bases(
     result = await db.execute(stmt)
     kbs = result.scalars().all()
 
-    return {
-        "items": [KnowledgeBaseReadSchema.model_validate(kb).model_dump() for kb in kbs],
-        "total": total,
-    }
+    # Per-KB document counts (soft-deleted docs excluded) for the list view.
+    doc_counts: dict[uuid.UUID, int] = {}
+    if kbs:
+        count_stmt = (
+            select(DocumentModel.knowledge_base_id, func.count())
+            .where(
+                DocumentModel.knowledge_base_id.in_([kb.id for kb in kbs]),
+                ~DocumentModel.deleted,
+            )
+            .group_by(DocumentModel.knowledge_base_id)
+        )
+        doc_counts = {kb_id: count for kb_id, count in (await db.execute(count_stmt)).all()}
+
+    items = []
+    for kb in kbs:
+        payload = KnowledgeBaseReadSchema.model_validate(kb).model_dump()
+        payload["document_count"] = doc_counts.get(kb.id, 0)
+        items.append(payload)
+
+    return {"items": items, "total": total}
+
+
+@router.get("/knowledge-bases/{kb_id}")
+async def get_knowledge_base(
+    kb_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Get a single knowledge base by ID.
+
+    Args:
+        kb_id: The knowledge base ID.
+        db: The async database session.
+        ctx: The authenticated context.
+
+    Returns:
+        dict: The knowledge base record.
+
+    Raises:
+        HTTPException: 404 if the knowledge base does not exist (or belongs
+            to another workspace).
+    """
+    kb = await _get_kb_or_404(kb_id, db, workspace_id=ctx.workspace_id or uuid.UUID(int=0))
+    return KnowledgeBaseReadSchema.model_validate(kb).model_dump()
 
 
 @router.post("/knowledge-bases/{kb_id}/documents", status_code=status.HTTP_201_CREATED)
@@ -160,6 +204,126 @@ async def upload_document(
     await db.flush()
     await db.refresh(doc)
     return DocumentReadSchema.model_validate(doc).model_dump()
+
+
+@router.post("/knowledge-bases/{kb_id}/upload")
+async def upload_document_file(
+    kb_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    file: Annotated[UploadFile, File(...)],
+) -> dict:
+    """Accept a document file, extract its text, and ingest it into the KB.
+
+    The multipart counterpart of the metadata-only ``POST .../documents``
+    endpoint: stores nothing itself, delegates text extraction to the
+    document parser and chunk/embed/upsert to the shared ingestion
+    service — the same pipeline the URL crawler uses.
+
+    Raises:
+        HTTPException: 404 if knowledge base not found; 415 for unsupported
+            formats; 422 when no text could be extracted.
+    """
+    kb = await _get_kb_or_404(kb_id, db, ctx.workspace_id)
+
+    filename = file.filename or "untitled.txt"
+    suffix = Path(filename).suffix
+    if f".{suffix.lstrip('.').lower()}" not in SUPPORTED_EXTENSIONS:
+        message = f"Unsupported file format: {suffix}"
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={"error": {"code": "UNSUPPORTED_FORMAT", "message": message, "details": None}},
+        )
+
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(await file.read())
+            tmp_path = tmp.name
+        text = await DocumentParser().parse(tmp_path, file.content_type)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={"error": {"code": "UNSUPPORTED_FORMAT", "message": str(e), "details": None}},
+        ) from e
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    if not text.strip():
+        message = "No text could be extracted from the file"
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": {"code": "EMPTY_DOCUMENT", "message": message, "details": None}},
+        )
+
+    doc = DocumentModel(
+        knowledge_base_id=kb_id,
+        filename=filename,
+        file_path=f"upload://{filename}",
+        file_size=len(text.encode("utf-8")),
+        content_type=file.content_type,
+        parsing_status="pending",
+    )
+    db.add(doc)
+    await db.flush()
+
+    ingest_result = await knowledge_base_service.ingest_document_text(
+        text=text,
+        collection_name=kb.collection_name,
+        metadata={"filename": filename, "source": "upload", "document_id": str(doc.id)},
+        chunking_strategy=kb.chunk_strategy,
+        chunk_size=kb.chunk_size,
+        chunk_overlap=kb.chunk_overlap,
+    )
+    chunk_count = ingest_result.get("chunk_count", 0)
+    if chunk_count:
+        doc.parsing_status = "completed"
+        doc.chunk_count = chunk_count
+    else:
+        doc.parsing_status = "failed"
+        doc.parsing_error = str(ingest_result.get("error") or "Ingestion produced no chunks")
+    await db.flush()
+    await db.refresh(doc)
+
+    return {**DocumentReadSchema.model_validate(doc).model_dump(), "chunk_count": chunk_count}
+
+
+@router.delete("/knowledge-bases/{kb_id}/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    kb_id: uuid.UUID,
+    doc_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> None:
+    """Soft-delete a document and remove its vectors from the collection.
+
+    Best effort on the vector side: chunks ingested before document ids were
+    recorded in chunk metadata are matched by filename instead.
+    """
+    result = await db.execute(
+        select(DocumentModel).where(
+            DocumentModel.id == doc_id,
+            DocumentModel.knowledge_base_id == kb_id,
+            ~DocumentModel.deleted,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Document not found", "details": None}},
+        )
+
+    kb = await _get_kb_or_404(kb_id, db, ctx.workspace_id)
+
+    doc.deleted = True
+    doc.deleted_at = datetime.now(UTC)
+    await db.flush()
+
+    store = get_vector_store()
+    await store.delete_by_metadata(kb.collection_name, {"metadata.document_id": str(doc_id)})
+    await store.delete_by_metadata(kb.collection_name, {"metadata.filename": doc.filename})
 
 
 @router.get("/knowledge-bases/{kb_id}/documents")
@@ -491,13 +655,18 @@ async def ingest_urls(
             "source_url": result.url,
             "title": result.title,
             "description": result.description,
+            "document_id": str(doc.id),
         }
 
         ingest_result = await knowledge_base_service.ingest_document_text(
             text=result.text,
             collection_name=kb.collection_name,
             metadata=metadata,
+            chunking_strategy=kb.chunk_strategy,
+            chunk_size=kb.chunk_size,
+            chunk_overlap=kb.chunk_overlap,
         )
+        doc.chunk_count = ingest_result.get("chunk_count", 0)
 
         ingested.append(
             {
