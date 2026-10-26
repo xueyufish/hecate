@@ -31,16 +31,34 @@ class KnowledgeBaseService:
     """
 
     @staticmethod
-    async def _chunk(text: str, metadata: dict[str, Any], strategy: str | None) -> list[Any]:
-        """Chunk text with an optional strategy override (catalog 3.2.6)."""
-        if strategy:
+    async def _chunk(
+        text: str,
+        metadata: dict[str, Any],
+        strategy: str | None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ) -> list[Any]:
+        """Chunk text with an optional per-KB strategy override (catalog 3.2.6).
+
+        Knowledge bases record the strategy as ``"fixed"`` while the chunker
+        enum calls the same behavior ``"character"``; sizes apply when set.
+        """
+        if strategy or chunk_size is not None or chunk_overlap is not None:
             from hecate_memory.rag.chunker import ChunkingStrategy, TextChunker
 
-            chunker = TextChunker(strategy=ChunkingStrategy(strategy))
-            if strategy == ChunkingStrategy.SEMANTIC.value:
-                chunker._embedding_service = embedding_service
-                return await chunker.chunk_text_async(text, metadata)
-            return chunker.chunk_text(text, metadata)
+            normalized = {"fixed": ChunkingStrategy.CHARACTER}.get(strategy or "", strategy)
+            kwargs: dict[str, Any] = {}
+            if chunk_size is not None:
+                kwargs["chunk_size"] = chunk_size
+            if chunk_overlap is not None:
+                kwargs["chunk_overlap"] = chunk_overlap
+            if normalized:
+                chunker = TextChunker(strategy=ChunkingStrategy(normalized), **kwargs)
+                if normalized == ChunkingStrategy.SEMANTIC.value:
+                    chunker._embedding_service = embedding_service
+                    return await chunker.chunk_text_async(text, metadata)
+                return chunker.chunk_text(text, metadata)
+            return TextChunker(**kwargs).chunk_text(text, metadata)
         return text_chunker.chunk_text(text, metadata)
 
     async def ingest_document(
@@ -50,6 +68,8 @@ class KnowledgeBaseService:
         metadata: dict[str, Any] | None = None,
         workspace_id: str | None = None,
         chunking_strategy: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> dict[str, Any]:
         """Ingest a document into the knowledge base.
 
@@ -69,7 +89,7 @@ class KnowledgeBaseService:
         if not text:
             return {"chunk_count": 0, "error": "No text extracted"}
 
-        chunks = await self._chunk(text, metadata or {}, chunking_strategy)
+        chunks = await self._chunk(text, metadata or {}, chunking_strategy, chunk_size, chunk_overlap)
         if not chunks:
             return {"chunk_count": 0, "error": "No chunks generated"}
 
@@ -93,6 +113,11 @@ class KnowledgeBaseService:
         ]
 
         store = get_vector_store()
+        # Self-heal: provision the collection with the actual embedding
+        # dimension (idempotent when it already exists) — covers KBs created
+        # while the vector store was down.
+        if hasattr(store, "create_collection"):
+            await store.create_collection(collection_name, vector_size=len(vectors[0]))
         await store.upsert(
             collection_name=collection_name,
             ids=ids,
@@ -110,6 +135,8 @@ class KnowledgeBaseService:
         metadata: dict[str, Any] | None = None,
         workspace_id: str | None = None,
         chunking_strategy: str | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
     ) -> dict[str, Any]:
         """Ingest pre-extracted text into the knowledge base.
 
@@ -128,7 +155,7 @@ class KnowledgeBaseService:
         if not text:
             return {"chunk_count": 0, "error": "No text provided"}
 
-        chunks = await self._chunk(text, metadata or {}, chunking_strategy)
+        chunks = await self._chunk(text, metadata or {}, chunking_strategy, chunk_size, chunk_overlap)
         if not chunks:
             return {"chunk_count": 0, "error": "No chunks generated"}
 
@@ -151,6 +178,11 @@ class KnowledgeBaseService:
         ]
 
         store = get_vector_store()
+        # Self-heal: provision the collection with the actual embedding
+        # dimension (idempotent when it already exists) — covers KBs created
+        # while the vector store was down.
+        if hasattr(store, "create_collection"):
+            await store.create_collection(collection_name, vector_size=len(vectors[0]))
         await store.upsert(
             collection_name=collection_name,
             ids=ids,

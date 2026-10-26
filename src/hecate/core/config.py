@@ -268,6 +268,15 @@ class Settings(BaseSettings):
     VECTOR_STORE_TYPE: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
+    # Embedding provider for the knowledge RAG stack. "local" runs BGE-M3
+    # in-process (FlagEmbedding); "openai_compatible" calls an OpenAI-style
+    # /embeddings endpoint via litellm (Zhipu, OpenAI, ...), which avoids
+    # shipping the ~2GB local model for self-hosted deployments.
+    EMBEDDING_PROVIDER: str = "local"
+    EMBEDDING_API_BASE: str = ""
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_MODEL: str = ""
+    EMBEDDING_DIMENSIONS: int = 1024
     CHROMA_PERSIST_DIR: str = "./data/chroma"
     MILVUS_URI: str = "http://localhost:19530"
     MILVUS_TOKEN: str = ""

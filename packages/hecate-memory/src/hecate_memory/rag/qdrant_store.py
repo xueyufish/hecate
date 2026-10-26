@@ -8,12 +8,24 @@ when the ``qdrant_client`` package is not installed.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from hecate_memory.rag.types import SearchResult
 from hecate_memory.rag.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
+
+
+def _to_point_id(raw: str) -> str:
+    """Qdrant accepts only UUIDs or unsigned integers as point IDs; map
+    arbitrary caller-chosen string ids (e.g. "text_0") to deterministic
+    UUIDs so re-ingestion updates the same points."""
+    try:
+        uuid.UUID(raw)
+        return raw
+    except ValueError:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
 
 
 class QdrantVectorStore(VectorStore):
@@ -85,7 +97,8 @@ class QdrantVectorStore(VectorStore):
 
             kwargs: dict[str, Any] = {
                 "collection_name": collection_name,
-                "vectors_config": VectorParams(size=vector_size, distance=Distance.COSINE),
+                # Named dense vector — upsert/query address it as "dense".
+                "vectors_config": {"dense": VectorParams(size=vector_size, distance=Distance.COSINE)},
             }
             if with_sparse:
                 kwargs["sparse_vectors_config"] = {"sparse": SparseVectorParams()}
@@ -151,7 +164,7 @@ class QdrantVectorStore(VectorStore):
                             indices=list(sparse.keys()),
                             values=list(sparse.values()),
                         )
-                points.append(PointStruct(id=id_, vector=point_vectors, payload=payload))
+                points.append(PointStruct(id=_to_point_id(id_), vector=point_vectors, payload=payload))
 
             client.upsert(collection_name=collection_name, points=points)
             logger.info(f"Upserted {len(ids)} vectors to {collection_name}")
@@ -170,12 +183,37 @@ class QdrantVectorStore(VectorStore):
         try:
             client.delete(
                 collection_name=collection_name,
-                points_selector=ids,
+                points_selector=[_to_point_id(i) for i in ids],
             )
             logger.info(f"Deleted {len(ids)} points from {collection_name}")
             return True
         except Exception as e:
             logger.error(f"Failed to delete points: {e}")
+            return False
+
+    async def delete_by_metadata(
+        self,
+        collection_name: str,
+        conditions: dict[str, str],
+    ) -> bool:
+        """Delete points whose payload metadata matches every condition."""
+        client = self._get_client()
+
+        if client == "mock":
+            logger.info(f"Mock: Deleted points matching {conditions} from {collection_name}")
+            return True
+
+        try:
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+            must = [FieldCondition(key=key, match=MatchValue(value=value)) for key, value in conditions.items()]
+            client.delete(
+                collection_name=collection_name,
+                points_selector=Filter(must=must),
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete by metadata {conditions}: {e}")
             return False
 
     async def search_dense(

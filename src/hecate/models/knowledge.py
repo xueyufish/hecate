@@ -92,3 +92,6 @@ class KnowledgeBaseReadSchema(PydanticBase):
     updated_at: datetime
     deleted: bool | None = False
     deleted_at: datetime | None
+    # Populated by the list endpoint (soft-deleted docs excluded); defaults
+    # to 0 on reads that don't compute it, e.g. the detail endpoint.
+    document_count: int = 0

@@ -40,7 +40,19 @@ class EmbeddingService:
         Consumers that need semantic fidelity (e.g. consolidation similarity
         scoring) check this and degrade instead of trusting mock vectors.
         """
+        if self._using_api_provider():
+            return False
         return self._get_model() == "mock"
+
+    def _using_api_provider(self) -> bool:
+        """True when an OpenAI-compatible embeddings endpoint is configured."""
+        from hecate.core.config import settings
+
+        return (
+            settings.EMBEDDING_PROVIDER == "openai_compatible"
+            and bool(settings.EMBEDDING_API_BASE)
+            and bool(settings.EMBEDDING_MODEL)
+        )
 
     def _get_model(self):
         """Lazy load the embedding model."""
@@ -55,6 +67,36 @@ class EmbeddingService:
                 self._model = "mock"
         return self._model
 
+    async def _encode_via_api(self, texts: list[str]) -> list[EmbeddingResult]:
+        """Embed via an OpenAI-compatible /embeddings endpoint.
+
+        Direct HTTP rather than litellm: provider-side param validation
+        (e.g. litellm rejecting `dimensions` for model names it maps to
+        OpenAI's own models) breaks third-party endpoints that do support
+        the parameter, such as Zhipu's embedding-3.
+        """
+        import httpx
+
+        from hecate.core.config import settings
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{settings.EMBEDDING_API_BASE.rstrip('/')}/embeddings",
+                    headers={"Authorization": f"Bearer {settings.EMBEDDING_API_KEY}"},
+                    json={
+                        "model": settings.EMBEDDING_MODEL,
+                        "input": texts,
+                        "dimensions": settings.EMBEDDING_DIMENSIONS,
+                    },
+                )
+                response.raise_for_status()
+            items = sorted(response.json()["data"], key=lambda d: d.get("index", 0))
+            return [EmbeddingResult(dense=[float(x) for x in item["embedding"]], sparse={}) for item in items]
+        except Exception as e:
+            logger.error(f"API embedding call failed: {e}")
+            return [self._mock_embedding(text) for text in texts]
+
     async def encode(self, texts: list[str]) -> list[EmbeddingResult]:
         """Generate embeddings for a list of texts.
 
@@ -64,6 +106,9 @@ class EmbeddingService:
         Returns:
             List of EmbeddingResult with dense and sparse vectors.
         """
+        if self._using_api_provider():
+            return await self._encode_via_api(texts)
+
         model = self._get_model()
 
         if model == "mock":
