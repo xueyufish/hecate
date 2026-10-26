@@ -164,6 +164,18 @@ class VectorStore(ABC):
             ``True`` if the deletion succeeded.
         """
 
+    async def delete_by_metadata(
+        self,
+        collection_name: str,
+        conditions: dict[str, str],
+    ) -> bool:
+        """Delete points whose payload metadata matches every condition.
+
+        Optional capability — adapters without metadata filtering return
+        ``False`` and callers degrade to leaving the vectors in place.
+        """
+        return False
+
     # ------------------------------------------------------------------
     # Search operations
     # ------------------------------------------------------------------

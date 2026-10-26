@@ -4,8 +4,12 @@ export interface ApiError {
   error: { code: string; message: string; details: unknown };
 }
 
-class ApiClient {
+export class ApiClient {
   private baseUrl: string;
+  // Single-flight refresh: concurrent 401s must share one refresh call. The
+  // auth service rotates refresh tokens, so parallel refreshes invalidate
+  // each other and leave half the retried requests with dead tokens.
+  private refreshInFlight: Promise<string | null> | null = null;
 
   constructor(baseUrl: string = API_BASE) {
     this.baseUrl = baseUrl;
@@ -23,6 +27,16 @@ class ApiClient {
 
   private async refreshIfNeeded(response: Response): Promise<string | null> {
     if (response.status !== 401) return null;
+    if (!this.getRefreshToken()) return null;
+    if (!this.refreshInFlight) {
+      this.refreshInFlight = this.doRefresh().finally(() => {
+        this.refreshInFlight = null;
+      });
+    }
+    return this.refreshInFlight;
+  }
+
+  private async doRefresh(): Promise<string | null> {
     const refreshToken = this.getRefreshToken();
     if (!refreshToken) return null;
 
@@ -39,6 +53,14 @@ class ApiClient {
       return data.access_token;
     } catch {
       return null;
+    }
+  }
+
+  private handleAuthFailure(): void {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      window.location.href = "/login";
     }
   }
 
@@ -76,11 +98,7 @@ class ApiClient {
         }
         return retry.json();
       }
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        window.location.href = "/login";
-      }
+      this.handleAuthFailure();
       throw { error: { code: "UNAUTHORIZED", message: "Please log in again", details: null } };
     }
 
@@ -133,15 +151,28 @@ class ApiClient {
       session_id?: string;
     }
   ): AsyncGenerator<string> {
-    const token = this.getToken();
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ ...body, stream: true }),
-    });
+    const send = (token: string | null) =>
+      fetch(`${this.baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ ...body, stream: true }),
+      });
+
+    let response = await send(this.getToken());
+    if (response.status === 401) {
+      // Same refresh story as upload(): streaming skips request(), so an
+      // expired access token must be refreshed here before giving up.
+      const newToken = await this.refreshIfNeeded(response);
+      if (newToken) {
+        response = await send(newToken);
+      } else {
+        this.handleAuthFailure();
+        throw new Error(`Stream error: ${response.status}`);
+      }
+    }
 
     if (!response.ok || !response.body) {
       throw new Error(`Stream error: ${response.status}`);
@@ -173,16 +204,33 @@ class ApiClient {
   }
 
   async upload(path: string, file: File): Promise<unknown> {
-    const token = this.getToken();
     const formData = new FormData();
     formData.append("file", file);
-    const response = await fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: formData,
-    });
+
+    const send = (token: string | null) =>
+      fetch(`${this.baseUrl}${path}`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: formData,
+      });
+
+    let response = await send(this.getToken());
+    if (response.status === 401) {
+      // Multipart uploads bypass request() (no JSON content type), so the
+      // 401-refresh-retry must be handled here too — otherwise an expired
+      // access token turns every upload into a spurious failure.
+      const newToken = await this.refreshIfNeeded(response);
+      if (newToken) {
+        response = await send(newToken);
+      } else {
+        this.handleAuthFailure();
+        throw {
+          error: { code: "UNAUTHORIZED", message: "Please log in again", details: null },
+        };
+      }
+    }
     if (!response.ok) {
       const err: ApiError = await response.json().catch(() => ({
         error: { code: "UNKNOWN", message: response.statusText, details: null },
