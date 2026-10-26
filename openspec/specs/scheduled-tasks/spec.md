@@ -67,6 +67,44 @@ The system SHALL expose REST endpoints: `POST /api/schedules` (create), `GET /ap
 - **WHEN** a PUT request updates the `cron_expression` of an active schedule
 - **THEN** the system SHALL reschedule the APScheduler job and update `next_run_at`
 
+### Requirement: 定时任务管理 REST 访问边界
+
+定时任务管理入口(`/api/schedules` 全部路由)SHALL 施加一致的 workspace、角色与资源归属门:所有入口(含 system scope 身份)要求服务端解析的 active workspace(403 `NO_WORKSPACE`;显式零 UUID workspace 是合法取值,不得当作缺失,也不得退化为全局查询);list/detail/execution history 要求至少 `VIEWER`,create/update/delete/pause/resume/trigger 要求至少 `EDITOR`;角色与 workspace 只取自服务端解析的 `AuthContext`,不接受请求体自报,system 身份在显式 workspace 内保留角色豁免但不获得跨 workspace 查询或操作能力。创建的 workspace/org 归属 SHALL 由服务端实际 workspace 行确定,不得以缺省零 UUID 补造组织归属。
+
+按 ID 入口 SHALL 先以最小查询核对 schedule 存活(存在、未软删除、属于当前 workspace)——缺失、软删除与跨 workspace(含同组织不同 workspace、跨组织)SHALL 使用一致 404,不泄露原因;再施加角色门;然后才读取配置/执行历史、校验 cron/业务参数或修改。不可见父 schedule MUST NOT 进入执行历史查询。历史 `workspace_id=NULL` 的组织级记录 SHALL 原样保留、不迁移不删除,本组 REST 入口不将其隐式开放给任何当前 workspace;后台调度器与可信内部调用保留既有签名兼容,其全局职责不因本边界改变。
+
+创建与更新/resume/trigger SHALL 校验显式绑定的 agent/workflow 存活于目标 workspace(存在、未软删除、workspace 一致;缺失/失效/跨 workspace 使用一致拒绝文案,不区分原因),校验先于落库、scheduler 注册、catch-up 与任何派发副作用;`execution_config` MUST NOT 携带行级归属保留键(org/workspace/agent/workflow 身份);删除与暂停不校验绑定,失效绑定的 schedule 仍可清理。权限或归属拒绝 SHALL 零业务副作用:schedule/execution 行与时间戳不变,scheduler 注册/更新/删除、catch-up 与后台派发不发生;cron/业务参数校验发生在相应权限门之后。当前手动 trigger 仅写执行记录,不构成实际执行成功的认证。
+
+#### Scenario: 跨 workspace 或软删除表现为不存在
+
+- **WHEN** 调用方请求不属于当前 workspace(含同组织其他 workspace 或其他组织)、已软删除或不存在的 schedule 的任一按 ID 入口
+- **THEN** 响应为一致 404,不区分三种情形;目标行、其执行记录与 scheduler 状态无任何变化
+
+#### Scenario: 角色不足或缺失被拒且零副作用
+
+- **WHEN** VIEWER 调用任一写入口,或有效身份在当前 workspace 无角色,或缺 workspace(含 system scope)调用任一入口
+- **THEN** 响应为 403(缺 workspace 为 `NO_WORKSPACE`),cron 等业务校验不再执行,schedule/execution 行、时间戳与 scheduler 注册不变
+
+#### Scenario: 创建绑定与 execution_config 校验先于副作用
+
+- **WHEN** 创建引用不属于目标 workspace 或已软删除的 agent/workflow,或 `execution_config` 携带 workspace/org/agent/workflow 身份键
+- **THEN** 请求被拒绝且文案不区分绑定缺失/失效/跨 workspace,无行落库、无 scheduler 注册
+
+#### Scenario: resume/trigger 复核绑定
+
+- **WHEN** 对绑定的 agent/workflow 已失效(软删除或归属变化)的 schedule 执行 resume 或 trigger
+- **THEN** 操作被拒绝,schedule 状态与执行记录不变;delete 与 pause 不受绑定失效影响,仍可用于清理
+
+#### Scenario: 旧组织级记录不隐式开放
+
+- **WHEN** 任何当前 workspace 的成员(含 system 身份)按 ID 或列表访问历史 `workspace_id=NULL` 的组织级 schedule
+- **THEN** 表现为不可见(404 或列表不包含),记录本身原样保留
+
+#### Scenario: 授权路径行为保持
+
+- **WHEN** 具备相应角色的成员访问属于当前 workspace 的 schedule
+- **THEN** 响应结构、分页与状态码与边界引入前一致;workspace/org 归属取自服务端 workspace 行
+
 ### Requirement: Concurrency control with max_concurrent_runs
 The system SHALL enforce `max_concurrent_runs` per scheduled task. If a new trigger fires while `max_concurrent_runs` executions are in progress, the system SHALL skip the trigger and log a warning. When `catch_up=true`, the system SHALL queue missed executions for later.
 
