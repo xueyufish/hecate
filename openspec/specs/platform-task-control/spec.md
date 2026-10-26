@@ -228,6 +228,8 @@
 
 平台 SHALL 提供具名的工作流回调入口:回调绑定父任务等待契约中的子任务引用(`await_task_ref`),平台核实该子任务存在于同一 workspace、已达终态、且其生命周期状态与回调声明一致后,才消费一次性 wait token 并以 `provide_input` 语义唤醒父任务(合并子任务结果摘要与回调载荷)。伪造或跨 workspace 的子引用、声明状态与子任务真实状态不符、等待契约不含该子引用的回调 MUST 得到显式 `rejected` 回执,MUST NOT 消费 token、不产生父任务状态变化。重复回调(同 command_id)SHALL 幂等返回既有回执;迟到回调(token 已消费或过期)SHALL 得到显式拒绝。父任务与子任务的持久事实 SHALL 各自跨进程重启保持——重启后回调入口行为不变。
 
+REST 入口(`POST /api/tasks/{task_id}/workflow-callback`)SHALL 在任何回执回放、子任务事实核实、token 消费或回执写入之前施加与任务控制命令相同的两级权限门:先要求调用方具备 active workspace,再校验父 Task 存在、未软删除且属于该 workspace——跨 workspace、已删除与不存在的父 Task SHALL 返回一致 404,SHALL NOT 泄露具体原因;随后要求至少 `EDITOR` 角色,不足 SHALL 返回 403。权限判定 SHALL 取自服务端解析的 `AuthContext`;wait token 与既有 `command_id` 是关于任务的事实,SHALL NOT 作为写权限的替代——持有正确 token 的 VIEWER 调用 MUST 被拒绝且 token 保持未消费,已降权调用方对已 `applied`/`rejected` 回调的重放 MUST 同样被拒绝且既有回执不被读取、重放或推进。拒绝时 SHALL 零副作用:不记录拒绝回执、不消费 token,Task/Run 状态、durable revision、输入、事件与 outbox SHALL NOT 变化,SHALL NOT 派发执行;权限门前仅允许父 Task 可见性查询。缺 workspace 身份(含 system scope)SHALL 维持既有 403 拒绝;显式携带 workspace 的 system-scope 身份保留既有角色豁免,资源归属仍按该 workspace 核验。可信内部自动回调(非 REST)SHALL 继续直接消费服务接口,SHALL NOT 因 REST 角色门被迫伪造用户身份。
+
 #### Scenario: 经核实的回调唤醒父任务
 
 - **WHEN** 子任务已 succeeded,回调声明 `declared_state=succeeded` 并携带正确 wait_token
@@ -247,6 +249,31 @@
 
 - **WHEN** 父任务等待期间父平台进程重启、子任务在另一进程完成后,回调到达
 - **THEN** 父任务等待事实与子任务终态事实均从持久记录核实,回调按正常语义应用
+
+#### Scenario: REST 回调对不可见父任务返回一致 404
+
+- **WHEN** 跨 workspace、已软删除或不存在的父 Task 收到 workflow-callback 请求(任意角色)
+- **THEN** 响应为一致 404,与目标不存在不可区分;无回执写入、无 token 消费、无状态变化
+
+#### Scenario: VIEWER 或无角色身份的 REST 回调被拒且零副作用
+
+- **WHEN** 同 workspace 的 VIEWER(或无角色)身份对可见父 Task 发送回调
+- **THEN** 响应为 403;即使携带正确 wait_token 也不消费,不记录拒绝回执,随后授权身份仍可用同一 token 完成唤醒
+
+#### Scenario: 降权后重放已结算回调被拒
+
+- **WHEN** EDITOR 曾成功应用或获得拒绝回执的回调,该身份降权后以同 command_id 重放
+- **THEN** 角色门先于幂等回放返回 403,既有回执内容与状态保持不变
+
+#### Scenario: system scope 与缺 workspace 行为保持
+
+- **WHEN** 缺 workspace 的身份(含 system scope)发送 REST 回调
+- **THEN** 维持既有 403 `NO_WORKSPACE` 拒绝;显式绑定 workspace 的 system 身份保留角色豁免,但资源归属仍按该 workspace 核验
+
+#### Scenario: 内部自动回调不经 REST 角色门
+
+- **WHEN** 平台 dispatcher 以平台 issuer 对子任务终态发起经核实的自动回调
+- **THEN** 直接消费服务接口完成唤醒,不因 REST 角色门伪造用户身份,正常工作流子任务完成与恢复保持可用
 
 ### Requirement: 命令重放绑定授权资源及原请求
 
