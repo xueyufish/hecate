@@ -1001,6 +1001,7 @@ class PlatformTaskDispatcher:
             PortTurnResponderSource,
         )
         from hecate_runtime.agent_turn import AgentTurn
+        from hecate_runtime.delivery_acceptance import declared_acceptance
         from hecate_runtime.execution_service import RuntimeExecutionRequest, runtime_execution_service
         from hecate_runtime.tool_call_executor import ToolCallExecutor
 
@@ -1088,8 +1089,9 @@ class PlatformTaskDispatcher:
             "model": model_name,
             "tools": sorted(tool_definitions),
             # Frozen goal/acceptance references: every committed decision
-            # pins the goal digest and acceptance version it ran under, so
-            # a re-presented chain under a different standard conflicts.
+            # pins the goal and acceptance version it ran under (the spec's
+            # declared standard adds the full declaration digest), so a
+            # re-presented chain under a different standard conflicts.
             "goal": context.goal,
             "acceptance_version": (context.acceptance or {}).get("version"),
         }
@@ -1152,6 +1154,10 @@ class PlatformTaskDispatcher:
             # turn boundaries — never folded into the frozen base, and every
             # decision pins the revision ids it consumed.
             input_revisions=revisions,
+            # An explicitly declared acceptance standard pins its version
+            # and digest on every decision; the delivery gate below then
+            # evaluates under the same frozen declaration.
+            acceptance=declared_acceptance(context.acceptance),
         )
         first_responder = source.responder_for(messages, {**base_refs, "controller": "agent-loop/1", "turn": 1})
         controller = AgentController(AgentTurn(store, first_responder, executor), source)
@@ -1167,6 +1173,13 @@ class PlatformTaskDispatcher:
             )
         )
         if result.state.value == "failed":
+            if result.detail.get("requires_reconciliation"):
+                return {
+                    "status": "awaiting_reconciliation",
+                    "content": "",
+                    "error": result.error or "accepted decision history is unavailable",
+                    "error_category": "decision_history_unavailable",
+                }
             raise RuntimeError(result.error or "controller execution failed")
         if result.state.value in ("unknown", "cancelled"):
             return {"status": "unknown", "content": "", "error": f"controller execution {result.state.value}"}
@@ -1174,7 +1187,14 @@ class PlatformTaskDispatcher:
         if outcome is None:  # pragma: no cover - a completed stream always carries one
             return {"status": "unknown", "content": "", "error": "controller stream ended without an outcome"}
         if outcome.is_final_answer:
-            return self._evaluate_delivery(outcome.final_text or "", context)
+            return self._evaluate_delivery(
+                outcome.final_text or "",
+                context,
+                task_ref=task_ref,
+                run_ref=controller_run,
+                final_decision_step_id=outcome.final_decision_step_id,
+                final_decision_digest=outcome.final_decision_digest,
+            )
         if outcome.reason == "cancel_requested":
             return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
         return {
@@ -1215,88 +1235,63 @@ class PlatformTaskDispatcher:
             for row in rows
         ), None
 
-    @staticmethod
-    def _declared_checks(context: _DispatchContext) -> tuple[int, list[dict[str, Any]]]:
-        """The acceptance version and deterministic checks this task declared.
-
-        A bare ``output_schema`` (no acceptance block) stays supported and
-        evaluates as one output-schema check under version 1.
-        """
-
-        acceptance = context.acceptance
-        if acceptance is not None:
-            checks = list(acceptance.get("required_checks") or [])
-            return int(acceptance.get("version", 1)), checks
-        if context.output_schema is not None:
-            return 1, [{"kind": "output_schema", "schema": context.output_schema}]
-        return 1, []
-
     @classmethod
-    def _evaluate_delivery(cls, text: str, context: _DispatchContext) -> dict[str, Any]:
+    def _evaluate_delivery(
+        cls,
+        text: str,
+        context: _DispatchContext,
+        *,
+        task_ref: BackendRef,
+        run_ref: Any,
+        final_decision_step_id: str | None = None,
+        final_decision_digest: str | None = None,
+    ) -> dict[str, Any]:
         """Delivery gate: execution, delivery and acceptance stay separate facts.
 
         An accepted final answer is the delivered content; it submits the
         task as succeeded only when every declared required check passes
-        under the declared acceptance version. The evaluation itself is
-        recorded (version, per-check status, content digest) on the task
-        result — the minimal durable acceptance record. A failed or
-        unverified check keeps the delivered content visible and never
-        grants success.
+        under the declared acceptance standard (the same shared evaluation
+        the Runner applies — one declaration, one delivery, one verdict in
+        either host). The record binds the full task/run namespace, the
+        final decision's identity and digest, the standard's version and
+        digest, the content digest, the checker version, each check's
+        verdict and the platform identity accountable for the evaluation.
+        A failed or unverified check keeps the delivered content visible
+        and never grants success; a task without any acceptance
+        declaration succeeds on its delivery but its record says
+        ``not_declared`` — never a completed business-goal acceptance.
         """
 
-        import hashlib
+        from hecate_runtime.delivery_acceptance import evaluate_delivery, evaluation_declaration
 
-        version, checks = cls._declared_checks(context)
-        results: list[dict[str, Any]] = []
-        status: str = "passed"
-        problem: tuple[str, str] | None = None
-        for check in checks:
-            kind = str(check.get("kind") or "")
-            if kind == "output_schema":
-                detail = cls._output_schema_problem(text, check.get("schema"))
-            elif kind == "content_contains":
-                value = str(check.get("value") or "")
-                detail = None if (value and value in text) else f"delivered content does not contain {value!r}"
-            else:
-                # Unknown-to-this-dispatcher check: unavailable, not passed.
-                detail = f"required check {kind!r} is not available"
-            if detail is None:
-                results.append({"kind": kind, "status": "passed"})
-                continue
-            failed_status = "unverified" if kind not in {"output_schema", "content_contains"} else "failed"
-            results.append({"kind": kind, "status": failed_status, "detail": detail})
-            if problem is None:
-                status = "acceptance_unverified" if failed_status == "unverified" else "acceptance_failed"
-                problem = (status, detail)
-        acceptance_record = {
-            "version": version,
-            "status": "passed" if problem is None else problem[0],
-            "checks": results,
-            "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        }
-        if problem is None:
-            return {"status": "succeeded", "content": text, "acceptance": acceptance_record}
+        declaration = evaluation_declaration(context.acceptance, context.output_schema)
+        final_decision = (
+            {"decision_step_id": final_decision_step_id, "content_digest": final_decision_digest}
+            if final_decision_step_id is not None and final_decision_digest is not None
+            else None
+        )
+        record = evaluate_delivery(
+            text,
+            declaration,
+            final_decision=final_decision,
+            evaluator={
+                "host": "platform",
+                "workspace_id": str(context.workspace_id),
+                "submitted_by": str(context.user_id) if context.user_id else None,
+            },
+            task_ref={"issuer": task_ref.issuer_domain, "id": task_ref.id},
+            run_ref={"issuer": run_ref.issuer_domain, "id": run_ref.run_id},
+        )
+        if record["status"] in ("passed", "not_declared"):
+            return {"status": "succeeded", "content": text, "acceptance": record}
+        problem = next(check["detail"] for check in record["checks"] if check["status"] != "passed")
         return {
             "status": "failed",
             "content": text,
-            "error": problem[1],
-            "error_category": problem[0],
-            "acceptance": acceptance_record,
+            "error": problem,
+            "error_category": record["status"],
+            "acceptance": record,
         }
-
-    @staticmethod
-    def _output_schema_problem(text: str, schema: Any) -> str | None:
-        """First schema violation of the delivered text, or None when absent."""
-        if not isinstance(schema, dict):
-            return "the declared output schema is unavailable"
-        from hecate.core.output_schema import output_schema_error
-
-        try:
-            document = json.loads(text)
-        except json.JSONDecodeError as exc:
-            return f"final answer is not valid JSON: {exc.msg}"
-        error = output_schema_error(document, schema)
-        return f"final answer violates the declared output schema: {error}" if error is not None else None
 
     @staticmethod
     def _child_result(result: dict[str, Any], context: _DispatchContext) -> dict[str, Any]:

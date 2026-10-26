@@ -223,7 +223,7 @@ class RunnerServer:
                     raise _ProblemError(413, "payload-too-large", "Payload too large", f"body exceeds {cap} bytes")
                 return self.rfile.read(length) if length else b""
 
-            def _authorized_run(self, run_id: str, identity: dict):
+            def _authorized_run(self, run_id: str, identity: dict, *, refresh_result: bool = False):
                 state = server._engine.get_state(run_id)
                 if state is None and server._durable is not None:
                     run_ref = BackendRef(
@@ -270,6 +270,17 @@ class RunnerServer:
                         "denial", identity["principal"], run_id, OUTCOME_DENIED, {"reason": "forbidden"}
                     )
                     raise _ProblemError(403, "forbidden", "Request denied", "run is outside the trusted identity scope")
+                if (
+                    refresh_result
+                    and server._durable is not None
+                    and state.task_ref is not None
+                    and state.run_ref is not None
+                ):
+                    restored = server._engine._durable_task_state(
+                        state.task_ref, state.principal, state.domains, state.run_ref
+                    )
+                    restored.events = state.events
+                    return restored
                 return state
 
             def _task_visible(self, record, identity: dict) -> bool:
@@ -522,7 +533,7 @@ class RunnerServer:
                         if issuer_domain is not None and issuer_domain != contract.ISSUER_DOMAIN:
                             self._send_problem(404, "run-not-found", "Run not found", "unknown run issuer")
                             return
-                        state = self._authorized_run(run_id, identity)
+                        state = self._authorized_run(run_id, identity, refresh_result=True)
                         if len(parts) == 2:
                             if formal:
                                 self._send_json(
@@ -536,6 +547,8 @@ class RunnerServer:
                                 "result_ref": state.result_ref,
                                 "error": state.error,
                             }
+                            if state.result is not None:
+                                payload["result"] = state.result
                             if state.status in ("waiting_input", "waiting_approval") and server._durable is not None:
                                 # step6c authorized wait view: the wake token
                                 # is only visible to the run's recorded

@@ -278,3 +278,69 @@ async def test_duplicate_wake_command_keeps_one_revision(database, tmp_path) -> 
     assert replay is not None
     revisions = backend.list_input_revisions(SQL_TASK)
     assert len(revisions) == 1 and revisions[0]["source_ref"] == "wake-dup"
+
+
+def _acceptance_config(backend, owner, acceptance: dict) -> str:
+    payload = json.loads(_config(backend, owner))
+    payload["acceptance"] = acceptance
+    return json.dumps(payload)
+
+
+_DECLARED_STANDARD = {
+    "version": 4,
+    "required_checks": [
+        {"kind": "content_contains", "value": "the loop answer"},
+    ],
+}
+
+
+async def test_acceptance_recovers_across_the_crash_boundary(database, tmp_path) -> None:
+    """Crash after the final decision commit: recovery re-derives acceptance.
+
+    The final decision is durable, but the process dies before any delivery
+    evaluation or terminal-state commit. A fresh process replays the whole
+    chain with ZERO model calls and ZERO re-executed effects, then evaluates
+    the delivery under the same frozen standard — the acceptance record
+    binds the final decision's identity and digest.
+    """
+    backend, _clock, _url = database
+    owner = prepare_decision_run(backend, RUN)
+    effect = tmp_path / "acceptance-effects.txt"
+
+    crashed = _run_probe(_acceptance_config(backend, owner, _DECLARED_STANDARD), "acceptance-crash", effect)
+    assert crashed.returncode == 9, crashed.stderr
+    assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]
+    final_decision = await SqlAcceptedDecisionStore(backend).lookup(RUN, "agent-turn-000003")
+    assert final_decision is not None and final_decision.accepted_at
+
+    recovered = _run_probe(_acceptance_config(backend, owner, _DECLARED_STANDARD), "acceptance-recover", effect)
+    assert recovered.returncode == 0, recovered.stderr
+    result = json.loads(recovered.stdout)
+    assert result["state"] == "final_answer"
+    assert result["asks"] == []  # nothing re-asked; the chain replayed
+    assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]  # nothing redone
+    record = result["acceptance"]
+    assert record["status"] == "passed"
+    assert record["version"] == 4
+    assert record["final_decision"] == {
+        "decision_step_id": "agent-turn-000003",
+        "content_digest": final_decision.content_digest,
+    }
+
+
+async def test_same_version_standard_rewrite_conflicts_instead_of_reevaluating(database, tmp_path) -> None:
+    """A committed chain never re-evaluates under a rewritten standard."""
+    backend, _clock, _url = database
+    owner = prepare_decision_run(backend, RUN)
+    effect = tmp_path / "tamper-effects.txt"
+
+    crashed = _run_probe(_acceptance_config(backend, owner, _DECLARED_STANDARD), "acceptance-crash", effect)
+    assert crashed.returncode == 9, crashed.stderr
+
+    tampered = {
+        "version": 4,  # same version, different check parameter
+        "required_checks": [{"kind": "content_contains", "value": "a different answer"}],
+    }
+    recovered = _run_probe(_acceptance_config(backend, owner, tampered), "acceptance-tampered", effect)
+    assert recovered.returncode == 0, recovered.stderr
+    assert json.loads(recovered.stdout) == {"conflict": True}
