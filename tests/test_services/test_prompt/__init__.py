@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
 from hecate.studio.prompts.service import PromptService
 
+WS = uuid.UUID(int=0)
+
 
 @pytest.mark.asyncio
 async def test_create_prompt(db_session: AsyncSession) -> None:
@@ -23,7 +25,7 @@ async def test_create_prompt(db_session: AsyncSession) -> None:
         labels=["production"],
     )
 
-    result = await service.create_prompt(data)
+    result = await service.create_prompt(data, WS, user_role="admin")
 
     assert result.name == "test-prompt"
     assert result.current_version == 1
@@ -42,7 +44,7 @@ async def test_create_prompt_auto_extract_variables(db_session: AsyncSession) ->
         template="Hello {{ name }}, welcome to {{ place }}!",
     )
 
-    result = await service.create_prompt(data)
+    result = await service.create_prompt(data, WS)
 
     assert result.version is not None
     assert "name" in result.version.variables
@@ -55,9 +57,9 @@ async def test_get_prompt(db_session: AsyncSession) -> None:
     service = PromptService(db_session)
 
     data = PromptCreateSchema(name="test", template="Hello!")
-    created = await service.create_prompt(data)
+    created = await service.create_prompt(data, WS)
 
-    result = await service.get_prompt(created.id)
+    result = await service.get_prompt(created.id, WS)
 
     assert result.id == created.id
     assert result.name == "test"
@@ -65,11 +67,11 @@ async def test_get_prompt(db_session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_get_prompt_not_found(db_session: AsyncSession) -> None:
-    """Test getting a non-existent prompt raises ValueError."""
+    """Test getting a non-existent prompt raises LookupError."""
     service = PromptService(db_session)
 
-    with pytest.raises(ValueError, match="not found"):
-        await service.get_prompt(uuid.uuid4())
+    with pytest.raises(LookupError, match="not found"):
+        await service.get_prompt(uuid.uuid4(), WS)
 
 
 @pytest.mark.asyncio
@@ -78,10 +80,10 @@ async def test_update_prompt_template(db_session: AsyncSession) -> None:
     service = PromptService(db_session)
 
     data = PromptCreateSchema(name="test", template="Hello!")
-    created = await service.create_prompt(data)
+    created = await service.create_prompt(data, WS)
 
     update = PromptUpdateSchema(template="Hello {{ name }}!")
-    result = await service.update_prompt(created.id, update)
+    result = await service.update_prompt(created.id, update, WS)
 
     assert result.current_version == 2
     assert result.version is not None
@@ -94,12 +96,12 @@ async def test_delete_prompt(db_session: AsyncSession) -> None:
     service = PromptService(db_session)
 
     data = PromptCreateSchema(name="test", template="Hello!")
-    created = await service.create_prompt(data)
+    created = await service.create_prompt(data, WS)
 
-    await service.delete_prompt(created.id)
+    await service.delete_prompt(created.id, WS)
 
-    with pytest.raises(ValueError, match="not found"):
-        await service.get_prompt(created.id)
+    with pytest.raises(LookupError, match="not found"):
+        await service.get_prompt(created.id, WS)
 
 
 @pytest.mark.asyncio
@@ -109,9 +111,9 @@ async def test_list_prompts(db_session: AsyncSession) -> None:
 
     for i in range(3):
         data = PromptCreateSchema(name=f"prompt-{i}", template=f"Template {i}")
-        await service.create_prompt(data)
+        await service.create_prompt(data, WS)
 
-    result = await service.list_prompts()
+    result = await service.list_prompts(WS)
 
     assert result["total"] == 3
     assert len(result["items"]) == 3
@@ -123,12 +125,12 @@ async def test_list_versions(db_session: AsyncSession) -> None:
     service = PromptService(db_session)
 
     data = PromptCreateSchema(name="test", template="V1")
-    created = await service.create_prompt(data)
+    created = await service.create_prompt(data, WS)
 
-    await service.update_prompt(created.id, PromptUpdateSchema(template="V2"))
-    await service.update_prompt(created.id, PromptUpdateSchema(template="V3"))
+    await service.update_prompt(created.id, PromptUpdateSchema(template="V2"), WS)
+    await service.update_prompt(created.id, PromptUpdateSchema(template="V3"), WS)
 
-    versions = await service.list_versions(created.id)
+    versions = await service.list_versions(created.id, WS)
 
     assert len(versions) == 3
     assert versions[0].template == "V1"
@@ -142,11 +144,11 @@ async def test_rollback_to_version(db_session: AsyncSession) -> None:
     service = PromptService(db_session)
 
     data = PromptCreateSchema(name="test", template="V1")
-    created = await service.create_prompt(data)
+    created = await service.create_prompt(data, WS)
 
-    await service.update_prompt(created.id, PromptUpdateSchema(template="V2"))
+    await service.update_prompt(created.id, PromptUpdateSchema(template="V2"), WS)
 
-    result = await service.rollback_to_version(created.id, 1)
+    result = await service.rollback_to_version(created.id, 1, WS)
 
     assert result.current_version == 3
     assert result.version is not None
@@ -163,9 +165,9 @@ async def test_get_by_label(db_session: AsyncSession) -> None:
         template="Hello!",
         labels=["production"],
     )
-    await service.create_prompt(data)
+    await service.create_prompt(data, WS, user_role="admin")
 
-    result = await service.get_by_label("production")
+    result = await service.get_by_label("production", WS)
 
     assert result is not None
     assert result.name == "test"
@@ -176,6 +178,6 @@ async def test_get_by_label_not_found(db_session: AsyncSession) -> None:
     """Test getting prompt by non-existent label returns None."""
     service = PromptService(db_session)
 
-    result = await service.get_by_label("nonexistent")
+    result = await service.get_by_label("nonexistent", WS)
 
     assert result is None
