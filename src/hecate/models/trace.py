@@ -105,7 +105,10 @@ class TraceReadSchema(PydanticBase):
     user_id: uuid.UUID | None = None
     input_data: dict[str, Any] | None = None
     output_data: dict[str, Any] | None = None
-    metadata: dict[str, Any] | None = Field(default=None, serialization_alias="metadata_")
+    # Validate from the ORM attribute ``metadata_`` — the plain attribute
+    # name ``metadata`` is the SQLAlchemy declarative MetaData, never the
+    # row's JSON column.
+    metadata: dict[str, Any] | None = Field(default=None, validation_alias="metadata_", serialization_alias="metadata_")
     usage: dict[str, Any] | None = None
     level: str = SpanLevel.DEFAULT
     status: str = SpanStatus.STARTED
