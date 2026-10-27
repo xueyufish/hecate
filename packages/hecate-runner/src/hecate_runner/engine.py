@@ -940,11 +940,23 @@ class ExecutionEngine:
                     validate_acceptance_declaration(acceptance)
                 except ValueError as exc:
                     raise ValueError(f"invalid acceptance declaration: {exc}") from exc
+            harness = run_input.get("harness")
+            if harness is not None:
+                from hecate_runtime.agent_harness import validate_harness_declaration
+
+                try:
+                    # Runner callers author the full semantic section set —
+                    # there is no agent persona here to derive it from.
+                    validate_harness_declaration(harness)
+                except ValueError as exc:
+                    raise ValueError(f"invalid harness declaration: {exc}") from exc
             controller = run_input.get("controller", {})
             if not isinstance(controller, dict):
                 raise ValueError("controller must be an object")
             ControllerLimits(max_turns=controller.get("max_turns", 16), deadline=controller.get("deadline"))
             return
+        if run_input.get("harness") is not None:
+            raise ValueError("harness composition requires the controller loop")
         for name in self._profile.config.tool_allowlist:
             arguments = raw.get(name) if isinstance(raw.get(name), dict) else raw
             for schema in (BUILTIN_TOOL_SCHEMAS[name], self._profile.tool_schemas[name]):
@@ -1494,8 +1506,11 @@ class ExecutionEngine:
             ControllerRunSpec,
             PortTurnResponderSource,
         )
+        from hecate_runtime.agent_harness import HarnessSection, declared_harness
         from hecate_runtime.agent_turn import AgentTurn
+        from hecate_runtime.context_policy import ContextChainFactory
         from hecate_runtime.delivery_acceptance import declared_acceptance
+        from hecate_runtime.harness_turn import HarnessTurnPipeline
         from hecate_runtime.tool_call_executor import ToolCallExecutor
 
         # The persisted admission is detached from caller-owned request
@@ -1544,6 +1559,23 @@ class ExecutionEngine:
             if self._approval_tools
             else ToolCallExecutor(port=port, action_hook=hook)
         )
+        # Per-turn harness pipeline: the shared context processor chain's
+        # projection (platform-default policy — the Runner carries no agent
+        # processor configuration) and provider shaping over the port. The
+        # Runner wires no LLM guard chains: none are configured on this
+        # host, so those stages are pass-throughs and tool-side governance
+        # stays with the executor.
+        controller_session = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"runner-controller:{controller_run.run_id}"))
+        turn_pipeline = (
+            HarnessTurnPipeline(
+                context_chain=ContextChainFactory(),
+                port=port,
+                session_id=controller_session,
+                model=self._profile.config.model_backend,
+            )
+            if run_input.get("harness") is not None
+            else None
+        )
         source = PortTurnResponderSource(
             port,
             config={"model": self._profile.config.model_backend},
@@ -1553,6 +1585,7 @@ class ExecutionEngine:
                 "model": self._profile.config.model_backend,
                 "output_schema": run_input.get("output_schema"),
             },
+            pipeline=turn_pipeline,
         )
         prompt = str(
             (run_input.get("prompt") if isinstance(run_input.get("prompt"), str) else None)
@@ -1575,6 +1608,22 @@ class ExecutionEngine:
         limits = ControllerLimits(
             max_turns=controller_options.get("max_turns", 16), deadline=controller_options.get("deadline")
         )
+        # Harness context composition: a declared block (persisted with the
+        # task input, validated on submission) composes the frozen base
+        # through the shared module — caller semantic sections, then the
+        # task input as the final section — and pins the composition digest
+        # on every decision. No block keeps the legacy base input and
+        # replays byte-for-byte. A block that no longer parses is storage
+        # corruption: the dispatch fails closed with its reason.
+        harness_spec = None
+        harness_declaration = declared_harness(run_input.get("harness"))
+        if harness_declaration is not None:
+            sections = []
+            if run_input.get("output_schema") is not None:
+                sections.append(HarnessSection("output_schema", run_input["output_schema"]))
+            sections.append(HarnessSection("task", base_messages))
+            harness_spec = harness_declaration.compose_spec(*sections)
+            base_messages = harness_spec.compose_messages()
         revisions = await self._controller_input_revisions(state, run_input, durable_run)
         if revisions is None:
             return
@@ -1588,6 +1637,10 @@ class ExecutionEngine:
             # version and digest on every decision; the delivery gate
             # below evaluates under the same frozen declaration.
             acceptance=declared_acceptance(run_input.get("acceptance")),
+            # An explicitly declared harness composition pins its version
+            # and digest on every decision; the controller additionally
+            # verifies the base messages equal the frozen composition.
+            harness=harness_spec,
             # A durable wait parked mid-turn (input request recorded as
             # the real outcome) stops the turn's remaining actions
             # BEFORE their ledger claim and ends the pass for parking.
@@ -1620,7 +1673,7 @@ class ExecutionEngine:
             result = await runtime_execution_service.execute(
                 RuntimeExecutionRequest(
                     runtime=driver,
-                    session_id=_uuid.uuid5(_uuid.NAMESPACE_URL, f"runner-controller:{controller_run.run_id}"),
+                    session_id=_uuid.UUID(controller_session),
                     initial_input={},
                     observer=observe,
                     should_cancel=lambda: state.cancel_requested,
@@ -1827,6 +1880,13 @@ class _ControllerModelPort:
     def __init__(self, engine: ExecutionEngine, state: RunState) -> None:
         self._engine = engine
         self._state = state
+
+    async def context_assemble(self, messages: list[dict], tools: list[dict] | None, session_id: str, model: str = ""):
+        """Apply the shared provider shaping to controller model inputs."""
+        from hecate_runtime.context_shaping import shape_context
+
+        shaped_messages, shaped_tools, strategy = shape_context(messages, tools, model)
+        return {"messages": shaped_messages, "tools": shaped_tools, "metadata": {"shaping_strategy": strategy}}
 
     async def create_span(self, name, parent_id=None, attributes=None):
         """No-op tracing surface the executor's span protocol requires."""

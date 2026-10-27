@@ -147,6 +147,10 @@ class _DispatchContext:
     # Versioned acceptance declaration: the goal/standard version plus the
     # deterministic required checks that gate task success.
     acceptance: dict[str, Any] | None = None
+    # Frozen harness composition declaration (caller-authored semantic
+    # sections). Absent for tasks submitted before the binding: those keep
+    # the manually composed base input and replay byte-for-byte.
+    harness: dict[str, Any] | None = None
 
 
 class PlatformTaskDispatcher:
@@ -659,6 +663,10 @@ class PlatformTaskDispatcher:
         messages = payload.get("messages")
         if not isinstance(messages, list):
             raise ValueError(f"task {task_ref.id} input payload has no messages list")
+        from hecate_runtime.agent_harness import validate_harness_declaration
+
+        harness = payload.get("harness")
+        validate_harness_declaration(harness, allowed_types=frozenset({"instructions", "skills", "memory"}))
         controller = payload.get("controller") if isinstance(payload.get("controller"), dict) else {}
         return _DispatchContext(
             task_id=uuid.UUID(task_ref.id),
@@ -680,6 +688,7 @@ class PlatformTaskDispatcher:
             output_schema=payload.get("output_schema") if isinstance(payload.get("output_schema"), dict) else None,
             platform_run_id=payload.get("platform_run_id") if isinstance(payload.get("platform_run_id"), str) else None,
             acceptance=payload.get("acceptance") if isinstance(payload.get("acceptance"), dict) else None,
+            harness=harness,
         )
 
     @staticmethod
@@ -1001,9 +1010,12 @@ class PlatformTaskDispatcher:
             ControllerRunSpec,
             PortTurnResponderSource,
         )
+        from hecate_runtime.agent_harness import HarnessSection, declared_harness
         from hecate_runtime.agent_turn import AgentTurn
+        from hecate_runtime.context_policy import ContextChainFactory
         from hecate_runtime.delivery_acceptance import declared_acceptance
         from hecate_runtime.execution_service import RuntimeExecutionRequest, runtime_execution_service
+        from hecate_runtime.harness_turn import HarnessTurnPipeline
         from hecate_runtime.tool_call_executor import ToolCallExecutor
 
         from hecate.core.composition.entry_assembly import (
@@ -1025,25 +1037,22 @@ class PlatformTaskDispatcher:
             raise ValueError("the frozen agent version no longer resolves")
         config = snapshot.get("config_snapshot") or {}
         tool_refs = config.get("tools") or []
-        event_store = None
+        event_store = get_shared_event_store()
         tool_registry = None
         effective_tools: list[dict[str, Any]] = []
-        bundle = None
         if tool_refs:
-            event_store = get_shared_event_store()
             tool_registry = build_tool_registry(db, workspace_id=context.workspace_id)
             effective_tools = await load_agent_tools(db, tool_refs, workspace_id=context.workspace_id)
-            if effective_tools:
-                bundle = await assemble_guardrails(
-                    db,
-                    workspace_id=context.workspace_id,
-                    agent_id=agent.id,
-                    guardrail_config=config.get("guardrail_config"),
-                    event_store=event_store,
-                    session_id=engine_session,
-                    user_id=context.user_id,
-                    dlp_scanner=None,
-                )
+        bundle = await assemble_guardrails(
+            db,
+            workspace_id=context.workspace_id,
+            agent_id=agent.id,
+            guardrail_config=config.get("guardrail_config"),
+            event_store=event_store,
+            session_id=engine_session,
+            user_id=context.user_id,
+            dlp_scanner=None,
+        )
         await self._wire_approval_backend(db, context, bundle, resume_interrupted=resume_interrupted)
 
         port = create_runtime_port(
@@ -1107,11 +1116,33 @@ class PlatformTaskDispatcher:
             denial_tracker=bundle.denial_tracker if bundle else None,
             action_hook=hook,
         )
+        # Per-turn harness pipeline: the same semantic order the graph path
+        # applies — pre-call guard chains (rejection before model usage),
+        # the context processor chain's non-destructive projection under
+        # the agent's frozen processor policy, provider shaping, and output
+        # governance. Model guards apply independently of whether this
+        # agent has any registered tools. Legacy tasks without a harness
+        # binding keep their original model-input path.
+        context_chain_factory = ContextChainFactory(
+            agent_policy=config.get("context_processors"),
+        )
+        turn_pipeline = (
+            HarnessTurnPipeline(
+                context_chain=context_chain_factory,
+                middleware_chains=bundle.middleware_chains if bundle else None,
+                port=port,
+                session_id=str(engine_session),
+                model=model_name,
+            )
+            if context.harness is not None
+            else None
+        )
         source = PortTurnResponderSource(
             port,
             config={**(config.get("model_config") or {}), "model": model_name},
             tool_definitions=tool_definitions,
             base_refs=base_refs,
+            pipeline=turn_pipeline,
         )
         limits = ControllerLimits(
             max_turns=context.controller_max_turns or 16,
@@ -1125,21 +1156,39 @@ class PlatformTaskDispatcher:
                 "error": revisions_error,
                 "error_category": "input_history_unavailable",
             }
-        messages = [
-            {"role": "system", "content": config.get("persona") or "You are a helpful assistant."},
-            *(
-                [
-                    {
-                        "role": "system",
-                        "content": "Return final output as JSON satisfying this schema: "
-                        + json.dumps(context.output_schema),
-                    }
-                ]
-                if context.output_schema is not None
-                else []
-            ),
-            *context.messages,
-        ]
+        # Harness context composition: a declared block composes the frozen
+        # base input through the shared module — caller semantic sections,
+        # then persona/output-schema/task sections derived from facts that
+        # were already frozen at submission (the version's config snapshot
+        # and the durable payload), so a re-dispatch rebuilds byte-identical
+        # messages and every decision pins the composition digest. An absent
+        # block (tasks submitted before the binding) keeps the manual
+        # composition below and replays byte-for-byte.
+        harness_spec = None
+        harness_declaration = declared_harness(context.harness)
+        if harness_declaration is not None:
+            derived_sections = [HarnessSection("persona", config.get("persona") or "You are a helpful assistant.")]
+            if context.output_schema is not None:
+                derived_sections.append(HarnessSection("output_schema", context.output_schema))
+            derived_sections.append(HarnessSection("task", context.messages))
+            harness_spec = harness_declaration.compose_spec(*derived_sections)
+            messages = harness_spec.compose_messages()
+        else:
+            messages = [
+                {"role": "system", "content": config.get("persona") or "You are a helpful assistant."},
+                *(
+                    [
+                        {
+                            "role": "system",
+                            "content": "Return final output as JSON satisfying this schema: "
+                            + json.dumps(context.output_schema),
+                        }
+                    ]
+                    if context.output_schema is not None
+                    else []
+                ),
+                *context.messages,
+            ]
         spec = ControllerRunSpec(
             run_ref=controller_run,
             base_messages=messages,
@@ -1159,6 +1208,10 @@ class PlatformTaskDispatcher:
             # and digest on every decision; the delivery gate below then
             # evaluates under the same frozen declaration.
             acceptance=declared_acceptance(context.acceptance),
+            # An explicitly declared harness composition pins its version
+            # and digest on every decision; the controller additionally
+            # verifies the base messages equal the frozen composition.
+            harness=harness_spec,
         )
         first_responder = source.responder_for(messages, {**base_refs, "controller": "agent-loop/1", "turn": 1})
         controller = AgentController(AgentTurn(store, first_responder, executor), source)

@@ -310,6 +310,12 @@ async def main() -> None:
     port = BusinessPort()
     source = LoopSource()
     base_messages = [{"role": "user", "content": "run the loop"}]
+    from hecate_runtime.agent_harness import HarnessSection, declared_harness
+
+    declaration = declared_harness(data.get("harness"))
+    harness_spec = declaration.compose_spec(HarnessSection("task", base_messages)) if declaration is not None else None
+    if harness_spec is not None:
+        base_messages = harness_spec.compose_messages()
     initial_refs = {**source.frozen_refs(), "controller": "agent-loop/1", "turn": 1}
     controller = AgentController(
         AgentTurn(store, source.responder_for(base_messages, initial_refs), _executor(backend, owner, port)),
@@ -330,6 +336,7 @@ async def main() -> None:
         limits=ControllerLimits(max_turns=8),
         input_revisions=spec_revisions,
         acceptance=declared_acceptance(data["acceptance"]) if _ACCEPTANCE and data.get("acceptance") else None,
+        harness=harness_spec,
     )
     if _ACCEPTANCE and _MODE != "acceptance-crash":
         from hecate_runtime.accepted_decision import DecisionConflictError

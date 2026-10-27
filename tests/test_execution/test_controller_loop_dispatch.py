@@ -101,8 +101,9 @@ class ScriptedLoopPort(StubRuntimePort):
 class _ScriptedAssembly:
     """Patch the composition seams the controller assembly consumes."""
 
-    def __init__(self, port: ScriptedLoopPort) -> None:
+    def __init__(self, port: ScriptedLoopPort, *, guardrails: Any | None = None) -> None:
         self._port = port
+        self._guardrails = guardrails
         self._saved: dict[str, Any] = {}
 
     def patch(self) -> None:
@@ -124,7 +125,7 @@ class _ScriptedAssembly:
         entry_assembly.load_agent_tools = _load_tools
         entry_assembly.build_tool_registry = lambda *args, **kwargs: None
         entry_assembly.get_shared_event_store = lambda: None
-        guardrail_platform.assemble_guardrails = _no_guardrails
+        guardrail_platform.assemble_guardrails = self._guardrails or _no_guardrails
         port_adapter.create_runtime_port = lambda *args, **kwargs: self._port
 
     def unpatch(self) -> None:
@@ -235,7 +236,7 @@ async def harness(tmp_path):
     store.dispose()
 
 
-async def _dispatch_to_completion(harness, **input_overrides: Any) -> tuple[Any, Any, ScriptedLoopPort]:
+async def _dispatch_to_completion(env, **input_overrides: Any) -> tuple[Any, Any, ScriptedLoopPort]:
     """Submit a controller task and drive it to a terminal durable state."""
 
     from hecate_durable.worker import DurableWorker
@@ -243,19 +244,19 @@ async def _dispatch_to_completion(harness, **input_overrides: Any) -> tuple[Any,
     from hecate.execution.task_dispatcher import PlatformTaskDispatcher
 
     port = input_overrides.pop("port")
-    assembly = _ScriptedAssembly(port)
+    assembly = _ScriptedAssembly(port, guardrails=input_overrides.pop("guardrails", None))
     assembly.patch()
-    harness["cleanups"].append(assembly.unpatch)
-    dispatcher = PlatformTaskDispatcher(harness["store"], harness["session_factory"])
-    worker = DurableWorker(harness["store"], dispatcher, leases=harness["store"].leases)
-    async with harness["session_factory"]() as db:
+    env["cleanups"].append(assembly.unpatch)
+    dispatcher = PlatformTaskDispatcher(env["store"], env["session_factory"])
+    worker = DurableWorker(env["store"], dispatcher, leases=env["store"].leases)
+    async with env["session_factory"]() as db:
         service = TaskControlService(
             db,
-            store=harness["suite"].store,
-            recorder=harness["suite"].recorder,
+            store=env["suite"].store,
+            recorder=env["suite"].recorder,
             backend="postgres",
             ledger_source="core",
-            session_factory=harness["session_factory"],
+            session_factory=env["session_factory"],
             dispatcher=None,
             worker=worker,
         )
@@ -263,7 +264,7 @@ async def _dispatch_to_completion(harness, **input_overrides: Any) -> tuple[Any,
             workspace_id=WS,
             user_id=OWNER,
             goal="run the controller loop",
-            agent_id=harness["agent_id"],
+            agent_id=env["agent_id"],
             input={
                 "messages": [{"role": "user", "content": "check the stock"}],
                 "controller_loop": True,
@@ -275,12 +276,12 @@ async def _dispatch_to_completion(harness, **input_overrides: Any) -> tuple[Any,
     t_ref = task_ref_of(task_uuid)
     deadline = asyncio.get_running_loop().time() + 20.0
     while asyncio.get_running_loop().time() < deadline:
-        record = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
+        record = await asyncio.to_thread(env["store"].get_task_state, t_ref)
         terminal = {"succeeded", "failed", "cancelled", "reconciliation_required"}
         if record is not None and record.lifecycle_state.value in terminal:
             return record, t_ref, port
         await asyncio.sleep(0.05)
-    record = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
+    record = await asyncio.to_thread(env["store"].get_task_state, t_ref)
     raise AssertionError(
         f"task never reached a terminal state; last={record.lifecycle_state.value if record else None}; "
         f"extra={record.extra if record else None}"
@@ -865,3 +866,202 @@ async def test_late_input_wakes_resume_accepted_turns_in_fresh_platform_assembli
     inputs = [i for i, message in enumerate(messages) if "provided_input" in str(message.get("content"))]
     tools = [i for i, message in enumerate(messages) if message.get("role") == "tool"]
     assert tools[0] < inputs[0] < tools[1] < inputs[1] < tools[2]
+
+
+async def _committed_first_decision(harness, payload: dict) -> Any:
+    """The run's first committed decision, read back from the durable store."""
+    from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+    from hecate_runtime.accepted_decision import RunRef
+
+    return await SqlAcceptedDecisionStore(harness["store"]).lookup(
+        RunRef("hecate", payload["platform_run_id"]), "agent-turn-000001"
+    )
+
+
+async def test_declared_harness_sections_compose_base_and_pin_digest(harness) -> None:
+    """Caller semantic sections precede host-derived sections; every decision pins the digest."""
+    port = ScriptedLoopPort(final_text=json.dumps({"answer": "ok"}))
+    declared = {
+        "version": 2,
+        "sections": [
+            {"type": "instructions", "content": "Consult memory before answering."},
+            {"type": "memory", "content": {"policy": "EU stock rules"}},
+        ],
+    }
+    record, t_ref, port = await _dispatch_to_completion(
+        harness, port=port, output_schema=OUTPUT_SCHEMA, harness=declared
+    )
+    assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
+    # The caller's declaration rides the durable payload verbatim.
+    payload = await asyncio.to_thread(harness["store"].get_task_input, t_ref)
+    assert payload["harness"] == declared
+    # Caller sections first, then the derived persona/schema/task sections.
+    assert port.messages[0] == {"role": "system", "content": "Consult memory before answering."}
+    assert port.messages[1] == {"role": "system", "content": '{"memory":{"policy":"EU stock rules"}}'}
+    assert port.messages[2] == {"role": "system", "content": "Follow the frozen stock policy."}
+    assert "satisfying this schema" in port.messages[3]["content"]
+    # Turn 2's recorded input: the four system sections, then the task's
+    # user message, the tool-call turn and its governed result.
+    assert port.messages[4] == {"role": "user", "content": "check the stock"}
+    assert port.messages[-1]["role"] == "tool"
+    decision = await _committed_first_decision(harness, payload)
+    assert decision is not None
+    assert decision.input_refs["harness_version"] == 2
+    assert decision.input_refs["harness_digest"]
+
+
+async def test_default_submission_pins_the_default_composition(harness) -> None:
+    """A controller task without caller sections is stamped the default block."""
+    port = ScriptedLoopPort(final_text=json.dumps({"answer": "ok"}))
+    record, t_ref, port = await _dispatch_to_completion(harness, port=port)
+    assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
+    payload = await asyncio.to_thread(harness["store"].get_task_input, t_ref)
+    assert payload["harness"] == {"version": 1}
+    # The composed base keeps the historical manual shape byte-for-byte.
+    assert port.messages[0] == {"role": "system", "content": "Follow the frozen stock policy."}
+    assert port.messages[1] == {"role": "user", "content": "check the stock"}
+    decision = await _committed_first_decision(harness, payload)
+    assert decision is not None
+    assert decision.input_refs["harness_version"] == 1
+    assert decision.input_refs["harness_digest"]
+
+
+async def test_pre_binding_payload_routes_to_manual_composition(harness) -> None:
+    """Tasks submitted before the binding carry no block: manual composition, no pinning."""
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    payload = {
+        "workspace_id": str(WS),
+        "agent_id": str(harness["agent_id"]),
+        "messages": [{"role": "user", "content": "legacy"}],
+        "controller_loop": True,
+    }
+    context = PlatformTaskDispatcher._context_of(task_ref_of(uuid.uuid4()), payload)
+    assert context.controller_loop is True
+    assert context.harness is None
+
+
+@pytest.mark.parametrize("block", [[], "corrupt", False, {"sections": [{"type": "persona", "content": "override"}]}])
+async def test_corrupt_persisted_harness_cannot_fall_back_to_legacy_composition(harness, block) -> None:
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    payload = {
+        "workspace_id": str(WS),
+        "agent_id": str(harness["agent_id"]),
+        "messages": [{"role": "user", "content": "task"}],
+        "controller_loop": True,
+        "harness": block,
+    }
+    with pytest.raises(ValueError, match="must be an object|not authorable"):
+        PlatformTaskDispatcher._context_of(task_ref_of(uuid.uuid4()), payload)
+
+
+async def test_harness_declaration_is_validated_at_submission(harness) -> None:
+    """Malformed or non-authorable declarations never reach dispatch or model usage."""
+    from hecate.execution.task_control import TaskControlService, TaskControlValidationError
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["suite"].store,
+            recorder=harness["suite"].recorder,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+            dispatcher=None,
+            worker=None,
+        )
+        base_input = {"messages": [{"role": "user", "content": "check the stock"}]}
+        with pytest.raises(TaskControlValidationError, match="requires controller_loop"):
+            await service.submit(
+                workspace_id=WS,
+                user_id=OWNER,
+                goal="g",
+                agent_id=harness["agent_id"],
+                input={**base_input, "harness": {"version": 1}},
+            )
+        with pytest.raises(TaskControlValidationError, match="not authorable"):
+            await service.submit(
+                workspace_id=WS,
+                user_id=OWNER,
+                goal="g",
+                agent_id=harness["agent_id"],
+                input={
+                    **base_input,
+                    "controller_loop": True,
+                    "harness": {"sections": [{"type": "persona", "content": "caller override"}]},
+                },
+            )
+        with pytest.raises(TaskControlValidationError, match="unknown harness section type"):
+            await service.submit(
+                workspace_id=WS,
+                user_id=OWNER,
+                goal="g",
+                agent_id=harness["agent_id"],
+                input={
+                    **base_input,
+                    "controller_loop": True,
+                    "harness": {"sections": [{"type": "planner", "content": "be smart"}]},
+                },
+            )
+
+
+@pytest.mark.parametrize("with_tools", [False, True])
+@pytest.mark.parametrize("stage", ["pre_llm", "llm_response"])
+async def test_guard_rejected_model_call_fails_the_task_with_category(harness, with_tools, stage) -> None:
+    """A pre-call guard BLOCK refuses the turn; no model usage, classified stop."""
+    from types import SimpleNamespace
+
+    from hecate_runtime.guardrail import GuardrailAction, GuardrailResult, PostLLMHook, PreLLMHook
+    from hecate_runtime.middleware_factory import build_llm_chain
+
+    if not with_tools:
+        from sqlalchemy import select
+
+        async with harness["session_factory"]() as db:
+            version = (await db.scalars(select(AgentVersionModel))).one()
+            version.config_snapshot = {**version.config_snapshot, "tools": []}
+            await db.commit()
+
+    class _Blocking(PreLLMHook):
+        async def on_pre_llm_call(self, messages, model, tools):
+            return GuardrailResult(action=GuardrailAction.BLOCK, reason="prompt injection suspected")
+
+    class _BlockingOutput(PostLLMHook):
+        async def on_post_llm_call(self, response, messages):
+            return GuardrailResult(action=GuardrailAction.BLOCK, reason="unsafe output")
+
+    async def _blocking_bundle(*args: Any, **kwargs: Any):
+        return SimpleNamespace(
+            access_policy=None,
+            approval_callback=None,
+            rules=[],
+            middleware_chains=build_llm_chain(
+                pre_hook=_Blocking() if stage == "pre_llm" else None,
+                post_hook=_BlockingOutput() if stage == "llm_response" else None,
+            ),
+            denial_tracker=None,
+        )
+
+    port = ScriptedLoopPort(final_text=json.dumps({"answer": "never"}))
+    record, _t_ref, port = await _dispatch_to_completion(harness, port=port, guardrails=_blocking_bundle)
+    assert record.lifecycle_state is TaskLifecycleState.FAILED
+    result = (record.extra or {}).get("result") or {}
+    assert result["error_category"] == "controller_model_call_rejected"
+    assert (result["error"] or "").endswith("model_call_rejected")
+    assert port.model_calls == (0 if stage == "pre_llm" else 1)
+    assert port.tool_calls == []
+
+
+async def test_context_budget_stop_never_marks_task_succeeded(harness) -> None:
+    port = ScriptedLoopPort(final_text="must never be accepted")
+    record, t_ref, port = await _dispatch_to_completion(
+        harness,
+        port=port,
+        harness={"sections": [{"type": "instructions", "content": "x" * 40000}]},
+    )
+    assert record.lifecycle_state is TaskLifecycleState.FAILED
+    assert record.extra["result"]["error_category"] == "controller_token_capped"
+    assert port.model_calls == 0 and port.tool_calls == []
+    payload = harness["store"].get_task_input(t_ref)
+    assert await _committed_first_decision(harness, payload) is None
