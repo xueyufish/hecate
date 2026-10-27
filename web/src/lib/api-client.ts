@@ -1,7 +1,29 @@
+import { SseFrameParser, type SseFrame } from "@/lib/sse-frames";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+
+/** One SSE frame off the wire, with whether its terminating blank line arrived. */
+export type StreamedSseFrame = SseFrame & { terminated: boolean };
 
 export interface ApiError {
   error: { code: string; message: string; details: unknown };
+}
+
+/** Connect-time stream rejection, including FastAPI's nested error envelope. */
+export class EventStreamHttpError extends Error {
+  readonly error: ApiError["error"];
+
+  constructor(readonly status: number, body: unknown) {
+    const raw = typeof body === "object" && body !== null ? body as Record<string, unknown> : {};
+    const detail = typeof raw.detail === "object" && raw.detail !== null
+      ? raw.detail as Record<string, unknown> : raw;
+    const error = typeof detail.error === "object" && detail.error !== null
+      ? detail.error as Record<string, unknown> : {};
+    const message = typeof error.message === "string" ? error.message : `HTTP ${status}`;
+    super(message);
+    this.name = "EventStreamHttpError";
+    this.error = { code: typeof error.code === "string" ? error.code : String(status), message, details: null };
+  }
 }
 
 export class ApiClient {
@@ -84,6 +106,7 @@ export class ApiClient {
 
     if (response.status === 401) {
       const newToken = await this.refreshIfNeeded(response);
+      if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("Aborted", "AbortError");
       if (newToken) {
         headers["Authorization"] = `Bearer ${newToken}`;
         const retry = await fetch(`${this.baseUrl}${path}`, {
@@ -112,8 +135,8 @@ export class ApiClient {
     return response.json();
   }
 
-  async get<T>(path: string): Promise<T> {
-    return this.request<T>(path);
+  async get<T>(path: string, options: { signal?: AbortSignal } = {}): Promise<T> {
+    return this.request<T>(path, options);
   }
 
   async post<T>(path: string, body?: unknown): Promise<T> {
@@ -200,6 +223,100 @@ export class ApiClient {
           // skip malformed SSE lines
         }
       }
+    }
+  }
+
+  /**
+   * Cancellable GET server-sent-events subscription.
+   *
+   * Yields fully-terminated SSE frames (see ``sse-frames``); an
+   * unterminated tail at EOF is yielded once with ``terminated: false``
+   * so the consumer can treat it as a dropped frame instead of silently
+   * accepting partial data. The Bearer token rides the Authorization
+   * header (never the URL); a pre-connection 401 goes through the same
+   * single-flight refresh as every other method. Aborting ``signal`` —
+   * or the consumer stopping iteration — cancels the reader and the
+   * underlying request.
+   */
+  async *getEventStream(
+    path: string,
+    options: { signal?: AbortSignal; onOpen?: () => void } = {},
+  ): AsyncGenerator<StreamedSseFrame, void, unknown> {
+    const checkAbort = () => {
+      if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("Aborted", "AbortError");
+    };
+    checkAbort();
+    const send = (token: string | null) =>
+      fetch(`${this.baseUrl}${path}`, {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        signal: options.signal,
+      });
+
+    let response = await send(this.getToken());
+    checkAbort();
+    if (response.status === 401) {
+      await response.body?.cancel().catch(() => undefined);
+      checkAbort();
+      const newToken = await this.refreshIfNeeded(response);
+      checkAbort();
+      if (newToken) {
+        response = await send(newToken);
+      } else {
+        this.handleAuthFailure();
+        throw { error: { code: "UNAUTHORIZED", message: "Please log in again", details: null } };
+      }
+    }
+    checkAbort();
+    if (!response.ok) {
+      const body: unknown = await response.json().catch(() => null);
+      throw new EventStreamHttpError(response.status, body);
+    }
+    if (!response.body) {
+      throw { error: { code: "NO_STREAM_BODY", message: "event stream has no body", details: null } };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const parser = new SseFrameParser();
+    const decode = (value: Uint8Array) => {
+      try {
+        return decoder.decode(value, { stream: true });
+      } catch {
+        throw { error: { code: "INVALID_STREAM_ENCODING", message: "event stream contains invalid UTF-8", details: null } };
+      }
+    };
+    const cancelReader = () => { void reader.cancel().catch(() => undefined); };
+    options.signal?.addEventListener("abort", cancelReader, { once: true });
+    try {
+      checkAbort();
+      options.onOpen?.();
+      while (true) {
+        checkAbort();
+        const { done, value } = await reader.read();
+        checkAbort();
+        if (done) {
+          // A truncated code point at EOF belongs to an undelivered tail,
+          // just like a frame missing its terminating blank line.
+          const pending = parser.finish();
+          if (pending !== null) yield { ...pending.frame, terminated: pending.terminated };
+          return;
+        }
+        const frames = parser.push(decode(value));
+        for (const frame of frames) {
+          checkAbort();
+          yield { ...frame, terminated: true };
+        }
+      }
+    } finally {
+      // Consumer stop, throw or abort: stop reading and drop the
+      // connection so the server observes the unsubscribe immediately.
+      options.signal?.removeEventListener("abort", cancelReader);
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
     }
   }
 
