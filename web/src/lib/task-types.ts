@@ -22,7 +22,42 @@ export interface RunSummary {
   deployment_id: string;
   backend_ref: Record<string, unknown>;
   projection: Record<string, unknown>;
+  /**
+   * Whitelisted delivery-acceptance view recorded with this run's terminal
+   * state. Absent means the run has no acceptance record at all (an
+   * execution that predates the surface or never evaluated a delivery) —
+   * that is NOT the recorded `not_declared` verdict.
+   */
+  delivery_acceptance?: DeliveryAcceptanceView;
   event_cursor: number | null;
+}
+
+export interface AcceptanceCheckItem {
+  kind: string | null;
+  status: string | null;
+  detail?: string;
+}
+
+export interface DeliveryAcceptanceView {
+  status:
+    | "passed"
+    | "acceptance_failed"
+    | "acceptance_unverified"
+    | "not_declared"
+    | "uninterpretable";
+  /** Acceptance-standard version; null on `not_declared`. */
+  version?: number | null;
+  declaration_sha256?: string | null;
+  checker_version?: string | null;
+  content_sha256?: string | null;
+  record_sha256?: string | null;
+  checks?: AcceptanceCheckItem[];
+  final_decision?: { decision_step_id?: string; content_digest?: string };
+  evaluated_by?: Record<string, unknown>;
+  /** Present on `uninterpretable`: why the stored record cannot be read. */
+  reason?: string;
+  /** The raw recorded status, when a view was downgraded to uninterpretable. */
+  recorded_status?: string;
 }
 
 export interface TaskDetail {
@@ -136,4 +171,34 @@ export const OUTCOME_LABELS: Record<string, string> = {
 export function outcomeLabel(outcome: string | null | undefined): string {
   if (!outcome) return "未记录";
   return OUTCOME_LABELS[outcome] ?? outcome;
+}
+
+export const ACCEPTANCE_LABELS: Record<string, string> = {
+  passed: "验收通过",
+  acceptance_failed: "验收未通过",
+  acceptance_unverified: "验收未能核实",
+  not_declared: "未声明验收",
+  uninterpretable: "记录无法解释",
+};
+
+export function acceptanceLabel(status: string | null | undefined): string {
+  if (!status) return "未记录";
+  return ACCEPTANCE_LABELS[status] ?? status;
+}
+
+export const CHECK_STATUS_LABELS: Record<string, string> = {
+  passed: "通过",
+  failed: "未通过",
+  unverified: "未能核实",
+};
+
+export function checkStatusLabel(status: string | null | undefined): string {
+  if (!status) return "未记录";
+  return CHECK_STATUS_LABELS[status] ?? status;
+}
+
+/** Short display form for a digest; the full value stays in the title. */
+export function digestPreview(digest: string | null | undefined): string {
+  if (!digest) return "未记录";
+  return digest.length > 16 ? `${digest.slice(0, 16)}…` : digest;
 }
