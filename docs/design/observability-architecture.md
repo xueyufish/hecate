@@ -97,6 +97,53 @@ SDK's own `TracerProvider` + `BatchSpanProcessor` (wired in
 The batch processor prevents slow exporters from blocking the engine. If an
 export fails, the span is dropped by the SDK without failing the request.
 
+### Trace read access boundary (REST)
+
+The local-query REST surface (`GET /api/traces`, `GET /api/traces/{trace_id}`)
+is workspace-scoped behind the standard read boundary:
+
+- **Workspace and role gates.** Every identity — system scope included —
+  needs an explicit active workspace (403 `NO_WORKSPACE` before any query;
+  an explicit zero-UUID workspace is a legal value), and reads require at
+  least VIEWER from the server-resolved auth context. The list applies the
+  gates before any query; the detail settles visibility with a minimal
+  ownership/structure probe first (no span payloads), then the role floor,
+  and only then loads full content.
+- **Ownership via live Session/Agent rows.** A root trace is visible only
+  when its associations resolve live into the caller's workspace: a session
+  link requires the Session row to be live in the workspace and its own
+  linked Agent to be live in the same workspace; a trace-level agent link
+  must resolve live on its own. Every association present on a row must be
+  valid — one legitimate link never masks a foreign, soft-deleted, or
+  contradictory one. Rows with no association (orphans) are invisible, and
+  trace `metadata` plus client-side filters never grant access.
+- **Span inheritance through a verified tree.** The OTel producer stores
+  each span's OTel span id in `metadata.otel.span_id` and the *parent's*
+  span id (as a zero-padded UUID) in `parent_id` — `parent_id` is never
+  assumed to be a row primary key, though a row-PK link is accepted as a
+  secondary form. Child spans — which usually carry no session/agent
+  attributes — inherit the root's authorization only through this verified
+  linkage. Present OTel span markers must be valid nonzero span ids and
+  unique within the tree. A marker colliding with another row's primary
+  key is ambiguous; neither reference form takes precedence.
+- **Refusal semantics (compatibility change).** Details whose structure
+  cannot be safely attributed are refused with a uniform 404: ambiguous
+  roots (several parentless rows under one `trace_id`), dangling parent
+  references, cycles, rows disconnected from the verified root, and spans
+  whose own associations contradict the caller's workspace. The previous
+  fallback of treating an arbitrary first row as the root is gone; missing,
+  foreign, soft-deleted, orphaned, and unsafe traces all look alike so the
+  response leaks neither content nor the reason.
+- **Freshness.** The content query checks live Session/Agent associations,
+  the probed parent and span bindings, and complete tree membership in the
+  same database snapshot before returning any payload. A changed binding,
+  deletion, or new fragment refuses the whole detail with the same 404;
+  the caller may retry against the new shape. The query also refreshes ORM
+  state (`populate_existing`), so stale cached objects from earlier reads
+  never replace current authorized content.
+  List pagination, filters, and ordering keep their behavior with
+  authorization applied first.
+
 ### Backends
 
 Spans export over OTLP to any compatible backend:
