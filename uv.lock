@@ -2666,6 +2666,7 @@ source = { editable = "packages/hecate-runtime" }
 dependencies = [
     { name = "cryptography" },
     { name = "httpx" },
+    { name = "jsonschema" },
     { name = "pydantic" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
@@ -2690,6 +2691,7 @@ requires-dist = [
     { name = "hecate-memory", marker = "extra == 'memory'", editable = "packages/hecate-memory" },
     { name = "hecate-sandbox", marker = "extra == 'sandbox'", editable = "packages/hecate-sandbox" },
     { name = "httpx", specifier = ">=0.28.0,<1.0" },
+    { name = "jsonschema", specifier = ">=4.23,<5" },
     { name = "llm-guard", marker = "extra == 'security'", specifier = ">=0.3" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20.0" },
     { name = "pydantic", specifier = ">=2.10.0" },

@@ -89,6 +89,20 @@ async def test_engine_failure_is_run_fact() -> None:
     assert result.error == "engine failed"
 
 
+async def test_decision_conflicts_remain_reconciliation_facts() -> None:
+    """Hosts must distinguish corrupt/conflicting history from an ordinary failure."""
+    from hecate_runtime.accepted_decision import DecisionConflictError
+
+    class ConflictingDriver(_StubDriver):
+        async def execute(self, *args, **kwargs):
+            raise DecisionConflictError("step", "old", "new")
+            yield  # pragma: no cover
+
+    result = await runtime_execution_service.execute(_request(ConflictingDriver([])))
+    assert result.state is RuntimeExecutionState.FAILED
+    assert result.detail["requires_reconciliation"] is True
+
+
 async def test_cooperative_cancel_stops_after_observed_event() -> None:
     result = await runtime_execution_service.execute(
         _request(

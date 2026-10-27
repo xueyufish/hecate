@@ -107,3 +107,70 @@ async def test_relay_outage_then_recovery_projects_everything(env):
             BackendRef(RefKind.RUN, "host", "relay-run"), workspace_id=WS
         )
         assert len(list(page.events)) == 3
+
+
+async def test_acceptance_terminal_projects_once_through_outage(env):
+    """The acceptance-bearing terminal event survives a projection outage once.
+
+    The terminal state commit (with the delivery result and acceptance
+    record) is authoritative and already durable; the relay outage only
+    delays the read model. Recovery projects the run_terminal event exactly
+    once, with the acceptance facts byte-identical to the committed record.
+    """
+    store = env["store"]
+    t2 = task_ref("host", "relay-acceptance-task")
+    r2 = run_ref("host", "relay-acceptance-run")
+    store.submit_task(
+        key=IdempotencyKey(key="relay-acceptance-key", subject="s", workspace=str(WS), request_digest="e" * 8),
+        task_ref=t2,
+        run_ref=r2,
+        input_payload={"goal": "acceptance", "workspace_id": str(WS)},
+    )
+    acceptance = {
+        "checker_version": "delivery-acceptance/1",
+        "version": 2,
+        "declaration_sha256": "a" * 64,
+        "status": "passed",
+        "checks": [{"kind": "content_contains", "status": "passed"}],
+        "content_sha256": "b" * 64,
+        "final_decision": {"decision_step_id": "agent-turn-000002", "content_digest": "c" * 64},
+    }
+    outcome = {"status": "succeeded", "content": '{"answer": "ok"}', "acceptance": acceptance}
+    store.apply_task_state(t2, TaskLifecycleState.RUNNING)
+    store.apply_task_state(
+        t2,
+        TaskLifecycleState.SUCCEEDED,
+        extra_update={"result": outcome},
+        terminal_payload=outcome,
+    )
+
+    projector = PlatformOutboxProjector(store, env["session_factory"])
+
+    class FlakyProjector:
+        def __init__(self, inner) -> None:
+            self.inner = inner
+            self.down = True
+
+        async def __call__(self, envelope: dict) -> None:
+            if self.down:
+                raise RuntimeError("read model down")
+            await self.inner(envelope)
+
+    flaky = FlakyProjector(projector)
+    relay = OutboxRelay(store.session_factory, flaky, relay_key="acceptance", max_consecutive_failures=50)
+    assert await relay.pump_once() == 0  # outage: the terminal fact waits
+    flaky.down = False
+    # Both tasks fully project: the fixture task (3) plus this task's
+    # submitted + state transitions + the acceptance-bearing run_terminal.
+    assert await relay.pump_once() == 6
+    assert await relay.pump_once() == 1
+    assert await relay.pump_once() == 0  # nothing projects twice
+
+    async with env["session_factory"]() as db:
+        page = await PlatformEventService(db).read_run_events(
+            BackendRef(RefKind.RUN, "host", "relay-acceptance-run"), workspace_id=WS
+        )
+        terminals = [e for e in page.events if e.payload_schema_ref == "hecate.platform.run_terminal/0"]
+        assert len(terminals) == 1
+        assert terminals[0].payload["acceptance"] == acceptance
+        assert terminals[0].payload["content"] == '{"answer": "ok"}'

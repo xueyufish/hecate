@@ -282,7 +282,7 @@ class SqlAcceptedDecisionStore(AcceptedDecisionStore):
 
     async def lookup(self, run_ref: RunRef, decision_step_id: str) -> AcceptedDecisionRecord | None:
         try:
-            return await asyncio.to_thread(self._lookup_sync, run_ref, decision_step_id)
+            return await asyncio.to_thread(self.lookup_sync, run_ref, decision_step_id)
         except Exception as exc:
             raise DecisionStoreUnavailableError("decision lookup failed or persisted content is invalid") from exc
 
@@ -337,7 +337,8 @@ class SqlAcceptedDecisionStore(AcceptedDecisionStore):
         except StaleFenceError as exc:
             raise StaleDecisionFenceError(step, exc.presented_token, exc.current_token) from exc
 
-    def _lookup_sync(self, run_ref: RunRef, decision_step_id: str) -> AcceptedDecisionRecord | None:
+    def lookup_sync(self, run_ref: RunRef, decision_step_id: str) -> AcceptedDecisionRecord | None:
+        """Read a validated decision for synchronous host result inspection."""
         from sqlalchemy import select
 
         from .storage.models import AcceptedDecisionRow

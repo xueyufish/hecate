@@ -411,35 +411,14 @@ class TaskControlService:
         Supported required-check kinds: ``output_schema`` (a JSON Schema)
         and ``content_contains`` (a substring). An unknown kind is an
         authoring error, not an ``unverified`` verdict — unavailability is
-        reserved for evaluation-time gaps this validator cannot see.
+        reserved for evaluation-time gaps this validator cannot see. The
+        validation itself is the shared runtime module the Runner also
+        applies, so one declaration shape admits in either host.
         """
 
-        if acceptance is None:
-            return
-        if not isinstance(acceptance, dict):
-            raise ValueError("acceptance must be an object")
-        version = acceptance.get("version", 1)
-        if type(version) is not int or version < 1:
-            raise ValueError("acceptance.version must be a positive integer")
-        checks = acceptance.get("required_checks", [])
-        if not isinstance(checks, list):
-            raise ValueError("acceptance.required_checks must be an array")
-        for check in checks:
-            if not isinstance(check, dict):
-                raise ValueError("each acceptance required check must be an object")
-            kind = check.get("kind")
-            if kind == "output_schema":
-                from hecate.core.output_schema import check_output_schema
+        from hecate_runtime.delivery_acceptance import validate_acceptance_declaration
 
-                schema = check.get("schema")
-                if not isinstance(schema, dict):
-                    raise ValueError("output_schema check requires a schema object")
-                check_output_schema(schema)
-            elif kind == "content_contains":
-                if not isinstance(check.get("value"), str) or not check["value"]:
-                    raise ValueError("content_contains check requires a nonempty value")
-            else:
-                raise ValueError(f"unsupported acceptance check kind {kind!r}")
+        validate_acceptance_declaration(acceptance)
 
     async def _dispatch_now(self, t_ref: BackendRef, *, db: AsyncSession | None = None) -> None:
         """Dispatch one task synchronously (the ``wait`` submission view)."""

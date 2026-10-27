@@ -145,11 +145,24 @@ async def _submit(client: AsyncClient, agent_id: uuid.UUID, goal: str, **overrid
 
 
 async def _wait_terminal(client: AsyncClient, task_id: str, timeout: float = 10.0) -> dict:
+    """Poll the task view to a terminal state, never racing a dispatch.
+
+    The test database is one in-memory SQLite served by a single aiosqlite
+    connection (StaticPool): a poll request's session commit collides with
+    a background dispatch's mid-flight RETURNING statement on that shared
+    connection ("cannot commit transaction - SQL statements in progress").
+    Drain each round of background dispatches — without cancelling them —
+    before polling, so request sessions never overlap dispatch sessions.
+    """
     import asyncio
     import time
 
+    from hecate.execution.task_control import _background_tasks
+
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if pending := set(_background_tasks):
+            await asyncio.wait(pending, timeout=max(0.1, deadline - time.monotonic()))
         detail = (await client.get(f"/api/tasks/{task_id}")).json()
         if detail["lifecycle_state"] not in ("queued", "running", "unrecorded"):
             return detail

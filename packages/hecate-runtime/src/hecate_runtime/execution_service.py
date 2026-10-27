@@ -19,6 +19,11 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any
 
+from hecate_runtime.accepted_decision import (
+    DecisionConflictError,
+    DecisionStoreUnavailableError,
+    StaleDecisionFenceError,
+)
 from hecate_runtime.execution_driver import ExecutionDriver
 from hecate_runtime.types import StreamMode
 
@@ -146,6 +151,11 @@ class RuntimeExecutionService:
                 state=RuntimeExecutionState.FAILED,
                 events=tuple(events),
                 error=str(exc),
+                detail=(
+                    {"requires_reconciliation": True}
+                    if isinstance(exc, (DecisionConflictError, DecisionStoreUnavailableError, StaleDecisionFenceError))
+                    else {}
+                ),
             )
 
 

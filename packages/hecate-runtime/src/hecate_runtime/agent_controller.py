@@ -48,6 +48,7 @@ from hecate_runtime.accepted_decision import (
 )
 from hecate_runtime.agent_turn import AgentTurn, AgentTurnOutcome
 from hecate_runtime.decision_step import DecisionResponder
+from hecate_runtime.delivery_acceptance import AcceptanceDeclaration
 from hecate_runtime.execution_driver import ExecutionDriver
 from hecate_runtime.turn_projection import project_turn_messages
 
@@ -165,6 +166,13 @@ class ControllerRunSpec:
     execution_context: dict[str, Any] | None = None
     clock: Callable[[], datetime] | None = None
     input_revisions: tuple[ControllerInputRevision, ...] = ()
+    # Explicitly declared acceptance standard. Every decision pins its
+    # version and digest in ``input_refs``, so a standard modified under
+    # the same version number can never reinterpret a committed chain —
+    # the replay conflicts and stops for reconciliation instead. Absent
+    # (or a bare ``output_schema`` without an acceptance block) pins
+    # nothing, keeping pre-binding chains replayable byte-for-byte.
+    acceptance: AcceptanceDeclaration | None = None
     # Host-level stop reasons consulted between actions (before any claim)
     # and between turns; host reasons take precedence over the loop's own
     # cancel/deadline classification. Example: a durable input wait parked
@@ -179,7 +187,10 @@ class AgentControllerOutcome:
     ``state`` separates an accepted final answer from explicit stops;
     ``reason`` classifies stops (turn cap, deadline, cancellation or the
     governing stop reason of the halted turn). ``turns`` counts the turns
-    this pass processed; the durable chain length is what survives.
+    this pass processed; the durable chain length is what survives. A
+    final answer carries its committing decision's identity and digest so
+    acceptance records bind the exact accepted output, not a re-read of
+    whatever content storage currently holds.
     """
 
     state: Literal["final_answer", "stopped"]
@@ -187,6 +198,8 @@ class AgentControllerOutcome:
     final_text: str | None
     turns: int
     decision_step_ids: tuple[str, ...] = ()
+    final_decision_step_id: str | None = None
+    final_decision_digest: str | None = None
 
     @property
     def is_final_answer(self) -> bool:
@@ -200,6 +213,8 @@ class AgentControllerOutcome:
             "final_text": self.final_text,
             "turns": self.turns,
             "decision_step_ids": list(self.decision_step_ids),
+            "final_decision_step_id": self.final_decision_step_id,
+            "final_decision_digest": self.final_decision_digest,
         }
 
     @classmethod
@@ -210,6 +225,8 @@ class AgentControllerOutcome:
             final_text=data.get("final_text"),
             turns=int(data["turns"]),
             decision_step_ids=tuple(data.get("decision_step_ids") or ()),
+            final_decision_step_id=data.get("final_decision_step_id"),
+            final_decision_digest=data.get("final_decision_digest"),
         )
 
 
@@ -348,6 +365,15 @@ class AgentController:
 
         frozen = json_copy(self._source.frozen_refs())
         frozen["base_input"] = hashlib.sha256(canonical_json(base_messages).encode()).hexdigest()
+        if spec.acceptance is not None:
+            spec.acceptance.to_dict()
+            # The acceptance binding is identifiable per decision: only an
+            # explicitly declared standard pins version and digest, so
+            # chains committed before the binding (or without a declared
+            # standard) replay byte-for-byte, and a same-version standard
+            # rewrite conflicts on the first replayed decision.
+            frozen["acceptance_version"] = spec.acceptance.version
+            frozen["acceptance_digest"] = spec.acceptance.sha256
         # Stable causal order: by effective boundary, then given (durable
         # seq) order inside one boundary. Ids are unique — two revisions
         # can share a boundary, never an identity.
@@ -433,6 +459,8 @@ class AgentController:
                     final_text=text_or_none(outcome),
                     turns=turn_index,
                     decision_step_ids=tuple(committed),
+                    final_decision_step_id=outcome.record.decision_step_id,
+                    final_decision_digest=outcome.record.content_digest,
                 )
                 yield {
                     "type": _FINAL_ANSWER,
