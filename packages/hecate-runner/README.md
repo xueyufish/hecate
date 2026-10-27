@@ -270,6 +270,26 @@ commands, expired waits, wrong tokens, and command replays return explicit
 preview (non-durable) profile still refuses `approval_required` tools: no
 persistence, no reliable waiting.
 
+## Controller delivery acceptance
+
+Durable controller profiles retain delivered content and its versioned
+acceptance record with the task's terminal state and governance event.
+An authorized `GET /runs/{run}` returns this data in `result`; the formal
+contract view exposes it in `detail_ns.result`. Both views restore the
+record after a restart, including content whose required checks failed.
+
+The record binds the final accepted decision, full task/run scope, frozen
+standard, content digest and checker version. Reads verify those bindings;
+unreadable or inconsistent history produces a reconciliation view instead
+of reporting verified success. Terminal publication checks the controller's
+dispatch lease in the same transaction, so a replaced owner cannot publish
+an acceptance result.
+
+Required checks share the platform's evaluation semantics. A failed or
+unavailable required check withholds success and preserves the delivery.
+Without a declaration, the compatible completion path records
+`not_declared`, which does not certify business-goal acceptance.
+
 ## Scenario coverage
 
 SC01 (clean-install cold start) and SC02 (structured inventory read and

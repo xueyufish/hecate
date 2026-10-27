@@ -21,6 +21,8 @@ runner path and the platform path share one decision table
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import logging
 import uuid
 from collections.abc import Callable
@@ -44,6 +46,7 @@ from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_durable.runtime_hook import SqlActionLedgerHook as RunnerLedgerHook
 from hecate_durable.storage import SqlDurableStore
 from hecate_durable.storage.eventlog import EventPage, SqlEventLog, build_envelope
+from hecate_durable.storage.lease import LeaseHandle
 from hecate_runtime.action_ledger import (
     ToolExecutionResolution,
     ToolExecutionState,
@@ -148,6 +151,63 @@ class DurableRuntime:
     def begin_run(self, task_ref: BackendRef) -> None:
         self.store.apply_task_state(task_ref, TaskLifecycleState.RUNNING)
 
+    def read_result(self, task_ref: BackendRef, run_ref: BackendRef) -> dict[str, Any] | None:
+        """Restore a delivery after checking its decision and standard bindings."""
+        from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+        from hecate_runtime.accepted_decision import RunRef
+        from hecate_runtime.delivery_acceptance import evaluation_declaration, validate_acceptance_record
+
+        if self.store.run_for_task(task_ref) != run_ref:
+            return None
+        state = self.store.get_task_state(task_ref)
+        if state is None:
+            return None
+        result = (state.extra or {}).get("result")
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise ValueError("stored delivery result is malformed")
+        record = result.get("acceptance")
+        if not isinstance(record, dict) or "checker_version" not in record:
+            raise ValueError("stored delivery has no verifiable acceptance history")
+        if result.get("status") != state.lifecycle_state.value:
+            raise ValueError("stored delivery status does not match the task")
+        if record:
+            validate_acceptance_record(record)
+            final = record.get("final_decision")
+            if not isinstance(final, dict) or not isinstance(final.get("decision_step_id"), str):
+                raise ValueError("stored acceptance has no final decision")
+            decision = SqlAcceptedDecisionStore(self.store).lookup_sync(
+                RunRef(run_ref.issuer_domain, run_ref.id), final["decision_step_id"]
+            )
+            if (
+                decision is None
+                or decision.schema_version != 2
+                or decision.accepted_output.get("text") != result.get("content")
+            ):
+                raise ValueError("stored delivery does not match its accepted final answer")
+            payload = self.store.get_task_input(task_ref) or {}
+            declaration = evaluation_declaration(payload.get("acceptance"), payload.get("output_schema"))
+            if payload.get("acceptance") is not None and (
+                declaration is None or decision.input_refs.get("acceptance_digest") != declaration.sha256
+            ):
+                raise ValueError("stored acceptance standard is not the accepted standard")
+            expected = {
+                "version": declaration.version if declaration else None,
+                "declaration_sha256": declaration.sha256 if declaration else None,
+                "content_sha256": hashlib.sha256(result["content"].encode("utf-8")).hexdigest(),
+                "final_decision": {
+                    "decision_step_id": decision.decision_step_id,
+                    "content_digest": decision.content_digest,
+                },
+                "evaluated_by": {"host": "runner", "principal": (payload.get("_host_identity") or {}).get("principal")},
+                "task_ref": {"issuer": task_ref.issuer_domain, "id": task_ref.id},
+                "run_ref": {"issuer": run_ref.issuer_domain, "id": run_ref.id},
+            }
+            if any(record.get(key) != value for key, value in expected.items()):
+                raise ValueError("stored acceptance record does not match its authoritative inputs")
+        return copy.deepcopy(result)
+
     def finish_run(
         self,
         task_ref: BackendRef,
@@ -156,17 +216,23 @@ class DurableRuntime:
         needs_reconciliation: bool = False,
         error: str | None = None,
         cancel_command_id: str | None = None,
+        result: dict[str, Any] | None = None,
+        lease: LeaseHandle | None = None,
     ) -> TaskStateRecord:
         """Converge a task; withheld actions land in ``reconciliation_required``.
 
         Non-reconciliation targets commit a ``run_terminal`` governance event
         in the same transaction as the state change, carrying the honest
         outcome (status + error); that event is what the platform projection
-        folds into the managed Run's terminal state.
+        folds into the managed Run's terminal state. ``result`` is the
+        controller delivery outcome — delivered content plus the acceptance
+        record (and, when checks withheld success, the error facts); it
+        commits with the same transition into the task's durable result so
+        acceptance and terminal state can never disagree.
         """
 
         if needs_reconciliation:
-            return self.store.apply_task_state(task_ref, TaskLifecycleState.RECONCILIATION_REQUIRED)
+            return self.store.apply_task_state(task_ref, TaskLifecycleState.RECONCILIATION_REQUIRED, lease=lease)
         target = {
             "succeeded": TaskLifecycleState.SUCCEEDED,
             "failed": TaskLifecycleState.FAILED,
@@ -176,10 +242,17 @@ class DurableRuntime:
         terminal_payload = (
             {"status": outcome, "error": error} if target is not TaskLifecycleState.RECONCILIATION_REQUIRED else None
         )
+        extra_update = None
+        if result is not None and target is not TaskLifecycleState.RECONCILIATION_REQUIRED:
+            result_payload = {**result, "status": outcome, "error": error}
+            terminal_payload = dict(result_payload)
+            extra_update = {"result": result_payload}
         return self.store.apply_task_state(
             task_ref,
             target,
             terminal_payload=terminal_payload,
+            extra_update=extra_update,
+            lease=lease,
             applied_command_id=cancel_command_id if target is TaskLifecycleState.CANCELLED else None,
         )
 

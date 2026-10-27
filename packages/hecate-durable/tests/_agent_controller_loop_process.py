@@ -54,6 +54,7 @@ from hecate_runtime.agent_controller import (
 )
 from hecate_runtime.agent_turn import AgentTurn
 from hecate_runtime.decision_step import KIND_FINAL_ANSWER, DecisionProposal, DecisionResponder
+from hecate_runtime.delivery_acceptance import declared_acceptance
 from hecate_runtime.errors import ApprovalWaitSignal
 from hecate_runtime.eventstore import InMemoryEventStore
 from hecate_runtime.ports import StubRuntimePort
@@ -65,6 +66,7 @@ _EFFECT = sys.argv[3]
 _RECOVERING = _MODE in {"recover", "wake", "recover-unknown"}
 _WAITING = _MODE in {"wait", "wake"}
 _INPUT_RECOVERY = _MODE in {"input-resume", "input-resume-final"}
+_ACCEPTANCE = _MODE in {"acceptance-crash", "acceptance-recover", "acceptance-tampered"}
 _FINAL_TURN = 3
 
 RUN = RunRef("domain", "run-loop-1")
@@ -274,7 +276,14 @@ async def main() -> None:
     store: SqlAcceptedDecisionStore = (
         CrashAfterDecisionCommitStore(backend, "agent-turn-000002")
         if _MODE == "crash-after-decision"
-        else SqlAcceptedDecisionStore(backend)
+        # The acceptance boundary: the FINAL decision is durably
+        # committed, then the process dies before any delivery
+        # evaluation or terminal-state commit could happen.
+        else (
+            CrashAfterDecisionCommitStore(backend, "agent-turn-000003")
+            if _MODE == "acceptance-crash"
+            else SqlAcceptedDecisionStore(backend)
+        )
     )
     if _MODE == "receipt-loss":
         record_outcome = backend.record_outcome_ex
@@ -320,7 +329,42 @@ async def main() -> None:
         ownership=owner,
         limits=ControllerLimits(max_turns=8),
         input_revisions=spec_revisions,
+        acceptance=declared_acceptance(data["acceptance"]) if _ACCEPTANCE and data.get("acceptance") else None,
     )
+    if _ACCEPTANCE and _MODE != "acceptance-crash":
+        from hecate_runtime.accepted_decision import DecisionConflictError
+        from hecate_runtime.delivery_acceptance import evaluate_delivery
+
+        try:
+            outcome = await controller.run(spec)
+        except DecisionConflictError:
+            # A same-version rewrite of the standard (or a legacy chain
+            # replayed with a newly declared one) is a conflict, never a
+            # re-evaluation under the modified standard.
+            print(json.dumps({"conflict": True}), flush=True)
+            os._exit(0)
+        record = evaluate_delivery(
+            outcome.final_text or "",
+            spec.acceptance,
+            final_decision={
+                "decision_step_id": outcome.final_decision_step_id,
+                "content_digest": outcome.final_decision_digest,
+            },
+            task_ref={"issuer": SQL_TASK.issuer_domain, "id": SQL_TASK.id},
+            run_ref={"issuer": RUN.issuer_domain, "id": RUN.run_id},
+        )
+        print(
+            json.dumps(
+                {
+                    "state": outcome.state,
+                    "final_text": outcome.final_text,
+                    "asks": source.asks,
+                    "acceptance": record,
+                }
+            ),
+            flush=True,
+        )
+        os._exit(0)
     if _MODE == "wait":
         try:
             await controller.run(spec)

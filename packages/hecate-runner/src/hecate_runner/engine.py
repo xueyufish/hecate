@@ -28,6 +28,7 @@ from hecate_durable.contracts.credentials import CredentialError
 from hecate_durable.contracts.durable import canonical_request_digest
 from hecate_durable.contracts.references import BackendRef
 from hecate_durable.contracts.tools import ToolSideEffectClass
+from hecate_durable.storage.lease import LeaseHandle
 from hecate_runtime.action_ledger import ActionLedgerHook, tool_arguments_digest
 from hecate_runtime.checkpoint import InMemoryCheckpointStore
 from hecate_runtime.errors import ApprovalWaitSignal
@@ -209,6 +210,11 @@ class RunState:
     wait_token: str | None = None
     dispatch_denied: bool = False
     model_invocation_id: str | None = None
+    # Delivery-acceptance outcome of a controller final answer: content,
+    # acceptance record and (when checks withheld success) the error facts.
+    # finish_run persists it with the terminal state in one transaction.
+    result: dict | None = None
+    controller_lease: LeaseHandle | None = None
     local_approval_refs: dict[str, str] = field(default_factory=dict)
     # Durable event-stream sequence for this run (single writer: this
     # engine). Seeded from the persisted stream on re-entry so a resumed
@@ -915,6 +921,7 @@ class ExecutionEngine:
             raise ValueError("tool_arguments must be an object")
         if self._controller_loop:
             from hecate_runtime.agent_controller import ControllerLimits
+            from hecate_runtime.delivery_acceptance import validate_acceptance_declaration
 
             schema = run_input.get("output_schema")
             if schema is not None:
@@ -925,6 +932,14 @@ class ExecutionEngine:
                     _check_local_schema_refs(schema)
                 except (SchemaError, ProfileError, ValueError) as exc:
                     raise ValueError(f"invalid output_schema: {exc}") from exc
+            acceptance = run_input.get("acceptance")
+            if acceptance is not None:
+                if not isinstance(acceptance, dict):
+                    raise ValueError("acceptance must be an object")
+                try:
+                    validate_acceptance_declaration(acceptance)
+                except ValueError as exc:
+                    raise ValueError(f"invalid acceptance declaration: {exc}") from exc
             controller = run_input.get("controller", {})
             if not isinstance(controller, dict):
                 raise ValueError("controller must be an object")
@@ -1051,6 +1066,13 @@ class ExecutionEngine:
             self._durable.run_state(task_ref, run_ref) if self._durable else ("unknown", None, None)
         )
         association = self._durable.association_for_run(run_ref) if self._durable else None
+        result = None
+        if self._durable is not None:
+            try:
+                result = self._durable.read_result(task_ref, run_ref)
+            except Exception:
+                status = "reconciliation_required"
+                error = "delivery acceptance history is unreadable; manual reconciliation required"
         return RunState(
             run_id=run_ref.id,
             status=status,
@@ -1061,6 +1083,7 @@ class ExecutionEngine:
             replayed=True,
             received_at=recorded_at,
             error=error,
+            result=result,
             result_ref=f"runs/{run_ref.id}/artifacts" if status == "succeeded" else None,
             idempotency_key=association.key.key if association is not None else None,
         )
@@ -1359,7 +1382,11 @@ class ExecutionEngine:
                 # Parked (step6c): the wait transition already committed on
                 # the signal path; no terminal convergence happens here.
                 pass
-            elif self._durable is not None and state.task_ref is not None:
+            elif (
+                self._durable is not None
+                and state.task_ref is not None
+                and (not self._controller_loop or state.controller_lease is not None)
+            ):
                 hook_failed = getattr(state.action_hook, "has_failed_outcomes", False)
                 try:
                     record = self._durable.finish_run(
@@ -1368,11 +1395,14 @@ class ExecutionEngine:
                         needs_reconciliation=state.needs_reconciliation or bool(hook_failed),
                         error=state.error,
                         cancel_command_id=state.cancel_command_id,
+                        result=state.result,
+                        lease=state.controller_lease,
                     )
                     state.status = record.lifecycle_state.value
                 except Exception:
                     logger.exception("Could not persist final task state for %s", run_id)
                     state.status = "unknown"
+                    state.result_ref = None
                 if state.cancel_command_id is not None:
                     # Cancel receipts converge only on actual effect: applied
                     # when the cooperative boundary took hold, rejected when
@@ -1382,7 +1412,16 @@ class ExecutionEngine:
                             self._durable.cancel_rejected(state.cancel_command_id)
                     except Exception:
                         logger.exception("Could not converge cancel command %s", state.cancel_command_id)
-            self._lock.release()
+            try:
+                if self._durable is not None and state.controller_lease is not None:
+                    handle = state.controller_lease
+                    self._durable.store.leases.release(
+                        handle.lease_key,
+                        handle.holder,
+                        fencing_token=handle.fencing_token,
+                    )
+            finally:
+                self._lock.release()
 
     def record_tool_result(self, state: RunState, tool_name: str, outcome: dict) -> None:
         self._append_event(state, {"type": "tool_result", "tool": tool_name, "outcome": outcome})
@@ -1456,8 +1495,13 @@ class ExecutionEngine:
             PortTurnResponderSource,
         )
         from hecate_runtime.agent_turn import AgentTurn
+        from hecate_runtime.delivery_acceptance import declared_acceptance
         from hecate_runtime.tool_call_executor import ToolCallExecutor
 
+        # The persisted admission is detached from caller-owned request
+        # dictionaries that may change while model work is in flight.
+        persisted_input = self._durable.store.get_task_input(state.task_ref) or {}
+        run_input = {key: value for key, value in persisted_input.items() if not key.startswith("_")}
         durable_run = self._durable.store.run_for_task(state.task_ref)
         controller_run = RunRef(
             issuer_domain=durable_run.issuer_domain if durable_run else "hecate-runner",
@@ -1480,169 +1524,199 @@ class ExecutionEngine:
             state.error = "controller dispatch lease unavailable"
             return
         ownership = DecisionOwnership(handle.lease_key, handle.fencing_token, handle.holder)
-        try:
-            hook = SqlActionLedgerHook(
-                self._durable.store,
-                task_ref=state.task_ref,
-                run_ref=BackendRef(RefKind.RUN, controller_run.issuer_domain, controller_run.run_id),
-                holder=handle.holder,
-                lease=handle,
+        state.controller_lease = handle
+        hook = SqlActionLedgerHook(
+            self._durable.store,
+            task_ref=state.task_ref,
+            run_ref=BackendRef(RefKind.RUN, controller_run.issuer_domain, controller_run.run_id),
+            holder=handle.holder,
+            lease=handle,
+        )
+        state.action_hook = hook
+        port = _ControllerModelPort(self, state)
+        executor = (
+            ToolCallExecutor(
+                port=port,
+                action_hook=hook,
+                access_policy=_ControllerApprovalPolicy(self),
+                approval_callback=_ControllerApprovalCallback(self, state),
             )
-            state.action_hook = hook
-            port = _ControllerModelPort(self, state)
-            executor = (
-                ToolCallExecutor(
-                    port=port,
-                    action_hook=hook,
-                    access_policy=_ControllerApprovalPolicy(self),
-                    approval_callback=_ControllerApprovalCallback(self, state),
-                )
-                if self._approval_tools
-                else ToolCallExecutor(port=port, action_hook=hook)
-            )
-            source = PortTurnResponderSource(
-                port,
-                config={"model": self._profile.config.model_backend},
-                tool_definitions=self._controller_tool_definitions(),
-                base_refs={
-                    "definition": self._definition_digest,
-                    "model": self._profile.config.model_backend,
-                    "output_schema": run_input.get("output_schema"),
-                },
-            )
-            prompt = str(
-                (run_input.get("prompt") if isinstance(run_input.get("prompt"), str) else None)
-                or ((run_input.get("input") or {}).get("prompt") if isinstance(run_input.get("input"), dict) else "")
-                or ""
-            )
-            base_messages = [{"role": "user", "content": prompt}] if prompt else []
-            persisted = self._durable.store.get_task_input(state.task_ref) or {}
-            base_messages = base_messages or [
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {key: value for key, value in persisted.items() if not key.startswith("_")},
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                }
-            ]
-            controller_options = run_input.get("controller") or {}
-            limits = ControllerLimits(
-                max_turns=controller_options.get("max_turns", 16), deadline=controller_options.get("deadline")
-            )
-            revisions = await self._controller_input_revisions(state, run_input, durable_run)
-            if revisions is None:
-                return
-            spec = ControllerRunSpec(
-                run_ref=controller_run,
-                base_messages=base_messages,
-                ownership=ownership,
-                limits=limits,
-                input_revisions=revisions,
-                # A durable wait parked mid-turn (input request recorded as
-                # the real outcome) stops the turn's remaining actions
-                # BEFORE their ledger claim and ends the pass for parking.
-                stop_check=lambda: "input_wait_requested" if state.wait_request is not None else None,
-            )
-            initial_refs = {**source.frozen_refs(), "controller": "agent-loop/1", "turn": 1}
-            first_responder = source.responder_for(base_messages, initial_refs)
-            controller = AgentController(
-                AgentTurn(SqlAcceptedDecisionStore(self._durable.store), first_responder, executor),
-                source,
-            )
-            driver = ControllerExecutionDriver(controller, spec, should_cancel=lambda: state.cancel_requested)
+            if self._approval_tools
+            else ToolCallExecutor(port=port, action_hook=hook)
+        )
+        source = PortTurnResponderSource(
+            port,
+            config={"model": self._profile.config.model_backend},
+            tool_definitions=self._controller_tool_definitions(),
+            base_refs={
+                "definition": self._definition_digest,
+                "model": self._profile.config.model_backend,
+                "output_schema": run_input.get("output_schema"),
+            },
+        )
+        prompt = str(
+            (run_input.get("prompt") if isinstance(run_input.get("prompt"), str) else None)
+            or ((run_input.get("input") or {}).get("prompt") if isinstance(run_input.get("input"), dict) else "")
+            or ""
+        )
+        base_messages = [{"role": "user", "content": prompt}] if prompt else []
+        persisted = self._durable.store.get_task_input(state.task_ref) or {}
+        base_messages = base_messages or [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {key: value for key, value in persisted.items() if not key.startswith("_")},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            }
+        ]
+        controller_options = run_input.get("controller") or {}
+        limits = ControllerLimits(
+            max_turns=controller_options.get("max_turns", 16), deadline=controller_options.get("deadline")
+        )
+        revisions = await self._controller_input_revisions(state, run_input, durable_run)
+        if revisions is None:
+            return
+        spec = ControllerRunSpec(
+            run_ref=controller_run,
+            base_messages=base_messages,
+            ownership=ownership,
+            limits=limits,
+            input_revisions=revisions,
+            # An explicitly declared acceptance standard pins its
+            # version and digest on every decision; the delivery gate
+            # below evaluates under the same frozen declaration.
+            acceptance=declared_acceptance(run_input.get("acceptance")),
+            # A durable wait parked mid-turn (input request recorded as
+            # the real outcome) stops the turn's remaining actions
+            # BEFORE their ledger claim and ends the pass for parking.
+            stop_check=lambda: "input_wait_requested" if state.wait_request is not None else None,
+        )
+        initial_refs = {**source.frozen_refs(), "controller": "agent-loop/1", "turn": 1}
+        first_responder = source.responder_for(base_messages, initial_refs)
+        controller = AgentController(
+            AgentTurn(SqlAcceptedDecisionStore(self._durable.store), first_responder, executor),
+            source,
+        )
+        driver = ControllerExecutionDriver(controller, spec, should_cancel=lambda: state.cancel_requested)
 
-            def observe(event: dict) -> RuntimeEventDecision:
-                # Renew the dispatch lease at every turn boundary so a long
-                # multi-turn loop keeps valid fencing (same TTL budget per
-                # turn; a lost lease fences the next turn's writes).
-                self._durable.store.leases.renew(lease_key, holder, 120, fencing_token=handle.fencing_token)
-                self._append_event(state, event)
-                if state.needs_reconciliation or state.dispatch_denied:
-                    return RuntimeEventDecision.STOP_UNKNOWN
-                if state.wait_request is not None:
-                    # An input-required dispatch completed its turn with the
-                    # request as the real recorded outcome; park now instead
-                    # of deciding the next turn without the human input.
-                    return RuntimeEventDecision.STOP_UNKNOWN
-                return RuntimeEventDecision.CONTINUE
-
-            try:
-                result = await runtime_execution_service.execute(
-                    RuntimeExecutionRequest(
-                        runtime=driver,
-                        session_id=_uuid.uuid5(_uuid.NAMESPACE_URL, f"runner-controller:{controller_run.run_id}"),
-                        initial_input={},
-                        observer=observe,
-                        should_cancel=lambda: state.cancel_requested,
-                    )
-                )
-            except ApprovalWaitSignal as signal:
-                # A park-worthy dispatch outcome: record the wait on the
-                # run state; the shared park flow commits the durable wait
-                # and the caller's finally keeps the task non-terminal. The
-                # contract carries the accepted action's real arguments so
-                # the wake's one-shot grant matches them.
-                state.wait_request = {
-                    "wake_kind": signal.context.get("wake_kind", "resume"),
-                    "contract_ref": {
-                        "tool": signal.tool_name,
-                        "arguments_digest": tool_arguments_digest(signal.arguments),
-                        "arguments": dict(signal.arguments or {}),
-                        "invocation_id": signal.context.get("invocation_id"),
-                        "kind": signal.context.get("wait_kind", "approval"),
-                    },
-                }
-                return
+        def observe(event: dict) -> RuntimeEventDecision:
+            # Renew the dispatch lease at every turn boundary so a long
+            # multi-turn loop keeps valid fencing (same TTL budget per
+            # turn; a lost lease fences the next turn's writes).
+            self._durable.store.leases.renew(lease_key, holder, 120, fencing_token=handle.fencing_token)
+            self._append_event(state, event)
+            if state.needs_reconciliation or state.dispatch_denied:
+                return RuntimeEventDecision.STOP_UNKNOWN
             if state.wait_request is not None:
-                # The observer stopped the stream at the turn boundary after
-                # an input-required outcome was durably recorded; the shared
-                # park flow commits the wait and releases the worker.
-                return
-            if result.state.value == "failed":
+                # An input-required dispatch completed its turn with the
+                # request as the real recorded outcome; park now instead
+                # of deciding the next turn without the human input.
+                return RuntimeEventDecision.STOP_UNKNOWN
+            return RuntimeEventDecision.CONTINUE
+
+        try:
+            result = await runtime_execution_service.execute(
+                RuntimeExecutionRequest(
+                    runtime=driver,
+                    session_id=_uuid.uuid5(_uuid.NAMESPACE_URL, f"runner-controller:{controller_run.run_id}"),
+                    initial_input={},
+                    observer=observe,
+                    should_cancel=lambda: state.cancel_requested,
+                )
+            )
+        except ApprovalWaitSignal as signal:
+            # A park-worthy dispatch outcome: record the wait on the
+            # run state; the shared park flow commits the durable wait
+            # and the caller's finally keeps the task non-terminal. The
+            # contract carries the accepted action's real arguments so
+            # the wake's one-shot grant matches them.
+            state.wait_request = {
+                "wake_kind": signal.context.get("wake_kind", "resume"),
+                "contract_ref": {
+                    "tool": signal.tool_name,
+                    "arguments_digest": tool_arguments_digest(signal.arguments),
+                    "arguments": dict(signal.arguments or {}),
+                    "invocation_id": signal.context.get("invocation_id"),
+                    "kind": signal.context.get("wait_kind", "approval"),
+                },
+            }
+            return
+        if state.wait_request is not None:
+            # The observer stopped the stream at the turn boundary after
+            # an input-required outcome was durably recorded; the shared
+            # park flow commits the wait and releases the worker.
+            return
+        if result.state.value == "failed":
+            state.needs_reconciliation = bool(result.detail.get("requires_reconciliation"))
+            state.status = "unknown" if state.needs_reconciliation else "failed"
+            state.error = result.error or "controller execution failed"
+            return
+        if result.state.value in ("unknown", "cancelled"):
+            state.status = "cancelled" if result.state.value == "cancelled" else "unknown"
+            state.error = f"controller execution {result.state.value}"
+            return
+        outcome = driver.outcome
+        if outcome is None:  # pragma: no cover - completed streams carry one
+            state.status = "unknown"
+            state.error = "controller stream ended without an outcome"
+            return
+        if outcome.is_final_answer:
+            from hecate_runtime.delivery_acceptance import evaluate_delivery, evaluation_declaration
+
+            text = outcome.final_text or ""
+            declaration = evaluation_declaration(run_input.get("acceptance"), run_input.get("output_schema"))
+            final_decision = (
+                {
+                    "decision_step_id": outcome.final_decision_step_id,
+                    "content_digest": outcome.final_decision_digest,
+                }
+                if outcome.final_decision_step_id is not None and outcome.final_decision_digest is not None
+                else None
+            )
+            record = evaluate_delivery(
+                text,
+                declaration,
+                final_decision=final_decision,
+                evaluator={"host": "runner", "principal": state.principal},
+                task_ref=(
+                    {"issuer": state.task_ref.issuer_domain, "id": state.task_ref.id}
+                    if state.task_ref is not None
+                    else None
+                ),
+                run_ref=(
+                    {"issuer": state.run_ref.issuer_domain, "id": state.run_ref.id}
+                    if state.run_ref is not None
+                    else None
+                ),
+            )
+            state.result = {"content": text, "acceptance": record}
+            if record["status"] not in ("passed", "not_declared"):
+                # The committed final-answer decision retains delivery;
+                # failed or unverified checks must not grant success and
+                # the confirmed actions are never redone.
+                problem = next(check["detail"] for check in record["checks"] if check["status"] != "passed")
                 state.status = "failed"
-                state.error = result.error or "controller execution failed"
+                state.error = problem
+                state.result["error"] = problem
+                state.result["error_category"] = record["status"]
                 return
-            if result.state.value in ("unknown", "cancelled"):
-                state.status = "cancelled" if result.state.value == "cancelled" else "unknown"
-                state.error = f"controller execution {result.state.value}"
-                return
-            outcome = driver.outcome
-            if outcome is None:  # pragma: no cover - completed streams carry one
-                state.status = "unknown"
-                state.error = "controller stream ended without an outcome"
-                return
-            if outcome.is_final_answer:
-                schema = run_input.get("output_schema")
-                if schema is not None:
-                    try:
-                        document = json.loads(outcome.final_text or "")
-                        violation = next(Draft202012Validator(schema).iter_errors(document), None)
-                        if violation is not None:
-                            raise ValueError(violation.message)
-                    except Exception as exc:
-                        # The committed final-answer event retains delivery;
-                        # failed or unavailable checks must not grant success.
-                        state.status = "failed"
-                        state.error = f"final answer rejected by output_schema: {exc}"
-                        return
-                state.status = "succeeded"
-                state.result_ref = f"runs/{run_id}/artifacts"
-                self.record_tool_result(state, "controller", {"status": "final_answer", "turns": outcome.turns})
-                return
-            if outcome.reason == "cancel_requested":
-                state.status = "cancelled"
-                return
-            if outcome.reason in {"needs_review", "reconciliation_required", "store_unavailable"}:
-                state.needs_reconciliation = True
-                state.status = "unknown"
-                state.error = f"controller loop stopped: {outcome.reason}"
-                return
-            state.status = "failed"
+            state.status = "succeeded"
+            state.result["status"] = "succeeded"
+            state.result_ref = f"runs/{run_id}/artifacts"
+            self.record_tool_result(state, "controller", {"status": "final_answer", "turns": outcome.turns})
+            return
+        if outcome.reason == "cancel_requested":
+            state.status = "cancelled"
+            return
+        if outcome.reason in {"needs_review", "reconciliation_required", "store_unavailable"}:
+            state.needs_reconciliation = True
+            state.status = "unknown"
             state.error = f"controller loop stopped: {outcome.reason}"
-        finally:
-            self._durable.store.leases.release(lease_key, holder, fencing_token=handle.fencing_token)
+            return
+        state.status = "failed"
+        state.error = f"controller loop stopped: {outcome.reason}"
 
     async def _controller_input_revisions(
         self, state: RunState, run_input: dict, durable_run: Any

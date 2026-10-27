@@ -917,3 +917,348 @@ async def test_two_input_wakes_preserve_history_order_and_effects(tmp_path, with
         assert len(model.requests) == 4  # each turn asked exactly once, replays asked nothing
     finally:
         await model.stop()
+
+
+@pytest.mark.parametrize(
+    "acceptance, match",
+    [
+        ({"version": 0}, "acceptance.version must be a positive integer"),
+        ({"required_checks": [{"kind": "future"}]}, "unsupported acceptance check kind 'future'"),
+        ({"required_checks": [{"kind": "content_contains"}]}, "content_contains check requires a nonempty value"),
+    ],
+)
+async def test_invalid_acceptance_declaration_is_rejected_before_submission(loop_profile, acceptance, match) -> None:
+    """A malformed standard admits no execution in the runner either."""
+    harness = _Harness(loop_profile, _BusinessApi())
+    try:
+        with pytest.raises(ValueError, match=match):
+            await harness.engine.submit("app-reader", {"prompt": "check", "acceptance": acceptance}, ("domain_a",))
+        assert harness.durable.store.list_tasks() == []
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+
+
+_DECLARED = {
+    "version": 3,
+    "required_checks": [
+        {"kind": "output_schema", "schema": {"type": "object", "required": ["answer"]}},
+        {"kind": "content_contains", "value": "verified"},
+    ],
+}
+
+
+async def _run_with_acceptance(profile_dir, model, acceptance: dict, prompt_extra: dict | None = None):
+    await model.start()
+    path = profile_dir / "runner.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config["model"] = {"backend": "endpoint", "endpoint": model.url}
+    path.write_text(json.dumps(config), encoding="utf-8")
+    harness = _Harness(profile_dir, _BusinessApi())
+    try:
+        run_id, _state = await harness.engine.submit(
+            "app-reader", {"prompt": "check", "acceptance": acceptance, **(prompt_extra or {})}, ("domain_a",)
+        )
+        final = await harness.engine.wait_for(run_id)
+        return harness, final
+    except BaseException:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+        await model.stop()
+        raise
+
+
+async def test_passing_acceptance_persists_the_versioned_record(loop_profile) -> None:
+    """Success under a declared standard binds the full acceptance facts."""
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, '{"answer": "verified"}')
+    harness, final = await _run_with_acceptance(loop_profile, model, _DECLARED)
+    try:
+        assert final.status == "succeeded", final.error
+        record = harness.durable.store.get_task_state(final.task_ref)
+        result = (record.extra or {})["result"]
+        acceptance = result["acceptance"]
+        assert acceptance["status"] == "passed"
+        assert acceptance["version"] == 3
+        assert acceptance["declaration_sha256"]
+        assert acceptance["final_decision"]["decision_step_id"] == "agent-turn-000002"
+        assert acceptance["final_decision"]["content_digest"]
+        assert acceptance["task_ref"] == {"issuer": final.task_ref.issuer_domain, "id": final.task_ref.id}
+        assert acceptance["run_ref"] == {"issuer": final.run_ref.issuer_domain, "id": final.run_ref.id}
+        assert acceptance["evaluated_by"] == {"host": "runner", "principal": "app-reader"}
+        assert {check["kind"]: check["status"] for check in acceptance["checks"]} == {
+            "output_schema": "passed",
+            "content_contains": "passed",
+        }
+        assert result["content"] == '{"answer": "verified"}'
+        # The same acceptance facts ride the terminal governance event the
+        # platform projection folds — one transaction, one event.
+        terminal = [
+            event
+            for event in harness.durable.store.read_events(final.run_ref).events
+            if event.payload.get("event_type") == "run_terminal"
+        ]
+        assert len(terminal) == 1
+        assert terminal[0].payload["acceptance"] == acceptance
+        assert terminal[0].payload["content"] == '{"answer": "verified"}'
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+        await model.stop()
+
+
+async def test_schema_passes_but_required_content_fails_withholds_success(loop_profile) -> None:
+    """Schema-passing delivery with a failed content check keeps content, not success."""
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, '{"answer": "not it"}')
+    harness, final = await _run_with_acceptance(loop_profile, model, _DECLARED)
+    try:
+        assert final.status == "failed"
+        assert final.error is not None and "verified" in final.error
+        record = harness.durable.store.get_task_state(final.task_ref)
+        result = (record.extra or {})["result"]
+        assert result["error_category"] == "acceptance_failed"
+        assert result["content"] == '{"answer": "not it"}'  # the delivery stays visible
+        statuses = {check["kind"]: check["status"] for check in result["acceptance"]["checks"]}
+        assert statuses == {"output_schema": "passed", "content_contains": "failed"}
+        # The failed acceptance never redoes the confirmed business action:
+        # one model turn, one governed call, one ledger entry.
+        assert len(model.requests) == 2
+        assert len(harness.durable.store.list_run_actions(final.run_ref)) == 1
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+        await model.stop()
+
+
+async def test_undeclared_delivery_succeeds_but_records_not_declared(loop_profile) -> None:
+    """A run without any declaration still succeeds — and says not_declared."""
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, "free-form answer")
+    await model.start()
+    harness = None
+    try:
+        path = loop_profile / "runner.json"
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        path.write_text(json.dumps(config), encoding="utf-8")
+        harness = _Harness(loop_profile, _BusinessApi())
+        run_id, _state = await harness.engine.submit("app-reader", {"prompt": "check"}, ("domain_a",))
+        final = await harness.engine.wait_for(run_id)
+        assert final.status == "succeeded", final.error
+        result = (harness.durable.store.get_task_state(final.task_ref).extra or {})["result"]
+        assert result["acceptance"]["status"] == "not_declared"
+        assert result["acceptance"]["version"] is None
+    finally:
+        if harness is not None:
+            await harness.engine.close()
+            harness.durable.store.dispose()
+        await model.stop()
+
+
+async def test_expired_controller_owner_cannot_commit_acceptance(loop_profile, monkeypatch) -> None:
+    """Taking ownership before the terminal commit fences the old evaluator."""
+    finish = DurableRuntime.finish_run
+
+    def take_over_before_finish(runtime, *args, **kwargs):
+        handle = kwargs.get("lease")
+        assert handle is not None
+        runtime.store.leases.release(handle.lease_key, handle.holder, fencing_token=handle.fencing_token)
+        assert runtime.store.leases.acquire(handle.lease_key, "replacement-owner", 120) is not None
+        return finish(runtime, *args, **kwargs)
+
+    monkeypatch.setattr(DurableRuntime, "finish_run", take_over_before_finish)
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, '{"answer":"verified"}')
+    harness, final = await _run_with_acceptance(loop_profile, model, _DECLARED)
+    try:
+        assert final.status == "unknown"
+        task = harness.durable.store.get_task_state(final.task_ref)
+        assert task.lifecycle_state is TaskLifecycleState.RUNNING
+        assert "result" not in task.extra
+        assert all(
+            event.payload.get("event_type") != "run_terminal"
+            for event in harness.durable.store.read_events(final.run_ref).events
+        )
+        assert len(model.requests) == 2
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+        await model.stop()
+
+
+@pytest.mark.parametrize("text", ['{"answer":"verified"}', '{"answer":"not it"}'])
+async def test_delivery_result_survives_restart_and_is_readable_over_http(loop_profile, text) -> None:
+    """Both successful and rejected deliveries remain visible in fresh host views."""
+    from urllib.request import Request, urlopen
+
+    from conftest_runner import READER_TOKEN
+    from hecate_runner.server import RunnerServer
+
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, text)
+    harness, final = await _run_with_acceptance(loop_profile, model, _DECLARED)
+    expected = harness.durable.read_result(final.task_ref, final.run_ref)
+    await harness.engine.close()
+    harness.durable.store.dispose()
+    fresh = _Harness(loop_profile, _BusinessApi())
+    server = RunnerServer(fresh.profile, fresh.engine, fresh.evidence, durable=fresh.durable)
+    http = server.serve()
+
+    def fetch(formal):
+        request = Request(f"http://127.0.0.1:{http.server_address[1]}/runs/{final.run_id}")
+        request.add_header("Authorization", f"Bearer {READER_TOKEN}")
+        if formal:
+            request.add_header("X-Contract-Version", "0.1")
+        with urlopen(request, timeout=10) as response:
+            return json.load(response)
+
+    try:
+        legacy = await asyncio.to_thread(fetch, False)
+        formal = await asyncio.to_thread(fetch, True)
+        assert legacy["result"] == expected
+        assert formal["detail_ns"]["result"] == expected
+        assert expected["content"] == text
+        assert model.requests and len(model.requests) == 2
+    finally:
+        server.close()
+        await asyncio.to_thread(http.shutdown)
+        http.server_close()
+        fresh.durable.store.dispose()
+        await model.stop()
+
+
+@pytest.mark.parametrize("field", ["content", "standard", "decision", "namespace", "checks", "missing_history"])
+async def test_corrupt_persisted_acceptance_never_reads_as_success(loop_profile, field) -> None:
+    """A stored result must match its authoritative decision, scope and standard."""
+    from hecate_durable.storage.models import TaskStateRow
+
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, '{"answer":"verified"}')
+    harness, final = await _run_with_acceptance(loop_profile, model, _DECLARED)
+    try:
+        with harness.durable.store.session_factory() as session, session.begin():
+            row = session.get(TaskStateRow, (final.task_ref.issuer_domain, final.task_ref.id))
+            extra = json.loads(json.dumps(row.extra))
+            result = extra["result"]
+            if field == "content":
+                result["content"] = "tampered"
+            elif field == "standard":
+                result["acceptance"]["declaration_sha256"] = "0" * 64
+            elif field == "decision":
+                result["acceptance"]["final_decision"]["content_digest"] = "0" * 64
+            elif field == "namespace":
+                result["acceptance"]["run_ref"]["issuer"] = "foreign"
+            elif field == "missing_history":
+                result.pop("acceptance")
+            else:
+                result["acceptance"]["checks"] = []
+            row.extra = extra
+        restored = harness.engine._durable_task_state(final.task_ref, final.principal, final.domains, final.run_ref)
+        assert restored.status == "reconciliation_required" and restored.result is None
+        assert len(model.requests) == 2
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+        await model.stop()
+
+
+async def test_caller_mutation_cannot_replace_the_admitted_standard(loop_profile, monkeypatch) -> None:
+    """The controller consumes the accepted SQL input instead of caller dictionaries."""
+    run_controller = ExecutionEngine._run_controller
+
+    async def mutate_caller_then_run(engine, state, run_id, run_input):
+        run_input["acceptance"]["required_checks"][1]["value"] = "tampered"
+        await run_controller(engine, state, run_id, run_input)
+
+    monkeypatch.setattr(ExecutionEngine, "_run_controller", mutate_caller_then_run)
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, '{"answer":"verified"}')
+    harness, final = await _run_with_acceptance(loop_profile, model, json.loads(json.dumps(_DECLARED)))
+    try:
+        assert final.status == "succeeded"
+        assert harness.durable.read_result(final.task_ref, final.run_ref)["acceptance"]["status"] == "passed"
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+        await model.stop()
+
+
+async def test_terminal_outcome_overrides_candidate_delivery_status(loop_profile) -> None:
+    """A cancelled task cannot publish the candidate's earlier success label."""
+    harness = _Harness(loop_profile, _BusinessApi())
+    try:
+        submission = harness.durable.submit(
+            principal="app-reader", run_input={"prompt": "check"}, idempotency_key=None, domains=("domain_a",)
+        )
+        task_ref = submission.association.task_ref
+        harness.durable.begin_run(task_ref)
+        record = harness.durable.finish_run(
+            task_ref, "cancelled", error="cancel took effect", result={"status": "succeeded", "content": "delivery"}
+        )
+        assert record.lifecycle_state is TaskLifecycleState.CANCELLED
+        assert record.extra["result"]["status"] == "cancelled"
+        events = harness.durable.store.read_events(submission.association.run_ref).events
+        terminal = next(event for event in events if event.payload.get("event_type") == "run_terminal")
+        assert terminal.payload["status"] == "cancelled"
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+
+
+async def test_checker_outage_after_admission_keeps_delivery_unverified(loop_profile, monkeypatch) -> None:
+    """Restoring an admitted standard does not require its check implementation."""
+    import hecate_runtime.delivery_acceptance as acceptance_module
+
+    run_controller = ExecutionEngine._run_controller
+    checker = acceptance_module._validate_check_strict
+
+    def unavailable(*args):
+        raise RuntimeError("checker unavailable after admission")
+
+    async def lose_checker_then_run(engine, *args):
+        monkeypatch.setattr(acceptance_module, "_validate_check_strict", unavailable)
+        await run_controller(engine, *args)
+
+    monkeypatch.setattr(ExecutionEngine, "_run_controller", lose_checker_then_run)
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, '{"answer":"verified"}')
+    harness, final = await _run_with_acceptance(loop_profile, model, _DECLARED)
+    try:
+        assert final.status == "failed"
+        monkeypatch.setattr(acceptance_module, "_validate_check_strict", checker)
+        result = harness.durable.read_result(final.task_ref, final.run_ref)
+        assert result["content"] == '{"answer":"verified"}'
+        assert result["acceptance"]["status"] == "acceptance_unverified"
+        assert len(model.requests) == 2
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+        await model.stop()
+
+
+async def test_rewritten_standard_after_lost_terminal_commit_reconciles(loop_profile, monkeypatch) -> None:
+    """A fresh Runner must stop a conflicting chain without another model request."""
+    from hecate_durable.storage.models import TaskStateRow
+
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "A"}, '{"answer":"verified"}')
+
+    def lost_terminal(*args, **kwargs):
+        raise RuntimeError("terminal write lost after final decision")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(DurableRuntime, "finish_run", lost_terminal)
+        harness, final = await _run_with_acceptance(loop_profile, model, _DECLARED)
+    fresh = None
+    try:
+        assert final.status == "unknown"
+        await harness.engine.close()
+        with harness.durable.store.session_factory() as session, session.begin():
+            row = session.get(TaskStateRow, (final.task_ref.issuer_domain, final.task_ref.id))
+            payload = json.loads(json.dumps(row.input_payload))
+            payload["acceptance"]["required_checks"][1]["value"] = "rewritten"
+            row.input_payload = payload
+        fresh = _Harness(loop_profile, _BusinessApi())
+        assert fresh.engine.resume(final.task_ref, final.run_ref, {}) == final.run_id
+        recovered = await fresh.engine.wait_for(final.run_id)
+        assert recovered.status == "reconciliation_required"
+        assert recovered.result is None
+        assert len(model.requests) == 2
+    finally:
+        if fresh is not None:
+            await fresh.engine.close()
+            fresh.durable.store.dispose()
+        harness.durable.store.dispose()
+        await model.stop()

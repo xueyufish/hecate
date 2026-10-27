@@ -117,6 +117,8 @@ def run_status(run_id: str, state, run_ref: BackendRef | None = None) -> dict[st
         detail["error"] = state.error
     if state.result_ref:
         detail["result_ref"] = state.result_ref
+    if getattr(state, "result", None) is not None:
+        detail["result"] = state.result
     return {
         "run_ref": backend_run_ref(run_id, run_ref).to_dict(),
         "state": formal_state,
