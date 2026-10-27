@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { RunActionsPanel } from "@/components/tasks/run-actions-panel";
+import { RunDeliveryPanel } from "@/components/tasks/run-delivery-panel";
 import { RunEventsPanel } from "@/components/tasks/run-events-panel";
 import { TaskCancelPanel } from "@/components/tasks/task-cancel-panel";
 import { TaskCommandsPanel } from "@/components/tasks/task-commands-panel";
@@ -170,6 +171,18 @@ export default function TaskDetailPage() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="space-y-2" data-testid="run-delivery-section">
+        <h2 className="font-medium">交付与验收</h2>
+        {(() => {
+          const selected = detail.runs.find((run) => run.run_id === selectedRunId);
+          return selected ? (
+            <RunDeliveryPanel run={selected} />
+          ) : (
+            <p data-testid="delivery-no-run">暂无 Run，无交付与验收可查</p>
+          );
+        })()}
       </div>
 
       <div className="space-y-2">

@@ -401,6 +401,57 @@ async def test_authorized_roles_preserve_real_content_and_cursor_resume(env, rol
     assert await _snapshot(env) == before
 
 
+@pytest.mark.parametrize("entry", ["run", "task", "task_runs"])
+async def test_delivery_acceptance_queries_are_passive_scoped_and_sanitized(env, entry):
+    """Every summary route uses the same safe view behind its read gate."""
+    from hecate_runtime.delivery_acceptance import evaluate_delivery, evaluation_declaration
+
+    secret = "PRIVATE-ACCEPTANCE-CONTENT"
+    content = json.dumps("x" * 2100 + secret)
+    run = env["run"]
+    acceptance = evaluate_delivery(
+        content,
+        evaluation_declaration(None, {"type": "string", "maxLength": 1}),
+        final_decision={"decision_step_id": "turn-1", "content_digest": "a" * 64, "context": secret},
+        evaluator={"host": "platform", "workspace_id": str(run.workspace_id), "credentials": secret},
+        task_ref={"issuer": run.issuer_domain, "id": str(run.task_id)},
+        run_ref={"issuer": run.issuer_domain, "id": str(run.id)},
+    )
+    run.projection = {
+        "state": "failed",
+        "result_preview": content[:2000],
+        "result_preview_truncated": True,
+        "error_category": "acceptance_failed",
+        "error": acceptance["checks"][0]["detail"],
+        "delivery_acceptance": acceptance,
+    }
+    await env["db"].commit()
+    before = await _snapshot(env)
+    env["holder"]["ctx"] = replace(env["admin_ctx"], role=WorkspaceRole.VIEWER)
+    path = {
+        "run": f"/api/runs/{run.id}",
+        "task": f"/api/tasks/{run.task_id}",
+        "task_runs": f"/api/tasks/{run.task_id}/runs",
+    }[entry]
+    response = await env["client"].get(path)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    summary = body if entry == "run" else body["runs" if entry == "task" else "items"][0]
+    assert summary["delivery_acceptance"]["status"] == "acceptance_failed"
+    assert "delivery_acceptance" not in summary["projection"]
+    assert secret not in response.text
+    assert not {"_dispatch_task", "_pump_events", "relay"}.intersection(env["calls"])
+    assert await _snapshot(env) == before
+
+    env["holder"]["ctx"] = replace(env["admin_ctx"], role=None)
+    env["calls"].clear()
+    denied = await env["client"].get(path)
+    assert denied.status_code == 403
+    assert secret not in denied.text
+    assert env["calls"] == []
+    assert await _snapshot(env) == before
+
+
 @pytest.mark.parametrize("entry_path", [False, True])
 @pytest.mark.parametrize("method", ["page", "stream"])
 @pytest.mark.parametrize("case", INVISIBLE)

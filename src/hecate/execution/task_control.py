@@ -55,6 +55,7 @@ from hecate.contracts.execution.references import (
     task_ref,
 )
 from hecate.execution.backend import EventPage
+from hecate.execution.delivery_acceptance_view import read_acceptance_view
 from hecate.execution.durable import ControlCommandRecorder, DurableTaskStore
 from hecate.execution.governance_events import RUN_TERMINAL, PlatformEventService
 from hecate.execution.task_dispatcher import PlatformTaskDispatcher, run_row_ref
@@ -1540,14 +1541,32 @@ class TaskControlService:
 
     @staticmethod
     def _run_summary(run: RunModel) -> dict[str, Any]:
-        return {
+        # The stored acceptance view is surfaced as its own read-validated
+        # field instead of raw inside the projection: a malformed or foreign
+        # entry is reported uninterpretable rather than reaching a client as
+        # a verdict, and absence stays an honest "no record".
+        projection = dict(run.projection or {})
+        acceptance = read_acceptance_view(
+            projection.pop("delivery_acceptance", None),
+            task_ref={"issuer": run.issuer_domain, "id": str(run.task_id)},
+            run_ref={"issuer": run.issuer_domain, "id": str(run.id)},
+            workspace_id=str(run.workspace_id),
+        )
+        # Shared checker errors can embed complete output values or schema
+        # parameters, beyond the deliberately bounded delivery preview.
+        if projection.get("error_category") in ("acceptance_failed", "acceptance_unverified"):
+            projection["error"] = "Delivery acceptance failed or could not be verified."
+        summary = {
             "run_id": str(run.id),
             "attempt_no": run.attempt_no,
             "deployment_id": str(run.deployment_id),
             "backend_ref": run.backend_ref,
-            "projection": run.projection,
+            "projection": projection,
             "event_cursor": run.event_cursor,
         }
+        if acceptance is not None:
+            summary["delivery_acceptance"] = acceptance
+        return summary
 
     async def _get_task(self, workspace_id: uuid.UUID, task_id: uuid.UUID) -> TaskModel:
         try:

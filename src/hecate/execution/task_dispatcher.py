@@ -41,6 +41,7 @@ from hecate.contracts.execution.durable import ControlCommandKind, TaskLifecycle
 from hecate.contracts.execution.events import ActorKind, ActorRef
 from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
 from hecate.contracts.execution.references import BackendRef, RefKind, deployment_ref, run_ref
+from hecate.execution.delivery_acceptance_view import delivery_projection
 from hecate.execution.entry_events import RunEventMapper
 from hecate.execution.governance_events import PlatformEventService
 from hecate.execution.task_run_registry import TaskRunRegistry, TaskRunRegistryError
@@ -1562,15 +1563,16 @@ class PlatformTaskDispatcher:
             ),
         )
         try:
+            projection = {
+                "state": terminal.value,
+                "error": outcome.get("error"),
+                "error_category": outcome.get("error_category"),
+                **delivery_projection(outcome, run.projection or {}),
+            }
             await TaskRunRegistry(db).update_projection(
                 run.id,
                 context.workspace_id,
-                projection={
-                    "state": terminal.value,
-                    "error": outcome.get("error"),
-                    "error_category": outcome.get("error_category"),
-                    "result_preview": (outcome.get("content") or "")[:2000],
-                },
+                projection=projection,
             )
         except TaskRunRegistryError:
             logger.warning("task %s run projection update skipped", task_ref.id)

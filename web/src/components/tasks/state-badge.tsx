@@ -1,7 +1,12 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { lifecycleLabel, outcomeLabel, recoveryStateLabel } from "@/lib/task-types";
+import {
+  acceptanceLabel,
+  lifecycleLabel,
+  outcomeLabel,
+  recoveryStateLabel,
+} from "@/lib/task-types";
 
 const LIFECYCLE_TONES: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   succeeded: "secondary",
@@ -37,4 +42,18 @@ export function OutcomeBadge({ outcome }: { outcome: string | null | undefined }
   const raw = outcome ?? "";
   if (!raw) return <Badge variant="outline">{outcomeLabel(raw)}</Badge>;
   return <Badge variant={OUTCOME_TONES[raw] ?? "default"}>{outcomeLabel(raw)}</Badge>;
+}
+
+const ACCEPTANCE_TONES: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  passed: "secondary",
+  acceptance_failed: "destructive",
+  acceptance_unverified: "outline",
+  not_declared: "outline",
+  uninterpretable: "destructive",
+};
+
+export function AcceptanceBadge({ status }: { status: string | null | undefined }) {
+  const raw = status ?? "";
+  if (!raw) return <Badge variant="outline">{acceptanceLabel(raw)}</Badge>;
+  return <Badge variant={ACCEPTANCE_TONES[raw] ?? "default"}>{acceptanceLabel(raw)}</Badge>;
 }

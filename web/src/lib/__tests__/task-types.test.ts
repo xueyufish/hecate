@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  acceptanceLabel,
+  checkStatusLabel,
+  digestPreview,
   lifecycleLabel,
   outcomeLabel,
   recoveryStateLabel,
@@ -70,5 +73,42 @@ describe("error body consumption", () => {
     const err = { error: { code: "SPOOF", message: "spoofed" } };
     expect(taskErrorCode(err)).toBeNull();
     expect(taskErrorMessage(err)).toBe("请求失败");
+  });
+});
+
+describe("acceptance labels are a recorded-verdict vocabulary", () => {
+  it("maps the four recorded statuses and the read-side refusal", () => {
+    expect(acceptanceLabel("passed")).toBe("验收通过");
+    expect(acceptanceLabel("acceptance_failed")).toBe("验收未通过");
+    expect(acceptanceLabel("acceptance_unverified")).toBe("验收未能核实");
+    expect(acceptanceLabel("not_declared")).toBe("未声明验收");
+    expect(acceptanceLabel("uninterpretable")).toBe("记录无法解释");
+  });
+
+  it("labels missing as 未记录 and never swallows unknown statuses", () => {
+    expect(acceptanceLabel(null)).toBe("未记录");
+    expect(acceptanceLabel("brand_new_status")).toBe("brand_new_status");
+  });
+});
+
+describe("check status labels", () => {
+  it("maps recorded check verdicts", () => {
+    expect(checkStatusLabel("passed")).toBe("通过");
+    expect(checkStatusLabel("failed")).toBe("未通过");
+    expect(checkStatusLabel("unverified")).toBe("未能核实");
+    expect(checkStatusLabel(null)).toBe("未记录");
+  });
+});
+
+describe("digest preview", () => {
+  it("shortens long digests and keeps short ones whole", () => {
+    expect(digestPreview("a".repeat(64))).toBe(`${"a".repeat(16)}…`);
+    expect(digestPreview("short-digest")).toBe("short-digest");
+  });
+
+  it("reports missing digests as 未记录", () => {
+    expect(digestPreview(null)).toBe("未记录");
+    expect(digestPreview(undefined)).toBe("未记录");
+    expect(digestPreview("")).toBe("未记录");
   });
 });

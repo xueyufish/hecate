@@ -79,21 +79,22 @@ class PlatformOutboxProjector:
                 try:
                     await events.append_resequenced(stored, workspace_id=workspace_id)
                     if event_type == "run_terminal" and workspace_id is not None:
+                        from hecate.execution.delivery_acceptance_view import delivery_projection
                         from hecate.execution.task_run_registry import TaskRunRegistry
 
-                        await TaskRunRegistry(db).update_projection(
-                            uuid.UUID(envelope.run_ref.id),
+                        registry = TaskRunRegistry(db)
+                        run_id = uuid.UUID(envelope.run_ref.id)
+                        recorded = await registry.get_run(run_id, workspace_id)
+                        projection = {
+                            "state": payload["status"],
+                            "error": payload.get("error"),
+                            **delivery_projection(payload, recorded.projection or {}),
+                            **({"error_category": payload["error_category"]} if payload.get("error_category") else {}),
+                        }
+                        await registry.update_projection(
+                            run_id,
                             workspace_id,
-                            projection={
-                                "state": payload["status"],
-                                "error": payload.get("error"),
-                                "result_preview": str(payload.get("content") or "")[:2000],
-                                **(
-                                    {"error_category": payload["error_category"]}
-                                    if payload.get("error_category")
-                                    else {}
-                                ),
-                            },
+                            projection=projection,
                         )
                     await db.commit()
                 except IntegrityError:
