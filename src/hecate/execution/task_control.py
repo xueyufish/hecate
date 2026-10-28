@@ -487,7 +487,16 @@ class TaskControlService:
                 await self._worker.dispatch_once(t_ref)
                 return
             if self._session_factory is None:
-                await self._dispatch_now(t_ref)
+                # A background dispatch must never drive the caller's
+                # request session: its teardown commit races the dispatch's
+                # SQL on that shared session ("prepared" state). Without a
+                # bound worker or factory, open a private session on the
+                # same engine — pooled in production, shared-connection in
+                # the in-memory test setup, but never the request's session.
+                factory = async_sessionmaker(self._db.bind, class_=AsyncSession, expire_on_commit=False)
+                async with factory() as session:
+                    await self._dispatch_now(t_ref, db=session)
+                    await session.commit()
                 return
             async with self._session_factory() as session:
                 await self._dispatch_now(t_ref, db=session)
