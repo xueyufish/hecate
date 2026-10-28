@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
@@ -147,6 +148,8 @@ class _ApprovalWakeGate:
     action: str
     detail: str = ""
     fact: dict[str, Any] | None = None
+    expires_at: str | None = None
+    clock: Callable[[], datetime] | None = None
 
 
 def task_ref_of(task_id: uuid.UUID | str) -> BackendRef:
@@ -1131,6 +1134,8 @@ class TaskControlService:
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "wake token expired; rejected"
         wake_payload = dict(payload)
+        approval_deadline: str | None = None
+        approval_clock: Callable[[], datetime] | None = None
         if expected_state is TaskLifecycleState.WAITING_APPROVAL:
             gate = await self._approval_wake_gate(current, wait, wake_payload, record)
             if gate.action == "refuse":
@@ -1143,6 +1148,8 @@ class TaskControlService:
                 return gate.detail if applied else "task moved on concurrently; wake rejected"
             if gate.fact:
                 wake_payload.update(gate.fact)
+            approval_deadline = gate.expires_at
+            approval_clock = gate.clock
         base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
         controller_loop = base_input.get("controller_loop") is True
         input_revision: dict[str, Any] | None = None
@@ -1195,6 +1202,16 @@ class TaskControlService:
                 extra_update=extra_update,
                 input_payload=merged_input,
                 input_revision=input_revision,
+                **(
+                    {
+                        "expected_wait": wait,
+                        "wait_expired": False,
+                        "approval_deadline": approval_deadline,
+                        "wait_clock": approval_clock,
+                    }
+                    if expected_state is TaskLifecycleState.WAITING_APPROVAL and hasattr(self._store, "engine")
+                    else {}
+                ),
                 **({"applied_command_id": record.command_id} if hasattr(self._store, "engine") else {}),
             )
         except (InvalidTaskTransitionError, ValueError):
@@ -1305,7 +1322,23 @@ class TaskControlService:
             return _ApprovalWakeGate("refuse", f"approval binding check failed ({verdict.detail}); wake rejected")
         if binding.consumed_by_invocation_id not in (None, request.invocation_id):
             return _ApprovalWakeGate("refuse", "approval already consumed by another action; wake rejected")
-        return _ApprovalWakeGate("authorize", "", fact={"approval_ref": ref})
+        from hecate_governance.clock import TimeAnchor, TrustedClock
+
+        def trusted_now() -> datetime:
+            now, problem = TrustedClock().trusted_now(
+                TimeAnchor(binding.anchor_wall, binding.anchor_monotonic, binding.clock_epoch)
+            )
+            if problem:
+                raise ValueError("approval wait commit time cannot be trusted")
+            return now
+
+        return _ApprovalWakeGate(
+            "authorize",
+            "",
+            fact={"approval_ref": ref},
+            expires_at=binding.expires_at.isoformat() if binding.expires_at is not None else None,
+            clock=trusted_now if binding.expires_at is not None or wait.get("wait_expires_at") is not None else None,
+        )
 
     async def _apply_approval_rejected(
         self,
@@ -1369,24 +1402,14 @@ class TaskControlService:
         The rejection terminal bypasses the dispatcher's ``_finish``, so
         without this the parent would sit in its durable wait until the
         token expired instead of applying its declared ``on_failure``
-        policy. The callback rides the SAME verified path as any child
-        terminal — the parent trusts only its own records — and its
-        idempotency/verification semantics are inherited unchanged.
-        Failures are logged, never surfaced: the child's terminal fact is
-        already committed.
+        policy. Delegates to the shared convergence used by the
+        wait-expiry path: the callback rides the SAME verified path as
+        any child terminal, with idempotency inherited unchanged.
         """
 
-        try:
-            payload = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
-            if not isinstance(payload.get("workflow_parent"), dict):
-                return
-            from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+        from hecate.execution.approval_wait_expiration import converge_workflow_parent
 
-            dispatcher = PlatformTaskDispatcher(self._store, self._session_factory)
-            context = PlatformTaskDispatcher._context_of(t_ref, payload)
-            await dispatcher._issue_child_callback(self._db, context, {**outcome, "status": "failed"})
-        except Exception:  # noqa: BLE001 — convergence must not un-commit the terminal
-            logger.warning("task %s rejection callback to workflow parent failed", t_ref.id, exc_info=True)
+        await converge_workflow_parent(self._db, self._store, self._session_factory, t_ref, outcome)
 
     async def _request_cancel(self, t_ref: BackendRef, record: ControlCommandRecord, workspace_id: uuid.UUID) -> str:
         state = await self._lifecycle_state(t_ref)

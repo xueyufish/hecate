@@ -34,7 +34,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import create_engine, func, select, update
+from sqlalchemy import create_engine, func, select, tuple_, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -379,8 +379,11 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         terminal_payload: dict[str, Any] | None = None,
         applied_command_id: str | None = None,
         input_revision: dict[str, Any] | None = None,
+        expected_wait: dict[str, Any] | None = None,
+        wait_expired: bool | None = None,
+        approval_deadline: str | None = None,
+        wait_clock: Callable[[], datetime] | None = None,
     ) -> TaskStateRecord:
-        recorded = recorded_at or self._clock()
         with self._session() as session, session.begin():
             if lease is not None:
                 self.leases.assert_valid(session, lease)
@@ -392,6 +395,41 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 )
                 .with_for_update()
             ).scalar_one_or_none()
+            # Read the commit clock after obtaining the row lock: a wake
+            # may have waited for that lock across its approval deadline.
+            recorded = recorded_at or self._clock()
+            if expected_wait is not None:
+                wait = (row.extra or {}).get("wait") if row is not None else None
+                if (
+                    row is None
+                    or row.lifecycle_state != TaskLifecycleState.WAITING_APPROVAL.value
+                    or wait != expected_wait
+                    or not isinstance(wait, dict)
+                    or wait.get("consumed")
+                    or not wait.get("wait_token")
+                ):
+                    raise ValueError("approval wait changed before effect commit")
+                if event_run_ref is not None and (row.run_issuer, row.run_id) != (
+                    event_run_ref.issuer_domain,
+                    event_run_ref.id,
+                ):
+                    raise ValueError("approval wait run linkage changed")
+                raw_deadline = wait.get("wait_expires_at")
+                if raw_deadline is not None and not isinstance(raw_deadline, str):
+                    raise ValueError("approval wait deadline is malformed")
+                deadline = datetime.fromisoformat(raw_deadline) if raw_deadline is not None else None
+                if deadline is not None and deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=UTC)
+                if approval_deadline is not None:
+                    authority_end = datetime.fromisoformat(approval_deadline)
+                    if authority_end.tzinfo is None:
+                        authority_end = authority_end.replace(tzinfo=UTC)
+                    deadline = min(deadline, authority_end) if deadline is not None else authority_end
+                now = wait_clock() if wait_clock is not None else datetime.fromisoformat(recorded)
+                if now.tzinfo is None:
+                    now = now.replace(tzinfo=UTC)
+                if wait_expired is None or (deadline is not None and deadline <= now) != wait_expired:
+                    raise ValueError("approval wait deadline changed before effect commit")
             if row is None:
                 if target is not TaskLifecycleState.QUEUED:
                     raise ValueError(f"first recorded state must be queued, got {target.value}")
@@ -795,6 +833,26 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         if states is None:
             return records
         return [record for record in records if record.lifecycle_state in states]
+
+    def list_task_page(
+        self,
+        states: set[TaskLifecycleState],
+        *,
+        after: tuple[str, str, str] | None = None,
+        limit: int = 32,
+    ) -> tuple[list[TaskStateRecord], tuple[str, str, str] | None]:
+        """Read a bounded keyset page for the platform wait reconciler."""
+        if limit < 1:
+            raise ValueError("task page limit must be positive")
+        position = tuple_(TaskStateRow.created_at, TaskStateRow.task_issuer, TaskStateRow.task_id)
+        query = select(TaskStateRow).where(TaskStateRow.lifecycle_state.in_([state.value for state in states]))
+        if after is not None:
+            query = query.where(position > tuple_(*after))
+        query = query.order_by(TaskStateRow.created_at, TaskStateRow.task_issuer, TaskStateRow.task_id).limit(limit)
+        with self._session() as session:
+            rows = session.execute(query).scalars().all()
+        cursor = (rows[-1].created_at, rows[-1].task_issuer, rows[-1].task_id) if len(rows) == limit else None
+        return [_task_record_of(row) for row in rows], cursor
 
     # -- ControlCommandRecorder ------------------------------------------------
 
