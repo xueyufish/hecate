@@ -48,6 +48,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 ## Observability and debugging
 
 - **[Debug an agent run with execution replay](replay-debug-guide.md)** — open the Execution Replay tab, read trace segments, time-travel to any commit point, and use the replay REST API (8.20).
+- **[Observe a run's events live](observe-run-events-live.md)** — follow a Run's event stream in real time from the ops console, resume after disconnects from the last accepted event, and read the connection states honestly.
 
 ## Troubleshooting
 

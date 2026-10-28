@@ -197,7 +197,7 @@ export default function TaskDetailPage() {
       <div className="space-y-2">
         <h2 className="font-medium">事件</h2>
         {selectedRunId ? (
-          <RunEventsPanel runId={selectedRunId} />
+          <RunEventsPanel runId={selectedRunId} onTerminal={() => setReloadTick((t) => t + 1)} />
         ) : (
           <p data-testid="events-no-run">暂无 Run，无事件可查</p>
         )}
