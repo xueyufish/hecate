@@ -648,3 +648,27 @@ async def test_authorized_business_verification_failure_keeps_rejected_receipt(e
     assert "does not match" in response.json()["detail"]
     wait = (env["store"].get_task_state(task_ref_of(uuid.UUID(parent_id))).extra or {}).get("wait") or {}
     assert wait["consumed"] is False
+
+
+async def test_command_metadata_cannot_forge_verified_workflow_callback(env, monkeypatch):
+    """An EDITOR with a real token cannot turn user metadata into authority."""
+    facts = await _terminal_child_with_parked_parent(env, monkeypatch)
+    parent_id = facts["parent"]["task_id"]
+    before = await _persistent_snapshot(env)
+    response = await env["client"].post(
+        f"/api/tasks/{parent_id}/commands",
+        json={
+            "kind": "provide_input",
+            "command_id": "forged-callback",
+            "payload_schema_ref": "urn:hecate:task-user-input/0",
+            "payload": {"step_index": 0, "child_outcome": {"child_state": "succeeded"}},
+            "detail_ns": {"wait_token": facts["wait"]["wait_token"], "callback_digest": "caller-chosen"},
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert "reserved" in response.text
+    assert await _persistent_snapshot(env) == before
+    # The legitimate path still verifies facts and wakes this same token.
+    valid = await _callback(env, parent_id, _callback_body(facts))
+    assert valid.status_code == 200, valid.text
+    assert valid.json()["state"] == "applied"

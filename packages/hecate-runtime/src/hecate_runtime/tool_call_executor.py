@@ -152,6 +152,27 @@ def _merge_resolutions(
     return event if _SEVERITY[event.state] >= _SEVERITY[ledger.state] else ledger
 
 
+def _input_request_value(result: Any) -> Any:
+    # The explicit business envelope uses the same typed value during
+    # first-run and ledger-replay governance. Ordinary tool text is opaque.
+    if isinstance(result, str):
+        try:
+            value = json.loads(result)
+        except ValueError:
+            return result
+        if isinstance(value, dict) and value.get("status") == "input_required":
+            return value
+    return result
+
+
+def _tool_result_content(result: Any) -> str:
+    # Explicit input envelopes must survive the same JSON round trip used
+    # by durable ledger backfill, after post-tool governance on both paths.
+    if isinstance(result, dict) and result.get("status") == "input_required":
+        return json.dumps(result, ensure_ascii=False)
+    return str(result)
+
+
 @dataclass(frozen=True)
 class AcceptedToolCallOutcome:
     """Semantic outcome from control flow, without parsing tool message text."""
@@ -619,6 +640,7 @@ class ToolCallExecutor:
         """
         from hecate_runtime.middleware import Phase
 
+        content = _input_request_value(content)
         context = dict(base_context or {})
         context["tool_call_id"] = tc_id
         context["invocation_id"] = execution_id
@@ -669,7 +691,7 @@ class ToolCallExecutor:
         return {
             "role": "tool",
             "tool_call_id": tc_id,
-            "content": str(content),
+            "content": _tool_result_content(content),
         }
 
     async def _maybe_govern_recovery(
@@ -1206,6 +1228,8 @@ class ToolCallExecutor:
                 usage={"duration_ms": int((time.monotonic() - tool_start) * 1000)},
             )
 
+        # Preserve the envelope type that durable replay gives the guards.
+        result = _input_request_value(result)
         # Post-tool hook (chain takes precedence; legacy hook is the fallback).
         post_chain = self._middleware_chains.get(Phase.TOOL_RESULT)
         if post_chain is not None:
@@ -1266,5 +1290,5 @@ class ToolCallExecutor:
         return {
             "role": "tool",
             "tool_call_id": tc_id,
-            "content": str(result),
+            "content": _tool_result_content(result),
         }

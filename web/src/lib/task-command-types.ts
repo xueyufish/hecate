@@ -61,7 +61,34 @@ export const taskCommandsApi = {
       expected_revision: expectedRevision,
     });
   },
+  // Human input for a waiting_input task: the payload is the user's field
+  // object (urn:hecate:task-user-input/0 — a JSON object whose keys
+  // answer the wait contract's declared fields); the wait token rides
+  // detail_ns as caller metadata, exactly like the cancel command carries
+  // its revision binding. The same id + body replays the same command.
+  issueProvideInput(
+    taskId: string,
+    commandId: string,
+    expectedRevision: number,
+    payload: Record<string, unknown>,
+    waitToken: string,
+  ) {
+    return api.post<CommandIssueResponse>(`/api/tasks/${taskId}/commands`, {
+      kind: "provide_input",
+      command_id: commandId,
+      expected_revision: expectedRevision,
+      payload,
+      payload_schema_ref: payload && Object.keys(payload).length > 0 ? TASK_USER_INPUT_SCHEMA_REF : null,
+      detail_ns: { wait_token: waitToken },
+    });
+  },
 };
+
+/** Declared shape of a human provide_input payload: a JSON object of
+ * user fields answering the parked contract's `fields`. Consumers: the
+ * durable input revision content (task_control._wake_waiting) and the
+ * contract-field validation against it. */
+export const TASK_USER_INPUT_SCHEMA_REF = "urn:hecate:task-user-input/0";
 
 // ---------------------------------------------------------------------------
 // Label maps: the single home for presentation wording, mirroring task-types.

@@ -60,6 +60,7 @@ from hecate.execution.delivery_acceptance_view import read_acceptance_view
 from hecate.execution.durable import ControlCommandRecorder, DurableTaskStore
 from hecate.execution.governance_events import RUN_TERMINAL, PlatformEventService
 from hecate.execution.task_dispatcher import PlatformTaskDispatcher, run_row_ref
+from hecate.execution.task_input import TASK_USER_INPUT_SCHEMA_REF, human_input_contract
 from hecate.execution.task_run_registry import (
     TaskNotFoundError,
     TaskRunRegistry,
@@ -830,8 +831,15 @@ class TaskControlService:
         expected_revision: int | None = None,
         expires_at: str | None = None,
         detail_ns: dict[str, Any] | None = None,
+        _verified_workflow_callback: bool = False,
     ) -> CommandIssueResult:
         """Record a command and act on what the platform can enforce."""
+        if payload_schema_ref == TASK_USER_INPUT_SCHEMA_REF and (
+            kind is not ControlCommandKind.PROVIDE_INPUT or not isinstance(payload, dict)
+        ):
+            raise TaskControlValidationError("task-user-input requires provide_input with a JSON object payload")
+        if (detail_ns or {}).get("callback_digest") and not _verified_workflow_callback:
+            raise TaskControlValidationError("callback metadata is reserved for verified workflow callbacks")
         if expires_at is not None:
             try:
                 datetime.fromisoformat(expires_at)
@@ -913,7 +921,12 @@ class TaskControlService:
             detail = await self._request_cancel(t_ref, record, workspace_id)
         elif kind is ControlCommandKind.PROVIDE_INPUT:
             detail = await self._wake_waiting(
-                t_ref, record, workspace_id, expected_state=TaskLifecycleState.WAITING_INPUT, payload=payload or {}
+                t_ref,
+                record,
+                workspace_id,
+                expected_state=TaskLifecycleState.WAITING_INPUT,
+                payload=payload or {},
+                verified_workflow_callback=_verified_workflow_callback,
             )
         elif kind is ControlCommandKind.RESUME:
             detail = await self._wake_waiting(
@@ -1080,6 +1093,7 @@ class TaskControlService:
             payload=merged_payload,
             payload_schema_ref="urn:hecate:workflow-callback:child-outcome/0",
             detail_ns={"wait_token": wait_token, "callback_digest": callback_digest},
+            _verified_workflow_callback=True,
             # The caller's command_id makes the callback idempotent end to
             # end: issue_command records under it and replays the receipt.
         )
@@ -1112,6 +1126,7 @@ class TaskControlService:
         *,
         expected_state: TaskLifecycleState,
         payload: dict[str, Any],
+        verified_workflow_callback: bool = False,
     ) -> str:
         """Wake a durable wait with the single-use token (revision-CAS consumed)."""
 
@@ -1133,6 +1148,19 @@ class TaskControlService:
         if _expired(wait.get("wait_expires_at")):
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "wake token expired; rejected"
+        contract_ref = wait.get("contract_ref")
+        contract_ref = contract_ref if isinstance(contract_ref, dict) else {}
+        if (
+            expected_state is TaskLifecycleState.WAITING_INPUT
+            and isinstance(contract_ref.get("await_task_ref"), dict)
+            and not verified_workflow_callback
+        ):
+            # A workflow child-result wait is only wakeable through the
+            # trusted callback invocation after verification of child
+            # facts; caller metadata carries no such authority. A human
+            # input form must never advance it.
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return "workflow child waits reject provide_input; use the verified callback"
         wake_payload = dict(payload)
         approval_deadline: str | None = None
         approval_clock: Callable[[], datetime] | None = None
@@ -1161,6 +1189,11 @@ class TaskControlService:
             merged_input = dict(base_input)
             if expected_state is TaskLifecycleState.WAITING_INPUT:
                 revision_content = {k: v for k, v in wake_payload.items() if k != "approval_ref"}
+                contract = human_input_contract(contract_ref.get("contract"))
+                fields = contract["fields"] if contract is not None else []
+                if any(field not in revision_content for field in fields):
+                    await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                    return "provided input does not satisfy the wait contract"
                 if revision_content:
                     run_for_task = getattr(self._store, "run_for_task", None)
                     linkage = await asyncio.to_thread(run_for_task, t_ref) if run_for_task else None
@@ -1173,6 +1206,12 @@ class TaskControlService:
                         "content": revision_content,
                         "wait_token": token,
                     }
+                execution_id = contract_ref.get("execution_id")
+                if isinstance(execution_id, str) and execution_id:
+                    acknowledged = list(base_input.get("_input_wait_acknowledgements", []))
+                    if execution_id not in acknowledged:
+                        acknowledged.append(execution_id)
+                    merged_input["_input_wait_acknowledgements"] = acknowledged
             else:
                 # The approval consumer still needs the authority reference;
                 # it is control data and must never become an input revision.
@@ -1180,7 +1219,7 @@ class TaskControlService:
         else:
             merged_input = {**base_input, "provided": wake_payload}
         extra_update = {"wait": {**wait, "consumed": True}}
-        if record.detail_ns.get("callback_digest") and "step_index" in wake_payload:
+        if verified_workflow_callback and "step_index" in wake_payload:
             callbacks = dict((current.extra or {}).get("_workflow_callbacks") or {})
             index = str(wake_payload["step_index"])
             if index in callbacks:

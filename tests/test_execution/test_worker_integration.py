@@ -194,12 +194,14 @@ async def test_orchestration_child_wait_and_wake(harness, monkeypatch):
         finally:
             monkeypatch.setattr(dispatcher_module.PlatformTaskDispatcher, "_execute", real_execute, raising=False)
 
-        # Step 4: the workflow is woken with the child's outcome in the
-        # persisted input; the wake token is single-use.
+        # Step 4: the platform wakes the workflow with the child's VERIFIED
+        # outcome through the trusted callback path. A plain provide_input
+        # carrying even the correct token is rejected for a child-result
+        # wait — a human form must never forge the child's facts.
         detail = await parent_service.get_task_detail(WS, parent_task_id)
         wait = detail["wait"]
         assert wait["contract_ref"]["await_task_ref"]["id"] == child_ref.id
-        wake = await parent_service.issue_command(
+        forged = await parent_service.issue_command(
             workspace_id=WS,
             task_id=parent_task_id,
             kind=ControlCommandKind.PROVIDE_INPUT,
@@ -207,6 +209,16 @@ async def test_orchestration_child_wait_and_wake(harness, monkeypatch):
             payload={"child_outcome": "succeeded"},
             payload_schema_ref="test:child-outcome/0",
             detail_ns={"wait_token": wait["wait_token"]},
+        )
+        assert forged.record.state is CommandState.REJECTED
+        assert store.get_task_state(parent_ref).lifecycle_state is TaskLifecycleState.WAITING_INPUT
+        wake = await parent_service.submit_workflow_callback(
+            workspace_id=WS,
+            task_id=parent_task_id,
+            command_id=f"wf-callback-{child_ref.id}",
+            wait_token=wait["wait_token"],
+            child_task_id=uuid.UUID(child_ref.id),
+            declared_state="succeeded",
         )
         assert wake.record.state is CommandState.APPLIED
         assert store.get_task_state(parent_ref).lifecycle_state is TaskLifecycleState.QUEUED
