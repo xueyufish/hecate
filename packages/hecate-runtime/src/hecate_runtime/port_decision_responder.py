@@ -16,7 +16,13 @@ from collections.abc import Callable
 from contextlib import aclosing
 from typing import Any
 
-from hecate_runtime.accepted_decision import AcceptedAction, DecisionValidationError, RunRef, canonical_json
+from hecate_runtime.accepted_decision import (
+    HARNESS_INPUT_SNAPSHOT_VERSION,
+    AcceptedAction,
+    DecisionValidationError,
+    RunRef,
+    canonical_json,
+)
 from hecate_runtime.decision_step import KIND_ACTIONS, KIND_FINAL_ANSWER, DecisionProposal, DecisionResponder
 from hecate_runtime.harness_turn import HarnessTurnPipeline, ModelCallRejectedError
 from hecate_runtime.ports import RuntimePort
@@ -146,6 +152,20 @@ class PortDecisionResponder(DecisionResponder):
             if self._pipeline is not None
             else None
         )
+        # The verifiable input snapshot: the same governed, projected and
+        # provider-shaped messages/config, detached before the port can
+        # mutate its arguments. The boundary is the runtime model port —
+        # this is not a claim about the vendor's final wire request.
+        input_snapshot = (
+            {
+                "snapshot_version": HARNESS_INPUT_SNAPSHOT_VERSION,
+                "messages": json.loads(canonical_json(messages)),
+                "config": json.loads(canonical_json(config)),
+                "sha256": invocation_digest,
+            }
+            if invocation_digest is not None
+            else None
+        )
         # Fresh copies keep provider mutations from changing future proposals.
         async with aclosing(self._port.llm_invoke_structured(messages=messages, config=config)) as stream:
             async for chunk in stream:
@@ -182,6 +202,7 @@ class PortDecisionResponder(DecisionResponder):
         accepted_output: dict[str, Any] = {"text": "".join(text_parts)}
         if invocation_digest is not None:
             accepted_output["harness_input_sha256"] = invocation_digest
+            accepted_output["harness_input"] = input_snapshot
         if final_tool_calls:
             actions = tuple(
                 self._action(run_ref, decision_step_id, position, entry)

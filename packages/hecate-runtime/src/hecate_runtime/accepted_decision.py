@@ -24,6 +24,13 @@ ACTION_DECISION_SCHEMA_VERSION = 1
 FINAL_ANSWER_SCHEMA_VERSION = 2
 SUPPORTED_SCHEMA_VERSIONS = (ACTION_DECISION_SCHEMA_VERSION, FINAL_ANSWER_SCHEMA_VERSION)
 
+# Version of the harness model-input snapshot embedded in ``accepted_output``
+# (``harness_input``): the post-governance, post-projection, provider-shaped
+# messages and config the runtime model port was invoked with. Unknown
+# versions refuse to validate — a snapshot this build cannot interpret is
+# never treated as a pass-through.
+HARNESS_INPUT_SNAPSHOT_VERSION = 1
+
 
 class DecisionConflictError(ValueError):
     """Different content or input versions were presented for an accepted step."""
@@ -190,7 +197,10 @@ def validate_decision(record: AcceptedDecisionRecord) -> None:
 
     The record version selects the shape contract: action decisions keep the
     original nonempty-action rules; final-answer decisions carry no actions
-    and must hold nonblank accepted text. Unknown versions fail closed.
+    and must hold nonblank accepted text. Unknown versions fail closed. A
+    harness input snapshot, when present, must be internally coherent and
+    agree with the recorded invocation digest; a digest without a snapshot
+    (the summary-only historical shape) stays valid unchanged.
     """
     if not isinstance(record.run_ref, RunRef):
         raise DecisionValidationError("run_ref must be a RunRef")
@@ -221,7 +231,50 @@ def validate_decision(record: AcceptedDecisionRecord) -> None:
                 raise DecisionValidationError("action arguments must be a JSON object")
             if action.side_effect_class not in {item.value for item in SideEffectClass}:
                 raise DecisionValidationError("unknown side-effect classification")
+    _validate_harness_input(record.accepted_output)
     canonical_decision_digest(record)
+
+
+def _validate_harness_input(accepted_output: dict[str, Any]) -> None:
+    """Check the embedded model-input snapshot against its recorded digest."""
+    if "harness_input" not in accepted_output:
+        return  # no snapshot: digest-only (or no harness) records keep their contract
+    snapshot = accepted_output["harness_input"]
+    if not isinstance(snapshot, dict):
+        raise DecisionValidationError("harness input snapshot must be a JSON object")
+    version = snapshot.get("snapshot_version")
+    if type(version) is not int or version != HARNESS_INPUT_SNAPSHOT_VERSION:
+        raise DecisionValidationError("unsupported harness input snapshot version")
+    messages = snapshot.get("messages")
+    config = snapshot.get("config")
+    if not isinstance(messages, list) or any(not isinstance(message, dict) for message in messages):
+        raise DecisionValidationError("harness input snapshot messages must be a list of JSON objects")
+    if not isinstance(config, dict):
+        raise DecisionValidationError("harness input snapshot config must be a JSON object")
+    sha256 = snapshot.get("sha256")
+    if not isinstance(sha256, str) or len(sha256) != 64:
+        raise DecisionValidationError("harness input snapshot digest is malformed")
+    recomputed = hashlib.sha256(canonical_json({"messages": messages, "config": config}).encode("utf-8")).hexdigest()
+    if sha256 != recomputed:
+        raise DecisionValidationError("harness input snapshot does not match its recorded content")
+    recorded = accepted_output.get("harness_input_sha256")
+    if recorded is not None and recorded != sha256:
+        raise DecisionValidationError("harness input snapshot disagrees with the invocation digest")
+    if recorded is None:
+        raise DecisionValidationError("harness input snapshot requires the invocation digest")
+
+
+def harness_input_snapshot(record: AcceptedDecisionRecord) -> dict[str, Any] | None:
+    """The validated model-input snapshot of an accepted decision, or ``None``.
+
+    A detached deep copy: callers may inspect or re-present the exact
+    provider-bound inputs without aliasing the accepted record. Absence is
+    the honest "no snapshot" (a summary-only or pre-harness record), never
+    an empty snapshot.
+    """
+
+    _validate_harness_input(record.accepted_output)
+    return _copy(record.accepted_output["harness_input"]) if "harness_input" in record.accepted_output else None
 
 
 def canonical_decision_digest(record: AcceptedDecisionRecord) -> str:

@@ -16,6 +16,7 @@ import sys
 import textwrap
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -685,3 +686,181 @@ async def test_empty_tool_call_lists_without_prior_intent_allow_final_answer(too
     assert outcome.record.actions == ()
     assert port.calls == 1
     assert port.stream_closed
+
+
+# --- harness input snapshot (recovery binding) -------------------------------------
+
+
+class ShapingPort(StubStructuredPort):
+    """Provider shaping that reorders tools and annotates messages in place."""
+
+    async def context_assemble(self, messages, tools, session_id, model="gpt-4o"):
+        return {
+            "messages": [{**message, "content": f"[shaped] {message['content']}"} for message in messages],
+            "tools": list(reversed(tools or [])),
+        }
+
+
+class MutatingPort(StubStructuredPort):
+    """A port that mutates its arguments mid-stream, as real providers may."""
+
+    async def llm_invoke_structured(self, messages: list[dict], config: dict):
+        self.calls += 1
+        messages.append({"role": "system", "content": "injected by the port"})
+        config["temperature"] = 99
+        async for chunk in super().llm_invoke_structured(messages, config):
+            yield chunk
+
+
+def _pipeline_responder(port: StubStructuredPort) -> PortDecisionResponder:
+    from hecate_runtime.harness_turn import HarnessTurnPipeline
+
+    return PortDecisionResponder(
+        port,
+        messages=[{"role": "user", "content": "choose next action"}],
+        config={"model": "test-model", "temperature": 0.2, "tools": list(TOOL_SNAPSHOT.values())},
+        tool_definitions=dict(TOOL_SNAPSHOT),
+        expected_refs=dict(REFS),
+        pipeline=HarnessTurnPipeline(model="test-model", port=port),
+    )
+
+
+async def test_pipeline_responder_commits_a_verified_input_snapshot() -> None:
+    """The snapshot holds the provider-shaped inputs, bound to the digest."""
+    port = ShapingPort([{"content": "working", "tool_calls": [_tool_call("biz_tool", '{"q": 7}')]}])
+    outcome = await DecisionStep(StubDecisionStore(), _pipeline_responder(port)).execute(
+        run_ref=_run_ref(), decision_step_id="step-1", input_refs=dict(REFS)
+    )
+    snapshot = outcome.record.accepted_output["harness_input"]
+    from hecate_runtime.accepted_decision import HARNESS_INPUT_SNAPSHOT_VERSION, harness_input_snapshot
+
+    assert outcome.record.accepted_output["harness_input_sha256"] == snapshot["sha256"]
+    assert snapshot["snapshot_version"] == HARNESS_INPUT_SNAPSHOT_VERSION
+    # Provider-shaped state, not the frozen controller hand-off.
+    assert snapshot["messages"][0]["content"] == "[shaped] choose next action"
+    assert [tool["function"]["name"] for tool in snapshot["config"]["tools"]] == [
+        "web_search",
+        "biz_tool",
+    ]
+    assert harness_input_snapshot(outcome.record) == snapshot
+
+
+async def test_port_mutation_cannot_pollute_the_committed_snapshot() -> None:
+    """Arguments the port mutates in place stay out of the accepted record."""
+    store = StubDecisionStore()
+    port = MutatingPort([{"content": "working", "tool_calls": [_tool_call("biz_tool", '{"q": 7}')]}])
+    outcome = await DecisionStep(store, _pipeline_responder(port)).execute(
+        run_ref=_run_ref(), decision_step_id="step-1", input_refs=dict(REFS)
+    )
+    snapshot = outcome.record.accepted_output["harness_input"]
+    assert all(message["content"] != "injected by the port" for message in snapshot["messages"])
+    assert "temperature" not in snapshot["config"] or snapshot["config"]["temperature"] == 0.2
+
+
+async def test_snapshot_recovery_returns_the_original_with_zero_model_calls() -> None:
+    """A committed snapshot decision recovers byte-identical, never re-asked."""
+    store = StubDecisionStore()
+    run_ref = _run_ref()
+    first = await DecisionStep(
+        store,
+        _pipeline_responder(ShapingPort([{"content": "working", "tool_calls": [_tool_call("biz_tool", '{"q": 7}')]}])),
+    ).execute(run_ref=run_ref, decision_step_id="step-1", input_refs=dict(REFS))
+    recovery_port = ShapingPort([])
+    second = await DecisionStep(store, _pipeline_responder(recovery_port)).execute(
+        run_ref=run_ref, decision_step_id="step-1", input_refs=dict(REFS)
+    )
+    assert second.resumed is True and recovery_port.calls == 0
+    assert second.record == first.record
+
+
+async def test_tampered_snapshot_content_fails_closed_at_lookup() -> None:
+    """Rewritten snapshot content can never read as an accepted decision."""
+    import hashlib
+
+    from hecate_runtime.accepted_decision import canonical_json
+
+    store = StubDecisionStore()
+    run_ref = _run_ref()
+    outcome = await DecisionStep(
+        store,
+        _pipeline_responder(ShapingPort([{"content": "working", "tool_calls": [_tool_call("biz_tool", '{"q": 7}')]}])),
+    ).execute(run_ref=run_ref, decision_step_id="step-1", input_refs=dict(REFS))
+    record = outcome.record
+    snapshot = dict(record.accepted_output["harness_input"])
+    snapshot["messages"] = [{**message, "content": "forged"} for message in snapshot["messages"]]
+    # The inner digest is recomputed for the forged content, but the
+    # recorded invocation digest is not — the cross-check must refuse.
+    snapshot["sha256"] = hashlib.sha256(
+        canonical_json({"messages": snapshot["messages"], "config": snapshot["config"]}).encode("utf-8")
+    ).hexdigest()
+    tampered = replace(
+        record,
+        accepted_output={**record.accepted_output, "harness_input": snapshot},
+    )
+    from hecate_runtime.accepted_decision import AcceptedDecisionRecord
+
+    store._records[(run_ref.issuer_domain, run_ref.run_id, "step-1")] = AcceptedDecisionRecord(
+        run_ref=tampered.run_ref,
+        decision_step_id=tampered.decision_step_id,
+        input_refs=tampered.input_refs,
+        accepted_output=tampered.accepted_output,
+        actions=tampered.actions,
+        accepted_at=tampered.accepted_at,
+        content_digest=canonical_decision_digest(tampered),
+        schema_version=tampered.schema_version,
+    )
+    with pytest.raises(DecisionValidationError, match="snapshot disagrees"):
+        await DecisionStep(store, _pipeline_responder(ShapingPort([]))).execute(
+            run_ref=run_ref, decision_step_id="step-1", input_refs=dict(REFS)
+        )
+
+
+@pytest.mark.parametrize("version", [99, True, 1.0, "1", None])
+async def test_unknown_snapshot_version_never_validates(version) -> None:
+    """A snapshot this build cannot interpret is a validation failure."""
+
+    port = ShapingPort([{"content": "working", "tool_calls": [_tool_call("biz_tool", '{"q": 7}')]}])
+    store = StubDecisionStore()
+    run_ref = _run_ref()
+    outcome = await DecisionStep(store, _pipeline_responder(port)).execute(
+        run_ref=run_ref, decision_step_id="step-1", input_refs=dict(REFS)
+    )
+    record = outcome.record
+    snapshot = {**record.accepted_output["harness_input"], "snapshot_version": version}
+    from hecate_runtime.accepted_decision import validate_decision
+
+    with pytest.raises(DecisionValidationError, match="snapshot version"):
+        validate_decision(
+            replace(
+                record,
+                accepted_output={**record.accepted_output, "harness_input": snapshot},
+            )
+        )
+
+
+async def test_explicit_null_snapshot_is_not_a_legacy_missing_snapshot() -> None:
+    from hecate_runtime.accepted_decision import harness_input_snapshot, validate_decision
+
+    outcome = await DecisionStep(StubDecisionStore(), _pipeline_responder(ShapingPort([{"content": "final"}]))).execute(
+        run_ref=_run_ref(), decision_step_id="step-1", input_refs=dict(REFS)
+    )
+    malformed = replace(outcome.record, accepted_output={**outcome.record.accepted_output, "harness_input": None})
+    for inspect in (validate_decision, harness_input_snapshot):
+        with pytest.raises(DecisionValidationError, match="snapshot must be"):
+            inspect(malformed)
+
+
+async def test_summary_only_digest_without_snapshot_stays_valid() -> None:
+    """Historical summary-only records keep their exact contract."""
+    from hecate_runtime.accepted_decision import AcceptedDecisionRecord
+
+    record = AcceptedDecisionRecord(
+        run_ref=_run_ref(),
+        decision_step_id="legacy-step",
+        input_refs=dict(REFS),
+        accepted_output={"text": "ok", "harness_input_sha256": "a" * 64},
+        actions=(),
+        accepted_at="2026-01-01T00:00:00+00:00",
+        schema_version=FINAL_ANSWER_SCHEMA_VERSION,
+    )
+    assert record.accepted_output["harness_input_sha256"] == "a" * 64  # validates on construction

@@ -1327,6 +1327,14 @@ async def test_declared_harness_composes_base_and_pins_the_binding(tmp_path, loo
         assert decision is not None
         assert decision.input_refs["harness_version"] == 4
         assert decision.input_refs["harness_digest"]
+        # The host's snapshot binds the exact shaped model input to the
+        # recorded invocation digest, inside the accepted record itself.
+        from hecate_runtime.accepted_decision import harness_input_snapshot
+
+        snapshot = harness_input_snapshot(decision)
+        assert snapshot is not None
+        assert snapshot["sha256"] == decision.accepted_output["harness_input_sha256"]
+        assert snapshot["messages"] == model.requests[0]["messages"]
     finally:
         await model.stop()
 

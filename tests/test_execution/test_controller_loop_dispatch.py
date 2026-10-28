@@ -1337,3 +1337,45 @@ def test_unknown_input_contract_never_parks(contract) -> None:
     watch = _ControllerInputWait([])
     watch.observe_result("action", "tool", {}, {"status": "input_required", "contract": contract})
     assert watch.requested is None
+
+
+async def test_harness_turns_commit_verified_input_snapshots(harness) -> None:
+    """Every accepted harness decision stores the shaped model input verbatim.
+
+    The snapshot rides the accepted record (one transaction, one digest),
+    binds to the recorded invocation digest, and never leaks into the
+    governance event stream.
+    """
+    from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+    from hecate_runtime.accepted_decision import RunRef, harness_input_snapshot
+
+    port = ScriptedLoopPort(final_text=json.dumps({"answer": "ok"}))
+    declared = {
+        "version": 2,
+        "sections": [
+            {"type": "instructions", "content": "Consult memory before answering."},
+            {"type": "memory", "content": {"policy": "EU stock rules"}},
+        ],
+    }
+    record, t_ref, _port = await _dispatch_to_completion(
+        harness, port=port, output_schema=OUTPUT_SCHEMA, harness=declared
+    )
+    assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
+    payload = await asyncio.to_thread(harness["store"].get_task_input, t_ref)
+    store = SqlAcceptedDecisionStore(harness["store"])
+    snapshots = []
+    for step in ("agent-turn-000001", "agent-turn-000002"):
+        decision = await store.lookup(RunRef("hecate", payload["platform_run_id"]), step)
+        assert decision is not None and decision.accepted_at, step
+        snapshot = harness_input_snapshot(decision)
+        assert snapshot is not None, step
+        assert snapshot["sha256"] == decision.accepted_output["harness_input_sha256"]
+        assert snapshot["messages"], step
+        snapshots.append(snapshot)
+    # Turn 1's snapshot is the composed conversation the model was invoked
+    # with: caller sections first, then derived persona, schema and task.
+    assert snapshots[0]["messages"][0] == {"role": "system", "content": "Consult memory before answering."}
+    assert snapshots[0]["config"]["tools"], "provider-visible tool definitions are part of the snapshot"
+    # Governance events carry decision facts, never the full input snapshot.
+    events = harness["store"].read_events(harness["store"].run_for_task(t_ref), limit=200).events
+    assert all("harness_input" not in json.dumps(event.payload) for event in events)

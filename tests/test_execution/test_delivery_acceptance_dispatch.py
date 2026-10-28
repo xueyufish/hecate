@@ -165,6 +165,21 @@ async def test_crash_after_final_decision_before_terminal_recovers_without_reask
     assert len(terminals) == 1
     assert terminals[0].payload["acceptance"] == acceptance
 
+    # The committed decisions' input snapshots survived the crash intact:
+    # the recovery replayed the chain from the original records.
+    from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+    from hecate_runtime.accepted_decision import RunRef, harness_input_snapshot
+
+    store = SqlAcceptedDecisionStore(harness["store"])
+    run_id = harness["store"].run_for_task(t_ref)
+    for step in ("agent-turn-000001", "agent-turn-000002"):
+        decision = await store.lookup(RunRef(run_id.issuer_domain, run_id.id), step)
+        assert decision is not None and decision.accepted_at, step
+        snapshot = harness_input_snapshot(decision)
+        assert snapshot is not None, step
+        assert snapshot["sha256"] == decision.accepted_output["harness_input_sha256"]
+        assert snapshot["messages"], step
+
 
 async def test_same_version_standard_rewrite_stops_for_reconciliation(
     harness,  # noqa: F811

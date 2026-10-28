@@ -57,6 +57,8 @@ from hecate_runtime.decision_step import KIND_FINAL_ANSWER, DecisionProposal, De
 from hecate_runtime.delivery_acceptance import declared_acceptance
 from hecate_runtime.errors import ApprovalWaitSignal
 from hecate_runtime.eventstore import InMemoryEventStore
+from hecate_runtime.harness_turn import HarnessTurnPipeline
+from hecate_runtime.port_decision_responder import PortDecisionResponder
 from hecate_runtime.ports import StubRuntimePort
 from hecate_runtime.tool_access import AccessDecision, ApprovalDecision
 from hecate_runtime.tool_call_executor import ToolCallExecutor
@@ -211,6 +213,64 @@ class LoopSource(TurnResponderSource):
         return _One()
 
 
+class SnapshotLoopSource(LoopSource):
+    """Exercise the real port responder and pipeline over the scripted loop."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.prepared = 0
+        source = self
+
+        class CountingPipeline(HarnessTurnPipeline):
+            """Count fresh preparations independently of model calls."""
+
+            async def prepare(self, messages, tools):
+                """Count and prepare only a fresh decision's input."""
+                source.prepared += 1
+                return await super().prepare(messages, tools)
+
+        self.pipeline = CountingPipeline(model="snapshot-probe")
+
+    def frozen_refs(self) -> dict[str, Any]:
+        """Bind the same pipeline policy across independent processes."""
+        return {**super().frozen_refs(), "harness_pipeline": self.pipeline.frozen_refs()}
+
+    def responder_for(self, messages, input_refs) -> DecisionResponder:
+        """Wrap the script in the production port responder."""
+        scripted = super().responder_for(messages, input_refs)
+        step = f"agent-turn-{int(input_refs['turn']):06d}"
+
+        class ModelPort(StubRuntimePort):
+            """Present scripted business decisions as structured model chunks."""
+
+            async def llm_invoke_structured(self, messages, config):
+                """Ask the script only when the real responder invokes the port."""
+                proposal = await scripted.respond(RUN, step, input_refs)
+                chunk = {"content": proposal.accepted_output["text"]}
+                if proposal.actions:
+                    chunk["tool_calls"] = [
+                        {
+                            "type": "function",
+                            "function": {"name": action.tool, "arguments": json.dumps(action.arguments)},
+                        }
+                        for action in proposal.actions
+                    ]
+                yield chunk
+
+        tools = {
+            name: {"type": "function", "function": {"name": name, "parameters": {"type": "object"}}}
+            for name in ("search", "fetch")
+        }
+        return PortDecisionResponder(
+            ModelPort(),
+            messages=messages,
+            config={"model": "snapshot-probe"},
+            tool_definitions=tools,
+            expected_refs=input_refs,
+            pipeline=self.pipeline,
+        )
+
+
 class CrashAfterDecisionCommitStore(SqlAcceptedDecisionStore):
     """Hard-exit once turn 2's decision is durably committed."""
 
@@ -308,7 +368,7 @@ async def main() -> None:
 
         backend.record_outcome_ex = exit_after_first_outcome
     port = BusinessPort()
-    source = LoopSource()
+    source = SnapshotLoopSource() if data.get("snapshots") else LoopSource()
     base_messages = [{"role": "user", "content": "run the loop"}]
     from hecate_runtime.agent_harness import HarnessSection, declared_harness
 
@@ -405,6 +465,7 @@ async def main() -> None:
                 "asks": source.asks,
                 "decision_step_ids": list(outcome.decision_step_ids),
                 "effects": port.calls,
+                "pipeline_preparations": source.prepared if isinstance(source, SnapshotLoopSource) else None,
             }
         ),
         flush=True,

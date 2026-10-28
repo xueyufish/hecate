@@ -75,9 +75,27 @@ Pipelined decisions also bind the `harness_pipeline` version, resolved processor
 parameters, model and context budget. A changed projection policy conflicts on
 replay even when the base messages are unchanged. The accepted output stores
 `harness_input_sha256`, a digest of the projected messages and configuration
-handed to the runtime model port. This binds the invocation without retaining
-a separate full input snapshot. Guard verdicts remain live; freezing a
-projection policy does not override a known policy denial.
+handed to the runtime model port, alongside the full versioned input snapshot
+(`harness_input`, snapshot version 1): the governed, projected, provider-shaped
+messages, model configuration and visible tool definitions, deep-copied before
+the port can mutate its arguments. The snapshot rides the accepted decision —
+one transaction, covered by the record's content digest — and its own digest
+must agree with `harness_input_sha256`, so a tampered or truncated snapshot
+fails validation and the recovery path refuses the record instead of
+re-deriving it. The boundary is the runtime model port, not a vendor's final
+wire request; port-internal credentials never enter the snapshot, and the
+snapshot never appears in governance events or observation surfaces.
+Decisions committed before this binding (or by a responder without a
+pipeline) carry the digest or nothing at all and keep recovering under their
+original contract — history is never backfilled. Guard verdicts remain live;
+freezing a projection policy does not override a known policy denial.
+
+Only an absent snapshot field denotes a historical record. An explicit null
+snapshot or a non-integer snapshot version is invalid. Independent-process
+recovery and causal input-revision coverage live in
+[`test_agent_controller_loop.py`](../../packages/hecate-durable/tests/test_agent_controller_loop.py);
+[`test_accepted_decision_store.py`](../../packages/hecate-durable/tests/test_accepted_decision_store.py)
+also verifies that an outbox failure rolls back the snapshot with its decision.
 
 ## Per-turn pipeline
 
