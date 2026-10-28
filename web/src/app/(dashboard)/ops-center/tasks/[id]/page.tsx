@@ -9,6 +9,7 @@ import { RunDeliveryPanel } from "@/components/tasks/run-delivery-panel";
 import { RunEventsPanel } from "@/components/tasks/run-events-panel";
 import { TaskCancelPanel } from "@/components/tasks/task-cancel-panel";
 import { TaskCommandsPanel } from "@/components/tasks/task-commands-panel";
+import { TaskInputPanel } from "@/components/tasks/task-input-panel";
 import { LifecycleBadge } from "@/components/tasks/state-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -141,6 +142,11 @@ export default function TaskDetailPage() {
           </Button>
         </div>
       )}
+
+      <div className="space-y-2" data-testid="task-input-section">
+        <h2 className="font-medium">补充输入</h2>
+        <TaskInputPanel taskId={taskId} detail={detail} onIssued={refreshAfterCommand} />
+      </div>
 
       <div className="space-y-2" data-testid="task-cancel-section">
         <h2 className="font-medium">取消任务</h2>

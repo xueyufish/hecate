@@ -237,8 +237,8 @@ async def test_verified_callback_wakes_parent_and_replay_is_idempotent(
     assert replay.json()["detail"] == "idempotent replay of a settled command"
 
 
-async def test_command_http_preserves_wake_token_and_id(client, db_session, entry_stub, monkeypatch):
-    """The public command route must carry the same fields as the service."""
+async def test_command_http_cannot_wake_workflow_child_wait(client, db_session, entry_stub, monkeypatch):
+    """A real token and stable command identity do not authorize child facts."""
     agent = await _seed_agent(db_session)
     child = await _submit(client, agent, "child", wait=True)
     parent = await _park_parent_on(client, agent, child["task_id"], monkeypatch)
@@ -249,9 +249,17 @@ async def test_command_http_preserves_wake_token_and_id(client, db_session, entr
     }
     response = await client.post(f"/api/tasks/{parent['task_id']}/commands", json=body)
     assert response.status_code == 201, response.text
-    assert response.json()["state"] == "applied"
+    assert response.json()["state"] == "rejected"
     assert response.json()["command_id"] == "http-wake"
-    assert (await client.post(f"/api/tasks/{parent['task_id']}/commands", json=body)).json()["state"] == "applied"
+    assert (await client.post(f"/api/tasks/{parent['task_id']}/commands", json=body)).json()["state"] == "rejected"
+    detail = (await client.get(f"/api/tasks/{parent['task_id']}")).json()
+    assert detail["lifecycle_state"] == "waiting_input"
+    assert detail["wait"]["consumed"] is False
+    verified = await client.post(
+        f"/api/tasks/{parent['task_id']}/workflow-callback", json=_callback_body(parent, child["task_id"])
+    )
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["state"] == "applied"
 
 
 async def test_callback_result_cannot_forge_verified_child_fields(client, db_session, entry_stub, monkeypatch):

@@ -34,7 +34,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from hecate_runtime.action_ledger import tool_arguments_digest
 from hecate_runtime.errors import ApprovalWaitSignal
+from hecate_runtime.tool_call_executor import AcceptedToolCallOutcome, ToolCallExecutor
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.contracts.execution.durable import ControlCommandKind, TaskLifecycleState, TaskStateRecord
@@ -44,6 +46,7 @@ from hecate.contracts.execution.references import BackendRef, RefKind, deploymen
 from hecate.execution.delivery_acceptance_view import delivery_projection
 from hecate.execution.entry_events import RunEventMapper
 from hecate.execution.governance_events import PlatformEventService
+from hecate.execution.task_input import human_input_contract
 from hecate.execution.task_run_registry import TaskRunRegistry, TaskRunRegistryError
 from hecate.execution.workflow_child import WorkflowChildTaskAdapter, WorkflowPlan
 from hecate.models.agent import AgentModel
@@ -111,6 +114,71 @@ class TaskWaitingSignalError(Exception):
         self.wake_kind = wake_kind
         self.contract_ref = dict(contract_ref)
         self.expires_in_seconds = expires_in_seconds
+
+
+class _ControllerInputWait:
+    """Observe governed outcomes, including replay, by durable action identity."""
+
+    def __init__(self, acknowledged: list[str]) -> None:
+        self.requested: dict[str, Any] | None = None
+        self._acknowledged = frozenset(acknowledged)
+
+    def observe_result(self, execution_id: str, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
+        """Park an unacknowledged explicit request after outcome persistence."""
+        if execution_id in self._acknowledged:
+            return
+        if not isinstance(result, dict) or result.get("status") != "input_required":
+            return
+        contract = human_input_contract(result.get("contract"))
+        if contract is None:
+            return
+        self.requested = {
+            "execution_id": execution_id,
+            "tool": tool_name,
+            "arguments_digest": tool_arguments_digest(arguments),
+            "contract": contract,
+        }
+
+    def stop_reason(self) -> str | None:
+        """Stop remaining actions before they acquire a claim."""
+        return "input_wait_requested" if self.requested is not None else None
+
+
+class _InputRequestExecutor(ToolCallExecutor):
+    """Observe only confirmed, governed results of fresh and recovered actions."""
+
+    def __init__(self, *, watch: _ControllerInputWait, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._watch = watch
+
+    async def execute_accepted_call(
+        self,
+        tool_call: dict,
+        context: dict,
+        execution_context: dict,
+        *,
+        run_ref: Any,
+        ownership: Any,
+        node_id: str = "",
+    ) -> AcceptedToolCallOutcome:
+        """Recognize the envelope only after the shared executor has settled it."""
+        outcome = await super().execute_accepted_call(
+            tool_call,
+            context,
+            execution_context,
+            run_ref=run_ref,
+            ownership=ownership,
+            node_id=node_id,
+        )
+        if outcome.status == "succeeded" and not outcome.result.get("is_error"):
+            content = outcome.result.get("content")
+            try:
+                result = json.loads(content) if isinstance(content, str) else None
+            except ValueError:
+                result = None
+            function = tool_call["function"]
+            self._watch.observe_result(context["invocation_id"], function["name"], function["arguments"], result)
+        return outcome
 
 
 def run_row_ref(run: RunModel) -> BackendRef:
@@ -1014,9 +1082,12 @@ class PlatformTaskDispatcher:
         from hecate_runtime.agent_turn import AgentTurn
         from hecate_runtime.context_policy import ContextChainFactory
         from hecate_runtime.delivery_acceptance import declared_acceptance
-        from hecate_runtime.execution_service import RuntimeExecutionRequest, runtime_execution_service
+        from hecate_runtime.execution_service import (
+            RuntimeEventDecision,
+            RuntimeExecutionRequest,
+            runtime_execution_service,
+        )
         from hecate_runtime.harness_turn import HarnessTurnPipeline
-        from hecate_runtime.tool_call_executor import ToolCallExecutor
 
         from hecate.core.composition.entry_assembly import (
             build_tool_registry,
@@ -1106,7 +1177,13 @@ class PlatformTaskDispatcher:
             "acceptance_version": (context.acceptance or {}).get("version"),
         }
         store = SqlAcceptedDecisionStore(self._store)
-        executor = ToolCallExecutor(
+        # Acknowledgements commit with the wake and its causal revision.
+        # They suppress only replay of that exact settled request, never a
+        # fresh action with the same tool and arguments.
+        persisted_payload = await asyncio.to_thread(self._store.get_task_input, task_ref) or {}
+        input_watch = _ControllerInputWait(persisted_payload.get("_input_wait_acknowledgements", []))
+        executor = _InputRequestExecutor(
+            watch=input_watch,
             port=port,
             event_store=event_store,
             access_policy=bundle.access_policy if bundle else None,
@@ -1212,6 +1289,10 @@ class PlatformTaskDispatcher:
             # and digest on every decision; the controller additionally
             # verifies the base messages equal the frozen composition.
             harness=harness_spec,
+            # A recorded input request stops the turn's remaining actions
+            # BEFORE their ledger claim — the request rides as the real
+            # outcome of the action that produced it.
+            stop_check=input_watch.stop_reason,
         )
         first_responder = source.responder_for(messages, {**base_refs, "controller": "agent-loop/1", "turn": 1})
         controller = AgentController(AgentTurn(store, first_responder, executor), source)
@@ -1220,12 +1301,39 @@ class PlatformTaskDispatcher:
             current = self._store.get_task_state(task_ref)
             return current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING
 
+        def observe(event: dict[str, Any]) -> Any:
+            # A recorded input request parks at the turn boundary instead of
+            # deciding the next turn without the human input.
+            if input_watch.stop_reason() is not None:
+                return RuntimeEventDecision.STOP_UNKNOWN
+            return RuntimeEventDecision.CONTINUE
+
         driver = ControllerExecutionDriver(controller, spec, should_cancel=should_cancel)
         result = await runtime_execution_service.execute(
             RuntimeExecutionRequest(
-                runtime=driver, session_id=engine_session, initial_input={}, should_cancel=should_cancel
+                runtime=driver,
+                session_id=engine_session,
+                initial_input={},
+                should_cancel=should_cancel,
+                observer=observe,
             )
         )
+        if input_watch.requested is not None:
+            # Both fresh execution and ledger replay reach this boundary.
+            # No process-local observation is required to recover the wait.
+            request = input_watch.requested
+            raise TaskWaitingSignalError(
+                ControlCommandKind.PROVIDE_INPUT,
+                {
+                    "tool": request["tool"],
+                    "execution_id": request["execution_id"],
+                    "arguments_digest": request["arguments_digest"],
+                    "kind": "input",
+                    "contract": request["contract"],
+                    **({"run_id": str(run.id)} if run is not None else {}),
+                    "engine_session_id": str(engine_session),
+                },
+            )
         if result.state.value == "failed":
             if result.detail.get("requires_reconciliation"):
                 return {

@@ -196,7 +196,9 @@ function WorkflowNodeBase({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const measure = () => {
       const { domNode, updateNodeInternals } = store.getState();
-      const nodeElement = domNode?.querySelector(`.react-flow__node[data-id="${id}"]`);
+      // React Flow renders each node as a div; narrow the query so the
+      // internal-update map accepts the element type it requires.
+      const nodeElement = domNode?.querySelector<HTMLDivElement>(`.react-flow__node[data-id="${id}"]`);
       if (nodeElement) {
         updateNodeInternals(new Map([[id, { id, nodeElement, force: true }]]), { triggerFitView: false });
         return;

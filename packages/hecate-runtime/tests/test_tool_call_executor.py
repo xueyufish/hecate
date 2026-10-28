@@ -587,3 +587,43 @@ def test_sandbox_router_old_path_forwards_to_same_implementation():
     from hecate_runtime.workers.sandbox_router import SandboxEnforcementRouter as LegacyRouter
 
     assert LegacyRouter is SandboxEnforcementRouter
+
+
+@pytest.mark.parametrize("mode", ["allow", "block", "sanitize"])
+async def test_input_envelope_governance_has_first_run_replay_parity(entry_class, mode):
+    """Structured input contracts retain their shape and guards across replay."""
+
+    class _InputPort(StubToolPort):
+        async def tool_execute(self, name, args, context=None):
+            self.calls.append((name, args, context or {}))
+            return {"status": "input_required", "contract": {"fields": ["secret"]}}
+
+    observed = []
+
+    class _Guard(PostToolHook):
+        async def on_post_tool_call(self, name, result, context):
+            observed.append(result)
+            assert isinstance(result, dict)
+            if mode == "block":
+                return GuardrailResult(action=GuardrailAction.BLOCK, reason="hidden")
+            if mode == "sanitize":
+                return GuardrailResult(
+                    action=GuardrailAction.SANITIZE,
+                    modified_data={
+                        "result": {
+                            "status": "input_required",
+                            "contract": {"fields": ["public"]},
+                        }
+                    },
+                )
+            return GuardrailResult()
+
+    port, ledger, session = _InputPort(), StubLedgerHook(), uuid.uuid4()
+    first = await _invoke(entry_class(port=port, action_hook=ledger, post_tool_hook=_Guard()), session)
+    replay = await _invoke(entry_class(port=port, action_hook=ledger, post_tool_hook=_Guard()), session)
+    assert first == replay
+    assert len(observed) == 2 and len(port.calls) == 1
+    if mode == "block":
+        assert "input_required" not in first["content"]
+    else:
+        assert json.loads(first["content"])["contract"]["fields"] == ["public" if mode == "sanitize" else "secret"]

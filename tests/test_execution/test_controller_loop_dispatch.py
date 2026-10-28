@@ -604,11 +604,12 @@ async def _submit_rows(harness, input_overrides: Any) -> tuple[Any, uuid.UUID]:
 
 
 async def _park_for_input(harness, t_ref: Any) -> str:
-    """Replicate the dispatcher's durable input park (state + wait record).
+    """Write a bare input wait record (state + token) for wake-side tests.
 
-    The controller loop has no business input-required park on the platform
-    yet (runner capability), so the test writes exactly the wait record
-    ``_park`` persists and wakes it through the REAL command path.
+    These tests exercise the wake/application side in isolation; the
+    production park path (business input_required contract -> dispatcher
+    -> _park) is covered end to end by
+    ``test_production_input_park_wake_and_consumption_end_to_end``.
     """
     from hecate.contracts.execution.durable import TaskLifecycleState as PlatformTaskState
 
@@ -658,7 +659,7 @@ async def _issue_input_wake(
             kind=ControlCommandKind.PROVIDE_INPUT,
             issuer="tester",
             payload=payload,
-            payload_schema_ref="test:input-wake/0" if payload else None,
+            payload_schema_ref="urn:hecate:task-user-input/0" if payload else None,
             command_id=command_id,
             detail_ns={"wait_token": wait_token},
         )
@@ -1063,5 +1064,276 @@ async def test_context_budget_stop_never_marks_task_succeeded(harness) -> None:
     assert record.lifecycle_state is TaskLifecycleState.FAILED
     assert record.extra["result"]["error_category"] == "controller_token_capped"
     assert port.model_calls == 0 and port.tool_calls == []
-    payload = harness["store"].get_task_input(t_ref)
+    payload = await asyncio.to_thread(harness["store"].get_task_input, t_ref)
     assert await _committed_first_decision(harness, payload) is None
+
+
+class _ProductionInputPort(ScriptedLoopPort):
+    """Business tool that declares the explicit input-required contract.
+
+    First business call (no region) returns the structured input request —
+    no side effect performed per the contract; the completed call serves
+    real data. The model asks twice fresh after the wake (region call +
+    final), replaying turn 1 from storage with zero model calls.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(final_text="unused")
+        self.business_calls: list[dict] = []
+
+    async def tool_execute(self, name, args, context=None):
+        self.business_calls.append(dict(args))
+        if "region" not in args:
+            return {"status": "input_required", "contract": {"fields": ["region"]}}
+        return {"quantity": 3, "region": args["region"]}
+
+    async def llm_invoke_structured(self, messages: list[dict], config: dict):
+        self.model_calls += 1
+        self.messages = messages
+        tool_messages = [m for m in messages if m.get("role") == "tool"]
+        provided = [
+            json.loads(m["content"])["provided_input"]
+            for m in messages
+            if m.get("role") == "user" and "provided_input" in str(m.get("content"))
+        ]
+        if not tool_messages:
+            first_call = {
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "query_inventory", "arguments": json.dumps({"sku": "S-9"})},
+            }
+            yield {"content": None, "tool_calls": [first_call]}
+        elif len(tool_messages) == 1 and provided:
+            # The input request's real outcome and the accepted revision are
+            # both visible: complete the request with the provided region.
+            yield {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-2",
+                        "type": "function",
+                        "function": {
+                            "name": "query_inventory",
+                            "arguments": json.dumps({"sku": "S-9", "region": "FROM-PROVIDED"}),
+                        },
+                    }
+                ],
+            }
+        else:
+            yield {"content": "region:" + json.dumps(provided), "tool_calls": None}
+
+
+async def test_production_input_park_wake_and_consumption_end_to_end(harness) -> None:
+    """The full loop without any hand-written wait record.
+
+    The business tool's structured input request parks the controller task
+    through the dispatcher's production path; the real provide_input
+    command records the durable revision and acknowledges that exact action;
+    the SAME run continues from the accepted-decision chain, the tool
+    consumes the provided fields, and the delivery passes. Committed turns
+    replay with zero model calls and the business tool is never re-run
+    without region.
+    """
+    port = _ProductionInputPort()
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    worker = _worker_for(harness)
+
+    record = await _dispatch_to_state(harness, t_ref, worker, "waiting_input")
+    assert record.lifecycle_state.value == "waiting_input"
+    wait = (record.extra or {}).get("wait") or {}
+    assert wait["wake_kind"] == "provide_input"
+    assert wait["consumed"] is False
+    contract_ref = wait["contract_ref"]
+    assert contract_ref["tool"] == "query_inventory"
+    assert contract_ref["execution_id"]
+    assert contract_ref["contract"] == {"fields": ["region"]}
+    assert port.business_calls == [{"sku": "S-9"}]  # no side effect performed
+
+    # A wake missing a contract-required field is rejected; the token stays
+    # unconsumed and no revision is recorded.
+    missing = await _issue_input_wake(harness, task_uuid, wait["wait_token"], {"tier": "gold"}, worker=worker)
+    assert missing.record.state.value == "rejected"
+    assert "wait contract" in (missing.detail or "")
+    record = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
+    assert record.lifecycle_state.value == "waiting_input"
+    assert (record.extra or {})["wait"]["consumed"] is False
+    assert await asyncio.to_thread(harness["store"].list_input_revisions, t_ref) == []
+
+    issue = await _issue_input_wake(
+        harness, task_uuid, wait["wait_token"], {"region": "EU"}, command_id="wake-prod-1", worker=worker
+    )
+    assert issue.record.state.value == "applied"
+    persisted = await asyncio.to_thread(harness["store"].get_task_input, t_ref)
+    assert persisted["_input_wait_acknowledgements"] == [contract_ref["execution_id"]]
+
+    record = await _dispatch_to_terminal(harness, t_ref, worker=worker)
+    assert record.lifecycle_state.value == "succeeded", record.extra
+    # The provided region reached the model, which completed the request
+    # WITH it; the parked call never re-ran without region.
+    assert port.business_calls == [{"sku": "S-9"}, {"sku": "S-9", "region": "FROM-PROVIDED"}]
+    # Three fresh model asks total: turn 1 pre-park, region call, final.
+    assert port.model_calls == 3
+    revisions = await asyncio.to_thread(harness["store"].list_input_revisions, t_ref)
+    assert [row["content"] for row in revisions] == [{"region": "EU"}]
+    result = (record.extra or {}).get("result") or {}
+    assert result["content"] == "region:" + json.dumps([{"region": "EU"}])
+
+
+def test_input_acknowledgement_is_bound_to_action_identity() -> None:
+    """An old outcome stays acknowledged; a fresh identical call still parks."""
+    from hecate.execution.task_dispatcher import _ControllerInputWait
+
+    watch = _ControllerInputWait(["old-action"])
+    result = {"status": "input_required", "contract": {"fields": ["region"]}}
+    watch.observe_result("old-action", "query_inventory", {"sku": "S-9"}, result)
+    assert watch.requested is None
+    watch.observe_result("fresh-action", "query_inventory", {"sku": "S-9"}, result)
+    assert watch.requested["execution_id"] == "fresh-action"
+
+
+async def test_workflow_child_wait_rejects_plain_provide_input(harness) -> None:
+    """A workflow child-result wait is only wakeable by the verified callback.
+
+    The parent's wait contract names the awaited child (await_task_ref); a
+    human input form carrying even the correct token must not advance it —
+    the token is rejected without being consumed and the parent stays
+    waiting_input for the callback path.
+    """
+    from hecate.contracts.execution.durable import TaskLifecycleState as PlatformTaskState
+
+    port = _ProductionInputPort()
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    await asyncio.to_thread(harness["store"].apply_task_state, t_ref, PlatformTaskState.RUNNING)
+    token = uuid.uuid4().hex
+    await asyncio.to_thread(
+        harness["store"].apply_task_state,
+        t_ref,
+        PlatformTaskState.WAITING_INPUT,
+        extra_update={
+            "wait": {
+                "wake_kind": "provide_input",
+                "contract_ref": {
+                    "await_task_ref": {"issuer_domain": "hecate", "id": str(uuid.uuid4()), "kind": "task"}
+                },
+                "wait_token": token,
+                "wait_expires_at": None,
+                "consumed": False,
+            }
+        },
+    )
+    rejected = await _issue_input_wake(harness, task_uuid, token, {"region": "EU"}, worker=_worker_for(harness))
+    assert rejected.record.state.value == "rejected"
+    assert "callback" in (rejected.detail or "")
+    record = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
+    assert record.lifecycle_state.value == "waiting_input"
+    assert (record.extra or {})["wait"]["consumed"] is False
+
+
+async def test_input_wait_recovers_after_outcome_commit_before_park(harness, monkeypatch) -> None:
+    """A new worker recovers the wait from the ledger, without another call."""
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    port = _ProductionInputPort()
+    t_ref, _task_uuid = await _submit_without_dispatch(harness, port)
+    original = PlatformTaskDispatcher._park
+
+    async def crash_before_park(*args, **kwargs):
+        raise asyncio.CancelledError("simulated process exit before durable park")
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_park", crash_before_park)
+    with pytest.raises(asyncio.CancelledError):
+        await _worker_for(harness).dispatch_once(t_ref)
+    assert harness["store"].get_task_state(t_ref).lifecycle_state is TaskLifecycleState.RUNNING
+    monkeypatch.setattr(PlatformTaskDispatcher, "_park", original)
+    await _worker_for(harness).reconcile()
+    record = harness["store"].get_task_state(t_ref)
+    assert record.lifecycle_state is TaskLifecycleState.WAITING_INPUT
+    assert (record.extra or {})["wait"]["contract_ref"]["execution_id"]
+    assert port.model_calls == 1
+    assert port.business_calls == [{"sku": "S-9"}]
+
+
+class _RepeatedInputPort(_ProductionInputPort):
+    """Two separate actions need input despite sharing identical arguments."""
+
+    async def llm_invoke_structured(self, messages, config):
+        self.model_calls += 1
+        inputs = [m for m in messages if m.get("role") == "user" and "provided_input" in str(m.get("content"))]
+        if len(inputs) >= 2:
+            yield {"content": "done", "tool_calls": None}
+        else:
+            yield {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"call-{len(inputs)}",
+                        "type": "function",
+                        "function": {"name": "query_inventory", "arguments": json.dumps({"sku": "S-9"})},
+                    }
+                ],
+            }
+
+
+async def test_fresh_identical_input_requests_park_across_multiple_wakes(harness) -> None:
+    port = _RepeatedInputPort()
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    identities = []
+    for index in range(2):
+        worker = _worker_for(harness)
+        record = await _dispatch_to_state(harness, t_ref, worker, "waiting_input")
+        wait = (record.extra or {})["wait"]
+        identities.append(wait["contract_ref"]["execution_id"])
+        issue = await _issue_input_wake(harness, task_uuid, wait["wait_token"], {"region": f"R{index}"}, worker=worker)
+        assert issue.record.state.value == "applied"
+    record = await _dispatch_to_terminal(harness, t_ref, worker=_worker_for(harness))
+    assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
+    assert len(set(identities)) == 2
+    assert port.business_calls == [{"sku": "S-9"}, {"sku": "S-9"}]
+    assert port.model_calls == 3
+
+
+async def test_post_tool_guard_removes_input_request_before_parking(harness) -> None:
+    """Raw tool envelopes must never bypass result sanitization into wait data."""
+    from types import SimpleNamespace
+
+    from hecate_runtime.guardrail import GuardrailAction, GuardrailResult, PostToolHook
+    from hecate_runtime.middleware_factory import build_tool_chain
+
+    class _Sanitize(PostToolHook):
+        async def on_post_tool_call(self, name, result, context):
+            return GuardrailResult(action=GuardrailAction.SANITIZE, modified_data={"result": "safe feedback"})
+
+    async def bundle(*args, **kwargs):
+        return SimpleNamespace(
+            access_policy=None,
+            approval_callback=None,
+            rules=[],
+            middleware_chains=build_tool_chain(pre_hook=None, post_hook=_Sanitize()),
+            denial_tracker=None,
+        )
+
+    port = _ProductionInputPort()
+    record, _t_ref, _port = await _dispatch_to_completion(harness, port=port, guardrails=bundle)
+    assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
+    assert "wait" not in (record.extra or {})
+
+
+@pytest.mark.parametrize(
+    "contract",
+    [
+        {},
+        {"fields": []},
+        {"fields": "region"},
+        {"fields": ["region", "region"]},
+        {"fields": [""]},
+        {"fields": [None]},
+        {"fields": ["approval_ref"]},
+        {"fields": ["region"], "prompt": 3},
+    ],
+)
+def test_unknown_input_contract_never_parks(contract) -> None:
+    from hecate.execution.task_dispatcher import _ControllerInputWait
+
+    watch = _ControllerInputWait([])
+    watch.observe_result("action", "tool", {}, {"status": "input_required", "contract": contract})
+    assert watch.requested is None

@@ -70,10 +70,11 @@ export function ConfigPanel({
 
   function handleChange(field: string, value: unknown) {
     const newConfig = { ...config, [field]: value };
-    const newData = { ...node!.data, config: newConfig };
+    const newData: Record<string, unknown> = { ...node!.data, config: newConfig };
     // Keep the canvas label in sync when the display name changes.
     if (field === "name") {
-      newData.label = (value as string) || newData.label;
+      const currentLabel = typeof newData.label === "string" ? newData.label : undefined;
+      newData.label = (value as string) || currentLabel;
     }
     onUpdate(node!.id, newData);
   }
