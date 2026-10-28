@@ -46,10 +46,12 @@ from hecate_runtime.accepted_decision import (
     RunRef,
     canonical_json,
 )
+from hecate_runtime.agent_harness import HarnessSpec
 from hecate_runtime.agent_turn import AgentTurn, AgentTurnOutcome
 from hecate_runtime.decision_step import DecisionResponder
 from hecate_runtime.delivery_acceptance import AcceptanceDeclaration
 from hecate_runtime.execution_driver import ExecutionDriver
+from hecate_runtime.harness_turn import HarnessTurnPipeline, ModelCallRejectedError
 from hecate_runtime.turn_projection import project_turn_messages
 
 __all__ = [
@@ -173,6 +175,13 @@ class ControllerRunSpec:
     # (or a bare ``output_schema`` without an acceptance block) pins
     # nothing, keeping pre-binding chains replayable byte-for-byte.
     acceptance: AcceptanceDeclaration | None = None
+    # Explicitly declared harness composition (see :mod:`hecate_runtime.agent_harness`).
+    # Every decision pins its version and digest, and the base messages
+    # must equal the frozen composition — a spec rewritten under the same
+    # version conflicts on the first replayed decision instead of silently
+    # recomposing. Absent pins nothing, keeping hosts that compose manually
+    # (and chains committed before this binding) replayable byte-for-byte.
+    harness: HarnessSpec | None = None
     # Host-level stop reasons consulted between actions (before any claim)
     # and between turns; host reasons take precedence over the loop's own
     # cancel/deadline classification. Example: a durable input wait parked
@@ -261,6 +270,7 @@ class PortTurnResponderSource(TurnResponderSource):
         tool_definitions: dict[str, Any],
         base_refs: dict[str, Any],
         on_usage: Callable[[dict[str, Any]], None] | None = None,
+        pipeline: HarnessTurnPipeline | None = None,
     ) -> None:
         from hecate_runtime.port_decision_responder import PortDecisionResponder
 
@@ -271,6 +281,9 @@ class PortTurnResponderSource(TurnResponderSource):
         self._base_refs["model_snapshot"] = hashlib.sha256(canonical_json(self._config).encode()).hexdigest()
         self._base_refs["tool_snapshot"] = hashlib.sha256(canonical_json(self._tool_definitions).encode()).hexdigest()
         self._on_usage = on_usage
+        self._pipeline = pipeline
+        if pipeline is not None:
+            self._base_refs["harness_pipeline"] = pipeline.frozen_refs()
         # Freeze once: every turn's responder shares one config/tool
         # snapshot, and an invalid combination fails before any turn runs.
         PortDecisionResponder(
@@ -294,6 +307,7 @@ class PortTurnResponderSource(TurnResponderSource):
             tool_definitions=self._tool_definitions,
             expected_refs=input_refs,
             on_usage=self._on_usage,
+            pipeline=self._pipeline,
         )
 
 
@@ -374,6 +388,17 @@ class AgentController:
             # rewrite conflicts on the first replayed decision.
             frozen["acceptance_version"] = spec.acceptance.version
             frozen["acceptance_digest"] = spec.acceptance.sha256
+        if spec.harness is not None:
+            spec.harness.to_dict()
+            # The harness binding is identifiable per decision and binds the
+            # rendered input, not just the plan: base messages that drift
+            # from the frozen composition are a validation error before any
+            # turn runs, and a spec rewritten under the same version
+            # conflicts on the first replayed decision.
+            if canonical_json(base_messages) != canonical_json(spec.harness.compose_messages()):
+                raise DecisionValidationError("base_messages must equal the frozen harness composition")
+            frozen["harness_version"] = spec.harness.version
+            frozen["harness_digest"] = spec.harness.sha256
         # Stable causal order: by effective boundary, then given (durable
         # seq) order inside one boundary. Ids are unique — two revisions
         # can share a boundary, never an identity.
@@ -441,16 +466,30 @@ class AgentController:
                 "input_refs": json_copy(input_refs),
             }
             responder = self._source.responder_for(copy.deepcopy(messages), json_copy(input_refs))
-            outcome = await self._turn.run(
-                run_ref=spec.run_ref,
-                decision_step_id=step_id,
-                input_refs=input_refs,
-                ownership=spec.ownership,
-                context=spec.context,
-                execution_context=spec.execution_context,
-                responder=responder,
-                should_stop=should_stop,
-            )
+            try:
+                outcome = await self._turn.run(
+                    run_ref=spec.run_ref,
+                    decision_step_id=step_id,
+                    input_refs=input_refs,
+                    ownership=spec.ownership,
+                    context=spec.context,
+                    execution_context=spec.execution_context,
+                    responder=responder,
+                    should_stop=should_stop,
+                )
+            except ModelCallRejectedError as exc:
+                # A guard refused this turn's model call: the turn commits
+                # no decision (a canned refusal is never an accepted model
+                # output), and the loop classifies the stop instead of
+                # crashing — the rejected turn re-attempts on a re-entry.
+                yield self._terminal(
+                    _STOPPED,
+                    committed,
+                    turn_index - 1,
+                    reason=exc.reason if exc.stage == "context" else "model_call_rejected",
+                    detail=f"{exc.stage}: {exc.reason}",
+                )
+                return
             committed.append(step_id)
             if outcome.is_final_answer:
                 final = AgentControllerOutcome(
@@ -516,7 +555,9 @@ class AgentController:
             return f"action_{last.status}"
         return None
 
-    def _terminal(self, event_type: str, committed: list[str], turns: int, *, reason: str) -> dict[str, Any]:
+    def _terminal(
+        self, event_type: str, committed: list[str], turns: int, *, reason: str, detail: str | None = None
+    ) -> dict[str, Any]:
         outcome = AgentControllerOutcome(
             state="stopped",
             reason=reason,
@@ -524,7 +565,10 @@ class AgentController:
             turns=turns,
             decision_step_ids=tuple(committed),
         )
-        return {"type": event_type, "reason": reason, "outcome": outcome.to_dict()}
+        event: dict[str, Any] = {"type": event_type, "reason": reason, "outcome": outcome.to_dict()}
+        if detail is not None:
+            event["detail"] = detail
+        return event
 
 
 def text_or_none(outcome: AgentTurnOutcome) -> str | None:

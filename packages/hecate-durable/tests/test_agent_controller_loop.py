@@ -76,19 +76,31 @@ async def test_full_loop_advances_on_real_feedback(database, tmp_path) -> None:
     assert len(backend.list_run_actions(SQL_RUN)) == 2
 
 
-async def test_crash_after_turn2_decision_recovers_in_new_process(database, tmp_path) -> None:
+@pytest.mark.parametrize(
+    "harness_declaration",
+    [None, {"version": 1, "sections": [{"type": "memory", "content": {"facts": ["frozen policy"]}}]}],
+    ids=["legacy", "harness"],
+)
+async def test_crash_after_turn2_decision_recovers_in_new_process(database, tmp_path, harness_declaration) -> None:
     """Hard crash after turn 2's commit: recovery replays and finishes."""
     backend, _clock, _url = database
     owner = prepare_decision_run(backend, RUN)
     effect = tmp_path / "loop-effects.txt"
 
-    crashed = _run_probe(_config(backend, owner), "crash-after-decision", effect)
+    config = json.loads(_config(backend, owner))
+    if harness_declaration is not None:
+        config["harness"] = harness_declaration
+    serialized = json.dumps(config)
+    crashed = _run_probe(serialized, "crash-after-decision", effect)
     assert crashed.returncode == 9, crashed.stderr
     assert _effects(effect) == ["effect-loop-a1"]  # turn 1's action ran; turn 2 never dispatched
     committed = await SqlAcceptedDecisionStore(backend).lookup(RUN, "agent-turn-000002")
     assert committed is not None and committed.accepted_at  # the crash point is durable
+    if harness_declaration is not None:
+        assert committed.input_refs["harness_version"] == harness_declaration["version"]
+        assert committed.input_refs["harness_digest"]
 
-    recovered = _run_probe(_config(backend, owner), "recover", effect)
+    recovered = _run_probe(serialized, "recover", effect)
     assert recovered.returncode == 0, recovered.stderr
     result = json.loads(recovered.stdout)
     assert result["state"] == "final_answer" and result["final_text"] == "the loop answer"

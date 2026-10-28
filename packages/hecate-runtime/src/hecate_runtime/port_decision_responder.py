@@ -18,6 +18,7 @@ from typing import Any
 
 from hecate_runtime.accepted_decision import AcceptedAction, DecisionValidationError, RunRef, canonical_json
 from hecate_runtime.decision_step import KIND_ACTIONS, KIND_FINAL_ANSWER, DecisionProposal, DecisionResponder
+from hecate_runtime.harness_turn import HarnessTurnPipeline, ModelCallRejectedError
 from hecate_runtime.ports import RuntimePort
 from hecate_runtime.tool_side_effects import classify
 
@@ -39,6 +40,12 @@ class PortDecisionResponder(DecisionResponder):
         on_usage: Optional synchronous observer of the final reported usage
             on a valid response. It must not perform a second settlement.
             Invalid/interrupted attempts remain accounted for by the port.
+        pipeline: Optional per-turn harness pipeline — pre-call guards
+            (which may reject), context projection, provider shaping and
+            output governance — applied inside :meth:`respond`. The frozen
+            snapshot this responder validates stays the controller-handed
+            messages and references; the pipeline only shapes what the
+            port is invoked with and what survives governance.
     """
 
     def __init__(
@@ -50,6 +57,7 @@ class PortDecisionResponder(DecisionResponder):
         tool_definitions: dict[str, Any],
         expected_refs: dict[str, Any],
         on_usage: Callable[[dict[str, Any]], None] | None = None,
+        pipeline: HarnessTurnPipeline | None = None,
     ) -> None:
         if not isinstance(messages, list) or any(not isinstance(message, dict) for message in messages):
             raise DecisionValidationError("messages must be a list of JSON objects")
@@ -71,6 +79,7 @@ class PortDecisionResponder(DecisionResponder):
         self._tool_names = frozenset(tool_map)
         self._port = port
         self._on_usage = on_usage
+        self._pipeline = pipeline
 
     @classmethod
     def for_turn_messages(
@@ -82,6 +91,7 @@ class PortDecisionResponder(DecisionResponder):
         tool_definitions: dict[str, Any],
         expected_refs: dict[str, Any],
         on_usage: Callable[[dict[str, Any]], None] | None = None,
+        pipeline: HarnessTurnPipeline | None = None,
     ) -> PortDecisionResponder:
         """Build a responder whose frozen snapshot continues a projected turn.
 
@@ -99,6 +109,7 @@ class PortDecisionResponder(DecisionResponder):
             tool_definitions=tool_definitions,
             expected_refs=expected_refs,
             on_usage=on_usage,
+            pipeline=pipeline,
         )
 
     async def respond(self, run_ref: RunRef, decision_step_id: str, input_refs: dict[str, Any]) -> DecisionProposal:
@@ -114,12 +125,29 @@ class PortDecisionResponder(DecisionResponder):
         final_tool_calls: list[dict[str, Any]] | None = None
         saw_tool_calls = False
         usage: dict[str, Any] | None = None
+        messages = json.loads(self._messages_json)
+        config = json.loads(self._config_json)
+        if self._pipeline is not None:
+            prepared = await self._pipeline.prepare(messages, config.get("tools") or [])
+            messages = prepared.messages
+            if prepared.stop_reason is not None:
+                raise ModelCallRejectedError("context", prepared.stop_reason)
+            visible_tools = self._tool_map(prepared.tools)
+            original_tools = self._tool_map(config.get("tools") or [])
+            if any(original_tools.get(name) != definition for name, definition in visible_tools.items()):
+                raise DecisionValidationError("pipeline tools must be a subset of the frozen snapshot")
+            if prepared.tools != config.get("tools"):
+                # Shaping may reorder or filter the provider-visible tool
+                # list; acceptance still validates against the frozen
+                # snapshot, and dispatch authorization is unchanged.
+                config = {**config, "tools": prepared.tools}
+        invocation_digest = (
+            hashlib.sha256(canonical_json({"messages": messages, "config": config}).encode("utf-8")).hexdigest()
+            if self._pipeline is not None
+            else None
+        )
         # Fresh copies keep provider mutations from changing future proposals.
-        async with aclosing(
-            self._port.llm_invoke_structured(
-                messages=json.loads(self._messages_json), config=json.loads(self._config_json)
-            )
-        ) as stream:
+        async with aclosing(self._port.llm_invoke_structured(messages=messages, config=config)) as stream:
             async for chunk in stream:
                 if not isinstance(chunk, dict):
                     raise DecisionValidationError("structured response chunks must be objects")
@@ -137,23 +165,34 @@ class PortDecisionResponder(DecisionResponder):
                     final_tool_calls = self._tool_call_snapshot(chunk_tool_calls)
                     saw_tool_calls = saw_tool_calls or bool(final_tool_calls)
 
+        if saw_tool_calls and not final_tool_calls:
+            raise DecisionValidationError("tool calls appeared in the stream but vanished from the final aggregation")
+        if self._pipeline is not None:
+            # Hooks consume the same provider-shaped response as the graph
+            # path; revalidate every governed call before forming actions.
+            calls = (
+                [{"type": "function", "function": dict(entry)} for entry in final_tool_calls]
+                if final_tool_calls is not None
+                else None
+            )
+            text, governed_calls = await self._pipeline.govern("".join(text_parts), calls, messages)
+            final_tool_calls = self._tool_call_snapshot(governed_calls) if governed_calls is not None else None
+            text_parts = [text]
+
+        accepted_output: dict[str, Any] = {"text": "".join(text_parts)}
+        if invocation_digest is not None:
+            accepted_output["harness_input_sha256"] = invocation_digest
         if final_tool_calls:
             actions = tuple(
                 self._action(run_ref, decision_step_id, position, entry)
                 for position, entry in enumerate(final_tool_calls)
             )
-            proposal = DecisionProposal(
-                accepted_output={"text": "".join(text_parts)}, actions=actions, kind=KIND_ACTIONS
-            )
+            proposal = DecisionProposal(accepted_output=accepted_output, actions=actions, kind=KIND_ACTIONS)
         else:
-            if saw_tool_calls:
-                raise DecisionValidationError(
-                    "tool calls appeared in the stream but vanished from the final aggregation"
-                )
             text = "".join(text_parts)
             if not text.strip():
                 raise DecisionValidationError("structured response carried neither tool calls nor nonblank text")
-            proposal = DecisionProposal(accepted_output={"text": text}, actions=(), kind=KIND_FINAL_ANSWER)
+            proposal = DecisionProposal(accepted_output=accepted_output, actions=(), kind=KIND_FINAL_ANSWER)
         if usage is not None and self._on_usage is not None:
             self._on_usage(usage)
         return proposal

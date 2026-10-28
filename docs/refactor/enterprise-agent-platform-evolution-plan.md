@@ -207,7 +207,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 
 | 已有资产 | 当前边界与后续责任 |
 |---|---|
-| `packages/hecate-runtime`、共享执行应用服务与 `hecate-runner` | 已有独立 wheel、共享装配及宿主；共享服务消费 `ExecutionDriver`，平台任务与 Runner 在显式启用 `controller_loop` 时装配同一无图 `AgentController`，其余既有图路径仍使用 Pregel，聊天执行仍有图专属调用。Controller 复用 `AgentTurn` 与真实动作反馈，输入修订在因果回合边界折叠且决策固定所消费的修订版本；共享版本化交付验收（声明摘要冻结、两宿主一致判定、终态同事务持久记录）已接入两宿主；Harness 语义组合层仍待交付 |
+| `packages/hecate-runtime`、共享执行应用服务与 `hecate-runner` | 已有独立 wheel、共享装配及宿主；共享服务消费 `ExecutionDriver`，平台任务与 Runner 在显式启用 `controller_loop` 时装配同一无图 `AgentController`，其余既有图路径仍使用 Pregel，聊天执行仍有图专属调用。Controller 复用 `AgentTurn` 与真实动作反馈，输入修订在因果回合边界折叠且决策固定所消费的修订版本；共享版本化交付验收（声明摘要冻结、两宿主一致判定、终态同事务持久记录）已接入两宿主；Harness 语义组合（声明式 sections、配置冻结、恢复绑定及回合内守卫/投影/shaping/输出治理管线）已接入两宿主，输入快照衔接仍待交付 |
 | 平台 builtin、`EntryExecutionService` 与聊天路径 | 多个入口已迁移，直接工具循环与图执行仍并存；step5d/G3 收口入口、事件与兼容性，不另造一套生命周期 |
 | `packages/hecate-durable` 与平台任务控制 | step6a—6f、决策接受、受控单动作/串行动作集合及最终回答的单回合恢复已交付；成功动作结果可显式续接模型输入，账本回填已补输出治理。显式启用的 Controller 已接入共享循环、声明式输出 Schema、平台版本化验收门禁与共享交付验收记录（随终态事务持久，无平行真源）；持久输入修订与跨进程唤醒已有技术验证（修订行与唤醒 CAS/回执同事务，权威写入方唯一）。完整任务验收、Plan Revision、通用 Child Run 及生产治理仍待增量验证 |
 | 语言中立执行契约、Deployment/Task/Run 模型 | 已有草案、隔离互操作和登记模型；登记成功不等于部署获准执行或取得治理等级 |
@@ -238,7 +238,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | step2 | ADR-037、定位/架构、相关主 specs 与规划数据对齐已交付；移除整项“待同步”，后续只同步新增切片 |
 | step3 | `ExecutionDriver`、决策/动作、Controller 输入修订与版本化交付验收已有实际消费；完整目标修订、文件及通用子执行契约继续开放 |
 | step4 | 身份、Deployment、Task/Run 登记沿用；登记不等于受管准入或完整目标/验收版本模型 |
-| step5 | 无图单回合与输入投影沿用；显式启用的 Controller 已接入共享自动循环、平台任务与 Runner、持久输入修订及共享版本化交付验收；Harness 语义组合层与完整入口收敛仍待交付 |
+| step5 | 无图单回合与输入投影沿用；显式启用的 Controller 已接入共享自动循环、平台任务与 Runner、持久输入修订、共享版本化交付验收及 Harness 语义组合（配置冻结、恢复绑定与回合内管线）；输入快照衔接与完整入口收敛仍待交付 |
 | step6 | 决策接受、模型 responder、受控派发、串行恢复及 `AgentTurn` 已交付；显式启用的 Controller 已接入持久继续位置（接受决策链）、输入等待/唤醒、持久输入修订与共享交付验收记录；共同语义的生产认证仍开放 |
 | step7 | 无图 `ToolCallExecutor` 已交付，补记账本回填的 PostTool 输出治理；保留治理 profile、旁路、预算和跨执行方式完整认证 |
 | step8 | 继续撤销，不恢复外部 Runtime 接入任务 |
@@ -316,7 +316,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 
 step11 拆为最小发布门禁和多能力组合发布：平台版本评测门禁及凭据已可独立复用，执行部署启用仍须满足 step7 对应治理；组合发布随实际启用的 step9/10 能力扩展。最小绑定记录只记录已使用的实现、配置摘要与版本，不依赖第三方 Memory 迁移完成。step16 是贯穿式质量工作包，生产支持按范围授予；step15、step17、step18 按条件启动，不阻塞基础平台的生产支持。step19 分批执行，不等待所有生态能力完成，也不一次性删除全部旧代码。
 
-**近期受管闭环路径：**复用 step2 已对齐的目标、step3 驱动接缝、step5e/6 已交付的共享多轮 Controller、持久输入修订与版本化交付验收，以及 step7 可信工具组件；下一步补 Harness 语义组合、无进展/受控续跑与完整目标修订，逐项验证 Workflow/Pregel 共同机制、局部 Plan 与双向父子组合。step5d 入口身份/事件/响应适配可并行，默认切流依赖新执行路径的恢复、治理及逐入口证据；Runner 复用同一能力。并行复用 step11 发布证据及 step14 观察/取消，补齐最小 step10/11/14 的剩余门槛与对应 step16，形成 M-A/I-Cb 的限定支持范围。I-Ca 单独验收，不作为受管闭环整体前置。
+**近期受管闭环路径：**复用 step2 已对齐的目标、step3 驱动接缝、step5e/6 已交付的共享多轮 Controller、持久输入修订、版本化交付验收与 Harness 语义组合（含回合内管线），以及 step7 可信工具组件；下一步补 Harness 输入快照衔接、无进展/受控续跑与完整目标修订，逐项验证 Workflow/Pregel 共同机制、局部 Plan 与双向父子组合。step5d 入口身份/事件/响应适配可并行，默认切流依赖新执行路径的恢复、治理及逐入口证据；Runner 复用同一能力。并行复用 step11 发布证据及 step14 观察/取消，补齐最小 step10/11/14 的剩余门槛与对应 step16，形成 M-A/I-Cb 的限定支持范围。I-Ca 单独验收，不作为受管闭环整体前置。
 
 上述为工作包内的连续切片，不新增必做 step5f，也不先造通用执行框架。闭环认证须在已交付组件上证明模型决策被接受、动作受控派发、最小交付/验收、停止与受控续跑、持久等待及 worker 重启后继续原执行；文件任务同时验证工作区/产物版本恢复。动态 Plan、异步 Child Run 和图组合按后续切片递增授予支持。每个切片同时给出自主行为、可靠性和结果证据，不将 Harness 与持久化拆成长期不相交的建设阶段。
 
@@ -422,8 +422,8 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 `step5e-durable-approval-continuation` 已为显式启用持久审批的内置任务记录 PostgreSQL worker 重启续跑证据：等待与 pending 绑定持久化，合法决定后在原 Run/会话继续，原审批与稳定动作 ID 保留；覆盖停车前成功写入、消费后领取前崩溃及相同参数新动作的再次审批，模型收到真实回执。跨进程时钟锚须由在线 SQL 权威重新核验，不延长原批准期限。真实模型补采保留原记录，gate=false、成本未知。审批决定经可信服务边界注入；新增企业审批 HTTP/UI、控制面进程重启、离线时钟信任及任意故障组合仍未认证。见[审批续跑复核](../../openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md)。
 
 - [x] 共享应用服务的驱动解耦、无图模型 responder、共享工具执行及可靠单回合组件已交付；详见 step3/6/7。`PortDecisionResponder` 已支持动作集合或无工具的非空最终回答，`AgentTurn` 接受并恢复对应输出；`project_turn_messages` 与 `for_turn_messages` 可显式续接成功动作回合，仍一次只处理指定决策步骤，不自动提交 Task 成功。
-- [x] 基于上述组件实现显式启用的 Runtime Agent Controller 多轮执行切片：自动推进多轮观察/决策、消费最终回答、持久等待/唤醒和声明式输出检查，平台任务与 Runner 装配同一实现，按 `ExecutionDriver` 接入；旧直连循环不因迁移而自动获得可靠性认证。输入等待/唤醒经持久输入修订闭环：修订与唤醒 CAS、等待消费及命令回执同事务提交，重放按真实因果顺序折叠且每个决策固定所消费的修订版本，跨多次等待/补充/重启不丢失、不重复、不重问；历史记录缺失或损坏时显式停止待对账，不用最新快照猜测历史。交付验收共享版本化门禁：平台与 Runner 消费同一声明校验、交付检查与结果分类，完整声明摘要（版本+实际检查参数）冻结并由每个决策固定，同版本改写标准在重放时冲突停止待对账而非重评；验收记录关联 Task/Run 命名空间、最终决策身份及摘要、标准版本及摘要、交付内容摘要、检查器版本、逐项结果与可信宿主责任身份，随终态与既有 outbox 同事务提交；验收失败或未核验保留交付内容且不重做已完成动作，无验收声明的旧路径按 `not_declared` 记录、不宣称业务目标验收。Harness 语义组合层与输入快照衔接仍待交付。
-- [ ] 形成 Harness 语义组合层，复用已有 ContextEngine、processor、压缩、Skill、Memory 和 Middleware；规划、模型策略及语义扩展可配置，不把一套 Planner/Evaluator 或 Todo 固定为所有 Agent 必经步骤。上下文投影不删除恢复事实，模型能力提升后可替换或移除不再必要的策略。
+- [x] 基于上述组件实现显式启用的 Runtime Agent Controller 多轮执行切片：自动推进多轮观察/决策、消费最终回答、持久等待/唤醒和声明式输出检查，平台任务与 Runner 装配同一实现，按 `ExecutionDriver` 接入；旧直连循环不因迁移而自动获得可靠性认证。输入等待/唤醒经持久输入修订闭环：修订与唤醒 CAS、等待消费及命令回执同事务提交，重放按真实因果顺序折叠且每个决策固定所消费的修订版本，跨多次等待/补充/重启不丢失、不重复、不重问；历史记录缺失或损坏时显式停止待对账，不用最新快照猜测历史。交付验收共享版本化门禁：平台与 Runner 消费同一声明校验、交付检查与结果分类，完整声明摘要（版本+实际检查参数）冻结并由每个决策固定，同版本改写标准在重放时冲突停止待对账而非重评；验收记录关联 Task/Run 命名空间、最终决策身份及摘要、标准版本及摘要、交付内容摘要、检查器版本、逐项结果与可信宿主责任身份，随终态与既有 outbox 同事务提交；验收失败或未核验保留交付内容且不重做已完成动作，无验收声明的旧路径按 `not_declared` 记录、不宣称业务目标验收。Harness 上下文组合（两宿主共用声明式 sections、配置冻结、恢复绑定及回合内守卫/投影/shaping/输出治理管线）已交付，输入快照衔接仍待交付。
+- [ ] 形成 Harness 语义组合层，复用已有 ContextEngine、processor、压缩、Skill、Memory 和 Middleware；规划、模型策略及语义扩展可配置，不把一套 Planner/Evaluator 或 Todo 固定为所有 Agent 必经步骤。上下文投影不删除恢复事实，模型能力提升后可替换或移除不再必要的策略。`controller-harness-composition` 已交付基础切片：两宿主经共享 `agent_harness` 模块以声明式 sections 组合冻结基础输入（caller 语义 sections 加宿主从冻结事实派生的 persona/schema/task 段），`harness_version`/`harness_digest` 随每个决策固定且基础消息必须与冻结组合一致，同版本改写在重放时冲突停止待对账；无声明的既有提交保持原拼装逐字节重放。回合管线经共享 `harness_turn` 组合调用前守卫拒绝、上下文 processor 链投影、provider shaping 与输出治理：平台接 guardrail 链与 agent 版本冻结的 processor 策略，Runner 用默认策略链；上下文预算耗尽按 `token_capped` 停止且不提交最终回答，守卫拒绝按 `model_call_rejected` 分类停止且不提交决策，每个决策固定管线版本与 processor 参数，接受输出保存实际传给模型 port 的消息和配置摘要；已提交回合重放不经管线。显式 offload 与 durable compaction 配置尚未接入所需存储，当前拒绝；规划、模型策略配置化与 Skill/Memory 动态装载（当前 sections 为静态快照）仍待交付。
 - [x] 复用 step6/7 已交付的决策/动作持久化、真实回执与单回合恢复，打通跨回合继续位置、持久等待/唤醒及共享 Controller 循环技术切片（含输入修订历史与恢复绑定 `agent-loop/1`，不重新解释已有决策摘要）；再递增计划与组合能力，不将普通内存 while 视为新执行内核。
 - [ ] 扩展已交付的声明式交付验收与完成控制：共享检查器已支持 `output_schema`、`content_contains`，区分 `passed/acceptance_failed/acceptance_unverified/not_declared`；后续依据当前目标/标准、真实结果和产物版本判断完成，并补无进展检测及业务确认。内容包含检查和 Schema 通过不代表业务目标满足，不把合法轮询等同死循环。Goal Evaluator 可选，不能仅由模型自报成功推进 Task。
 - [ ] 自动续跑记录触发原因、次数、进度依据及继续位置，沿用 Task 累计预算和原期限；评估调用本身计入用量。重启不清零，取消/撤权后不得由 evaluator 重新激活；最小状态接口可观察续跑，不将内部控制消息冒充用户新指令。
@@ -436,7 +436,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 **交付与验收：**独立 wheel 在无源码、无平台管理库环境安装；按 profile 声明支持/未支持能力。5e 原型可与 step7 并行，生产启用依赖 step6/7、最小 step10/11 及 step16；不得以固定计划预览替代自主 Agent 认证，也不因新增目标抹去既有预览交付。
 
-**证据与回退：**[入口复核](step5-review-report.md)、[执行链复核](step5-execution-review-report.md)、[共享应用服务交付](../../openspec/changes/archive/2026-10-06-runner-contract-shared-service/tasks.md)。后者更新了早期报告中 5c 的共享服务缺口。新增实现见[Controller](../../packages/hecate-runtime/src/hecate_runtime/agent_controller.py)与[共享交付验收](../../packages/hecate-runtime/src/hecate_runtime/delivery_acceptance.py)；验证入口见[持久循环故障测试](../../packages/hecate-durable/tests/test_agent_controller_loop.py)、[平台循环](../../tests/test_execution/test_controller_loop_dispatch.py)、[平台验收](../../tests/test_execution/test_delivery_acceptance_dispatch.py)及[Runner 循环/验收](../../packages/hecate-runner/tests/test_controller_loop.py)。这些确定性组件与宿主测试不授予真实模型质量或生产组合认证。路由只切新任务，活跃 Run 保留原绑定；影子验证不双执行外部写入，降级不得省略身份、账本或审计。
+**证据与回退：**[入口复核](step5-review-report.md)、[执行链复核](step5-execution-review-report.md)、[共享应用服务交付](../../openspec/changes/archive/2026-10-06-runner-contract-shared-service/tasks.md)。后者更新了早期报告中 5c 的共享服务缺口。新增实现见[Controller](../../packages/hecate-runtime/src/hecate_runtime/agent_controller.py)、[共享交付验收](../../packages/hecate-runtime/src/hecate_runtime/delivery_acceptance.py)与[共享 Harness 组合](../../packages/hecate-runtime/src/hecate_runtime/agent_harness.py)；验证入口见[持久循环故障测试](../../packages/hecate-durable/tests/test_agent_controller_loop.py)、[平台循环](../../tests/test_execution/test_controller_loop_dispatch.py)、[平台验收](../../tests/test_execution/test_delivery_acceptance_dispatch.py)、[Harness 组合](../../packages/hecate-runtime/tests/test_agent_harness.py)及[Runner 循环/验收](../../packages/hecate-runner/tests/test_controller_loop.py)。这些确定性组件与宿主测试不授予真实模型质量或生产组合认证。路由只切新任务，活跃 Run 保留原绑定；影子验证不双执行外部写入，降级不得省略身份、账本或审计。
 
 ### step6 — 持久任务、控制命令与治理事件
 

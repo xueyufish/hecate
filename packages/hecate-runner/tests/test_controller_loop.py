@@ -731,7 +731,8 @@ def _tool_indexes(messages: list[dict]) -> list[int]:
 
 
 @pytest.mark.parametrize("with_prompt", [True, False], ids=["prompt", "structured-input"])
-async def test_two_input_wakes_preserve_history_order_and_effects(tmp_path, with_prompt) -> None:
+@pytest.mark.parametrize("declared_harness", [False, True], ids=["legacy", "harness"])
+async def test_two_input_wakes_preserve_history_order_and_effects(tmp_path, with_prompt, declared_harness) -> None:
     """Two waits, two wakes: both values reach the model in causal order."""
     profile_dir = write_profile(
         tmp_path,
@@ -815,6 +816,8 @@ async def test_two_input_wakes_preserve_history_order_and_effects(tmp_path, with
         harness = _Harness(profile_dir, api)
         engine = harness.engine
         submitted_input = {"input": {"prompt" if with_prompt else "task": "regional tier stock"}}
+        if declared_harness:
+            submitted_input["harness"] = {}
         run_id, state = await engine.submit("app-reader", submitted_input, ("domain_a",))
         assert state is not None
 
@@ -1261,4 +1264,170 @@ async def test_rewritten_standard_after_lost_terminal_commit_reconciles(loop_pro
             await fresh.engine.close()
             fresh.durable.store.dispose()
         harness.durable.store.dispose()
+        await model.stop()
+
+
+_DECLARED_HARNESS = {
+    "version": 4,
+    "sections": [
+        {"type": "persona", "content": "You are the warehouse operator."},
+        {"type": "instructions", "content": "Check the ledger before answering."},
+        {"type": "memory", "content": {"policy": "EU stock rules"}},
+    ],
+}
+
+
+async def test_declared_harness_composes_base_and_pins_the_binding(tmp_path, loop_profile, monkeypatch) -> None:
+    """Caller sections compose the frozen base; the digest rides every decision."""
+    api = _BusinessApi()
+    import hecate_runtime.context_shaping as shaping
+
+    shape_context = shaping.shape_context
+    shaping_models: list[str] = []
+
+    def recording_shape(messages, tools, model):
+        shaping_models.append(model)
+        return shape_context(messages, tools, model)
+
+    monkeypatch.setattr(shaping, "shape_context", recording_shape)
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "H-1"}, json.dumps("done"))
+    await model.start()
+    try:
+        config = json.loads((loop_profile / "runner.json").read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        (loop_profile / "runner.json").write_text(json.dumps(config), encoding="utf-8")
+        harness = _Harness(loop_profile, api)
+        run_id, state = await harness.engine.submit(
+            "app-reader",
+            {"prompt": "check stock", "harness": _DECLARED_HARNESS, "output_schema": {"type": "string"}},
+            ("domain_a",),
+        )
+        assert state is not None
+        final = await harness.engine.wait_for(run_id)
+        assert final.status == "succeeded"
+        # The model's first request saw the declared sections in order, then
+        # the task input as the final base message.
+        first_messages = model.requests[0]["messages"]
+        assert first_messages == [
+            {"role": "system", "content": "You are the warehouse operator."},
+            {"role": "system", "content": "Check the ledger before answering."},
+            {"role": "system", "content": '{"memory":{"policy":"EU stock rules"}}'},
+            {"role": "system", "content": 'Return final output as JSON satisfying this schema: {"type": "string"}'},
+            {"role": "user", "content": "check stock"},
+        ]
+        assert shaping_models == ["endpoint", "endpoint"]
+        # The committed decision pins the frozen composition identity.
+        from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+        from hecate_runtime.accepted_decision import RunRef
+
+        durable_run = harness.durable.store.run_for_task(final.task_ref)
+        decision = await SqlAcceptedDecisionStore(harness.durable.store).lookup(
+            RunRef(durable_run.issuer_domain, durable_run.id), "agent-turn-000001"
+        )
+        assert decision is not None
+        assert decision.input_refs["harness_version"] == 4
+        assert decision.input_refs["harness_digest"]
+    finally:
+        await model.stop()
+
+
+@pytest.mark.parametrize(
+    ("harness_block", "match"),
+    [
+        ({"sections": [{"type": "planner", "content": "be smart"}]}, "unknown harness section type"),
+        ({"sections": [{"type": "task", "content": [{"role": "user", "content": "x"}]}]}, "cannot author"),
+        ({"version": 0}, "positive integer"),
+    ],
+)
+async def test_invalid_harness_declaration_is_rejected_before_submission(loop_profile, harness_block, match) -> None:
+    """A malformed composition admits no execution in the runner either."""
+    harness = _Harness(loop_profile, _BusinessApi())
+    try:
+        with pytest.raises(ValueError, match=match):
+            await harness.engine.submit("app-reader", {"prompt": "check", "harness": harness_block}, ("domain_a",))
+        assert harness.durable.store.list_tasks() == []
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+
+
+async def test_harness_requires_the_controller_loop_binding(tmp_path) -> None:
+    """The fixed-plan profile refuses a harness declaration at admission."""
+    profile_dir = write_profile(
+        tmp_path, durable={"database_url": f"sqlite:///{tmp_path / 'fixed-plan.db'}", "workspace": "ws-a"}
+    )
+    harness = _Harness(profile_dir, _BusinessApi())
+    try:
+        with pytest.raises(ValueError, match="requires the controller loop"):
+            await harness.engine.submit("app-reader", {"prompt": "check", "harness": _DECLARED_HARNESS}, ("domain_a",))
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+
+
+class _HugeResultApi(_BusinessApi):
+    """Business double returning an oversized tool result envelope."""
+
+    async def __call__(self, tool_name: str, arguments: dict, principal: str, domains: list[str]) -> dict:
+        self.calls.append({"tool": tool_name, "arguments": dict(arguments), "principal": principal})
+        return {"status": "ok", "result": "x" * 20000}
+
+
+@pytest.mark.parametrize("declared", [False, True], ids=["legacy", "harness"])
+async def test_oversized_tool_result_is_projected_truncated_for_the_model(tmp_path, loop_profile, declared) -> None:
+    """The per-turn context chain truncates the governed result the model re-reads."""
+    api = _HugeResultApi()
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "H-1"}, "done")
+    await model.start()
+    try:
+        config = json.loads((loop_profile / "runner.json").read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        (loop_profile / "runner.json").write_text(json.dumps(config), encoding="utf-8")
+        harness = _Harness(loop_profile, api)
+        run_input = {"prompt": "check stock", **({"harness": {}} if declared else {})}
+        run_id, state = await harness.engine.submit("app-reader", run_input, ("domain_a",))
+        assert state is not None
+        final = await harness.engine.wait_for(run_id)
+        assert final.status == "succeeded"
+        # The second model request re-read the tool result through the
+        # context chain's projection: over the 2000-token tool-result limit,
+        # the content is capped and marked, never silently passed whole.
+        second_messages = model.requests[1]["messages"]
+        tool_messages = [m for m in second_messages if m.get("role") == "tool"]
+        assert tool_messages
+        if declared:
+            assert tool_messages[0]["content"].endswith("\n[... truncated]")
+            assert len(tool_messages[0]["content"]) <= 8100
+        else:
+            assert len(tool_messages[0]["content"]) >= 20000
+    finally:
+        await model.stop()
+
+
+async def test_harness_context_cap_never_accepts_a_runner_final_answer(loop_profile) -> None:
+    """A pinned system context that exceeds the budget stops without model work."""
+    api = _BusinessApi()
+    model = _ScriptedModelServer("query_inventory", {}, "must not be accepted")
+    await model.start()
+    harness = None
+    try:
+        path = loop_profile / "runner.json"
+        config = json.loads(path.read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        path.write_text(json.dumps(config), encoding="utf-8")
+        harness = _Harness(loop_profile, api)
+        run_id, state = await harness.engine.submit(
+            "app-reader",
+            {"prompt": "task", "harness": {"sections": [{"type": "instructions", "content": "x" * 40000}]}},
+            ("domain_a",),
+        )
+        assert state is not None
+        final = await harness.engine.wait_for(run_id)
+        assert final.status == "failed" and final.error is not None
+        assert "token_capped" in final.error
+        assert final.result_ref is None and model.requests == [] and api.calls == []
+    finally:
+        if harness is not None:
+            await harness.engine.close()
+            harness.durable.store.dispose()
         await model.stop()

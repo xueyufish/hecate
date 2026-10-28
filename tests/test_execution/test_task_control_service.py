@@ -754,3 +754,46 @@ async def test_stale_expected_revision_rejects_cancel_without_effect(harness, mo
         )
         assert issued.record.state is CommandState.REJECTED
         assert harness["store"].get_task_state(result.task_ref).lifecycle_state is TaskLifecycleState.WAITING_INPUT
+
+
+async def test_bare_background_dispatch_opens_a_private_session(harness, monkeypatch):
+    """Without a worker or a session factory, a background dispatch never
+    drives the caller's request session.
+
+    The bare fallback used to reuse ``self._db`` — the spawning request's
+    session — so the request's teardown commit raced the dispatch's SQL on
+    that shared session ("prepared" state), stranding RUNNING tasks behind
+    the workflow-callback wakes. The background trigger must open its own
+    session on the same engine instead.
+    """
+    import hecate.execution.task_control as task_control_module
+
+    held: list[Any] = []
+    monkeypatch.setattr(task_control_module, "_spawn_background", held.append)
+    stub = _EntryStub("background reply")
+    stub.patch()
+    try:
+        async with harness["session_factory"]() as db:
+            service = TaskControlService(
+                db,
+                store=harness["suite"].store,
+                recorder=harness["suite"].recorder,
+                backend="postgres",
+                ledger_source="core",
+                dispatcher=_dispatcher(harness),
+            )
+            captured: dict[str, Any] = {}
+
+            async def _capture(t_ref, *, db=None):
+                captured["db"] = db
+
+            monkeypatch.setattr(service, "_dispatch_now", _capture)
+            result = await _submit(harness, db, service)
+            assert result.lifecycle_state == "queued"
+            assert held, "background trigger must have been scheduled"
+            await held[0]
+            assert captured["db"] is not None
+            assert captured["db"] is not db  # never the caller's session
+            assert captured["db"].bind is db.bind  # same engine, private session
+    finally:
+        stub.unpatch()

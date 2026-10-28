@@ -33,6 +33,7 @@ from hecate_runtime.agent_controller import (
     TurnResponderSource,
     decision_step_id_for_turn,
 )
+from hecate_runtime.agent_harness import HarnessSection, HarnessSpec
 from hecate_runtime.agent_turn import AgentTurn
 from hecate_runtime.decision_step import KIND_FINAL_ANSWER, DecisionProposal, DecisionResponder
 from hecate_runtime.errors import ApprovalWaitSignal
@@ -128,10 +129,10 @@ def _controller(
     return AgentController(AgentTurn(store, ScriptedResponder(), executor), source)
 
 
-def _spec(run_ref=None, **kwargs) -> ControllerRunSpec:
+def _spec(run_ref=None, base_messages=None, **kwargs) -> ControllerRunSpec:
     return ControllerRunSpec(
         run_ref=run_ref or _run_ref(),
-        base_messages=[{"role": "user", "content": "check the stock"}],
+        base_messages=base_messages if base_messages is not None else [{"role": "user", "content": "check the stock"}],
         ownership=STUB_OWNER,
         **kwargs,
     )
@@ -720,3 +721,164 @@ async def test_same_revision_identity_cannot_rewrite_consumed_content() -> None:
     with pytest.raises(DecisionConflictError):
         await _controller(store, LoopScriptedSource({}), port, ledger).run(_spec(run_ref, input_revisions=changed))
     assert port.calls == []
+
+
+def _harness_for(base_messages: list[dict[str, Any]]) -> HarnessSpec:
+    """A minimal declared composition that renders exactly ``base_messages``."""
+    return HarnessSpec(1, (HarnessSection("task", base_messages),))
+
+
+async def test_harness_binding_pins_version_and_digest_on_every_decision() -> None:
+    """A declared composition rides every turn's input_refs, verifiable per decision."""
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    seen: list[dict[str, Any]] = []
+
+    class RecordingSource(LoopScriptedSource):
+        def responder_for(self, messages, input_refs):
+            seen.append(dict(input_refs))
+            return super().responder_for(messages, input_refs)
+
+    base = [{"role": "user", "content": "check the stock"}]
+    harness = _harness_for(base)
+    await _controller(store, RecordingSource({(0, ""): _final("done")}), port).run(
+        _spec(base_messages=base, harness=harness)
+    )
+    assert seen[0]["harness_version"] == 1
+    assert seen[0]["harness_digest"] == harness.sha256
+
+
+async def test_harness_absent_pins_nothing_keeping_pre_binding_replays() -> None:
+    """No declaration means no harness keys: chains committed before the
+    binding keep replaying byte-for-byte."""
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    seen: list[dict[str, Any]] = []
+
+    class RecordingSource(LoopScriptedSource):
+        def responder_for(self, messages, input_refs):
+            seen.append(dict(input_refs))
+            return super().responder_for(messages, input_refs)
+
+    await _controller(store, RecordingSource({(0, ""): _final("done")}), port).run(_spec())
+    assert "harness_version" not in seen[0]
+    assert "harness_digest" not in seen[0]
+
+
+async def test_base_messages_must_equal_the_frozen_composition() -> None:
+    """The rendered input cannot drift from the composition it is pinned to."""
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    composed = [{"role": "system", "content": "You are a helper."}, {"role": "user", "content": "task"}]
+    harness = HarnessSpec(
+        1,
+        (
+            HarnessSection("persona", "You are a helper."),
+            HarnessSection("task", [{"role": "user", "content": "task"}]),
+        ),
+    )
+    with pytest.raises(DecisionValidationError, match="frozen harness composition"):
+        await _controller(store, LoopScriptedSource({}), port).run(_spec(base_messages=composed[:-1], harness=harness))
+    assert port.calls == []
+
+
+async def test_declared_harness_replays_with_zero_fresh_work() -> None:
+    """A committed bound chain restores under the same composition."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    base = [{"role": "user", "content": "check the stock"}]
+    harness = _harness_for(base)
+    first = await _controller(store, LoopScriptedSource({(0, ""): _final("partial")}), port, ledger).run(
+        _spec(run_ref, base_messages=base, harness=harness, limits=ControllerLimits(max_turns=2))
+    )
+    assert first.is_final_answer
+
+    recovery = LoopScriptedSource({})  # any fresh decision attempt must fail the test
+    fresh_port = StubToolPort()
+    second = await _controller(store, recovery, fresh_port, ledger).run(
+        _spec(run_ref, base_messages=base, harness=harness, limits=ControllerLimits(max_turns=2))
+    )
+    assert second.is_final_answer and second.final_text == "partial"
+    assert recovery.model_asks == []  # the committed decision restored, zero model calls
+
+
+async def test_harness_rewrite_under_same_version_conflicts_on_replay() -> None:
+    """A rewritten composition re-presenting turn 1 is an explicit conflict."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    base = [{"role": "user", "content": "check the stock"}]
+    await _controller(store, LoopScriptedSource({(0, ""): _final("done")}), port, ledger).run(
+        _spec(run_ref, base_messages=base, harness=_harness_for(base), limits=ControllerLimits(max_turns=1))
+    )
+    rewritten = HarnessSpec(
+        1,
+        (
+            HarnessSection("persona", "You are someone else."),
+            HarnessSection("task", [{"role": "user", "content": "check the stock"}]),
+        ),
+    )
+    rewritten_messages = rewritten.compose_messages()
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, LoopScriptedSource({}), StubToolPort(), ledger).run(
+            _spec(run_ref, base_messages=rewritten_messages, harness=rewritten, limits=ControllerLimits(max_turns=1))
+        )
+
+
+async def test_rejected_model_call_classifies_stop_without_committing() -> None:
+    """A guard-refused turn commits nothing and classifies a stop."""
+    from hecate_runtime.harness_turn import ModelCallRejectedError
+
+    class RejectingSource(LoopScriptedSource):
+        def responder_for(self, messages, input_refs):
+            class _Rejecting(DecisionResponder):
+                async def respond(self, run_ref, decision_step_id, refs) -> DecisionProposal:
+                    raise ModelCallRejectedError("pre_llm", "prompt injection suspected")
+
+            return _Rejecting()
+
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    events: list[dict[str, Any]] = []
+    outcome = await _controller(store, RejectingSource({}), port).run(_spec(), emit=events.append)
+    assert outcome.state == "stopped"
+    assert outcome.reason == "model_call_rejected"
+    assert outcome.decision_step_ids == ()  # the refused turn committed nothing
+    assert store.lookup_calls >= 1 and port.calls == []
+    terminal = [event for event in events if event["type"] == "controller/stopped"][-1]
+    assert terminal["detail"] == "pre_llm: prompt injection suspected"
+
+
+async def test_projection_policy_replay_skips_pipeline_and_conflicts_on_policy_drift() -> None:
+    from hecate_runtime.context_policy import ContextChainFactory
+    from hecate_runtime.harness_turn import HarnessTurnPipeline
+
+    class ModelPort(StubToolPort):
+        """Return a final answer and count fresh model calls."""
+
+        async def llm_invoke_structured(self, messages, config):
+            self.model_calls = getattr(self, "model_calls", 0) + 1
+            yield {"content": "done"}
+
+    class ReplayPipeline(HarnessTurnPipeline):
+        """Fail if recovery attempts to project an accepted decision."""
+
+        async def prepare(self, messages, tools):
+            raise AssertionError("accepted decisions must not run the pipeline")
+
+    def source(port, policy, *, replay=False):
+        pipeline_type = ReplayPipeline if replay else HarnessTurnPipeline
+        return PortTurnResponderSource(
+            port,
+            config={"model": "stub"},
+            tool_definitions={},
+            base_refs={},
+            pipeline=pipeline_type(context_chain=ContextChainFactory(agent_policy=policy), model="stub"),
+        )
+
+    store, port = InMemoryDecisionStore(), ModelPort()
+    spec = _spec()
+    initial = source(port, ["tool_result_truncation"])
+    first = await _controller(store, initial, port).run(spec)
+    assert first.is_final_answer and port.model_calls == 1
+    fresh = ModelPort()
+    replayed = await _controller(store, source(fresh, ["tool_result_truncation"], replay=True), fresh).run(spec)
+    assert replayed.final_text == "done" and not hasattr(fresh, "model_calls")
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, source(fresh, ["round_window"], replay=True), fresh).run(spec)
+    assert not hasattr(fresh, "model_calls")

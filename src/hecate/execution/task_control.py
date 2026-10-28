@@ -274,6 +274,7 @@ class TaskControlService:
             raise TaskControlValidationError("input.messages must be a non-empty list")
         if input.get("controller_loop") is True:
             from hecate_runtime.agent_controller import ControllerLimits
+            from hecate_runtime.agent_harness import validate_harness_declaration
 
             from hecate.core.output_schema import check_output_schema
 
@@ -288,8 +289,16 @@ class TaskControlService:
                         raise ValueError("output_schema must be an object")
                     check_output_schema(schema)
                 self._validate_acceptance_declaration(input.get("acceptance"))
+                # The platform derives persona, output schema and task
+                # sections from its own frozen facts; callers author only
+                # the semantic sections.
+                validate_harness_declaration(
+                    input.get("harness"), allowed_types=frozenset({"instructions", "skills", "memory"})
+                )
             except ValueError as exc:
                 raise TaskControlValidationError(str(exc)) from exc
+        elif input.get("harness") is not None:
+            raise TaskControlValidationError("input.harness requires controller_loop")
         agent = await self._db.get(AgentModel, agent_id)
         if agent is None or agent.deleted or agent.workspace_id != workspace_id:
             raise TaskControlNotFoundError(f"agent {agent_id} not found in workspace")
@@ -348,6 +357,16 @@ class TaskControlService:
             # The dispatcher freezes the references into every decision and
             # gates task success on the recorded acceptance evaluation.
             "acceptance": input.get("acceptance") if isinstance(input.get("acceptance"), dict) else None,
+            # Harness context composition: caller-authored semantic sections
+            # frozen verbatim, stamped even when empty so every new
+            # controller-loop task pins its composition digest on every
+            # decision. Tasks submitted before this binding carry no block
+            # and keep their manually composed base input byte-for-byte.
+            "harness": (
+                (input.get("harness") if isinstance(input.get("harness"), dict) else {"version": 1})
+                if input.get("controller_loop") is True
+                else None
+            ),
         }
         key = IdempotencyKey(
             key=idempotency_key or f"auto:{minted_task}",
@@ -468,7 +487,16 @@ class TaskControlService:
                 await self._worker.dispatch_once(t_ref)
                 return
             if self._session_factory is None:
-                await self._dispatch_now(t_ref)
+                # A background dispatch must never drive the caller's
+                # request session: its teardown commit races the dispatch's
+                # SQL on that shared session ("prepared" state). Without a
+                # bound worker or factory, open a private session on the
+                # same engine — pooled in production, shared-connection in
+                # the in-memory test setup, but never the request's session.
+                factory = async_sessionmaker(self._db.bind, class_=AsyncSession, expire_on_commit=False)
+                async with factory() as session:
+                    await self._dispatch_now(t_ref, db=session)
+                    await session.commit()
                 return
             async with self._session_factory() as session:
                 await self._dispatch_now(t_ref, db=session)
