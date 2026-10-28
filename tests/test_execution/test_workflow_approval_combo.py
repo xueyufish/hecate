@@ -692,3 +692,117 @@ async def test_invalid_child_output_after_approval_never_advances(harness, polic
     assert set(final.extra["_workflow_callbacks"]) == {"0"}
     assert {call["task"] for call in stub.calls} == {str(child_id)}, "next step must not execute"
     assert stub.side_effects == []
+
+
+# --- approval-wait expiry convergence (step6) -------------------------------------
+
+
+async def test_expired_child_wait_converges_parent_fail_policy(harness) -> None:
+    """A child whose approval wait expires converges the waiting parent
+    through the same verified callback path as a rejection — the parent
+    applies its declared on_failure policy without any user command."""
+
+    from datetime import UTC, datetime, timedelta
+
+    from hecate.execution.approval_wait_expiration import ApprovalWaitExpirer
+
+    parent_uuid, parent_ref, _parked, worker, stub = await _submit_workflow(harness)
+    child_id, child_ref = await _find_child(harness, parent_uuid, 0, worker=worker)
+    calls_before = len(stub.calls)
+
+    expirer = ApprovalWaitExpirer(
+        harness["store"], harness["session_factory"], clock=lambda: datetime.now(UTC) + timedelta(hours=2)
+    )
+    assert await expirer.expire_once() == 1
+
+    child_final = await asyncio.to_thread(harness["store"].get_task_state, child_ref)
+    assert child_final.lifecycle_state is TaskLifecycleState.FAILED
+    assert child_final.extra["result"]["error_category"] == "approval_wait_expired"
+    # Zero model/tool re-execution across the convergence.
+    assert len(stub.calls) == calls_before
+
+    parent_final = await _wait_for_state(harness, parent_ref, "failed", timeout=60.0, worker=worker)
+    assert parent_final.lifecycle_state.value == "failed"
+    parent_result = await _task_result(harness, parent_ref)
+    assert "approval_wait_expired" in str(parent_result.get("error")), parent_result
+
+    # A late approval decision + resume on the expired child cannot reopen
+    # anything: the consumed token and terminal child stand.
+    ref = child_final.extra["wait"]["contract_ref"]["approval_ref"]
+    await _decide(harness, ref, approved=True, reason="too late")
+    issued = await _issue_resume(
+        harness, child_id, child_final.extra["wait"]["wait_token"], worker, payload={"approval_ref": ref}
+    )
+    assert issued.record.state is CommandState.REJECTED
+    assert (
+        await asyncio.to_thread(harness["store"].get_task_state, child_ref)
+    ).lifecycle_state is TaskLifecycleState.FAILED
+    assert (
+        await asyncio.to_thread(harness["store"].get_task_state, parent_ref)
+    ).lifecycle_state is TaskLifecycleState.FAILED
+
+
+async def test_expired_child_wait_converges_parent_await_policy(harness) -> None:
+    """on_failure=await: the expired child routes the parent to reconciliation."""
+
+    from datetime import UTC, datetime, timedelta
+
+    from hecate.execution.approval_wait_expiration import ApprovalWaitExpirer
+
+    parent_uuid, parent_ref, _parked, worker, _stub = await _submit_workflow(harness, on_failure="await")
+    _child_id, child_ref = await _find_child(harness, parent_uuid, 0, worker=worker)
+
+    expirer = ApprovalWaitExpirer(
+        harness["store"], harness["session_factory"], clock=lambda: datetime.now(UTC) + timedelta(hours=2)
+    )
+    assert await expirer.expire_once() == 1
+    parent_final = await _wait_for_state(
+        harness, parent_ref, "reconciliation_required", "failed", timeout=60.0, worker=worker
+    )
+    assert parent_final.lifecycle_state.value == "reconciliation_required"
+
+
+async def test_expiry_parent_callback_loss_is_recovered_from_outbox(harness, monkeypatch) -> None:
+    """A lost direct callback never strands a parent after child expiry."""
+    from datetime import UTC, datetime, timedelta
+
+    from hecate_durable.worker import OutboxRelay
+
+    from hecate.execution.approval_wait_expiration import ApprovalWaitExpirer
+    from hecate.execution.event_relay import PlatformOutboxProjector
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    parent_id, parent_ref, _, worker, stub = await _submit_workflow(harness)
+    _, child_ref = await _find_child(harness, parent_id, 0, worker=worker)
+    calls_before = len(stub.calls)
+    original = PlatformTaskDispatcher._issue_child_callback
+    callback_calls = 0
+
+    async def lose_first(self, *args, **kwargs):
+        nonlocal callback_calls
+        callback_calls += 1
+        if callback_calls == 1:
+            raise RuntimeError("callback lost after child terminal commit")
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_issue_child_callback", lose_first)
+    expirer = ApprovalWaitExpirer(
+        harness["store"], harness["session_factory"], clock=lambda: datetime.now(UTC) + timedelta(hours=2)
+    )
+    assert await expirer.expire_once() == 1
+    assert (
+        await asyncio.to_thread(harness["store"].get_task_state, child_ref)
+    ).lifecycle_state is TaskLifecycleState.FAILED
+    assert (
+        await asyncio.to_thread(harness["store"].get_task_state, parent_ref)
+    ).lifecycle_state is TaskLifecycleState.WAITING_INPUT
+    relay = OutboxRelay(
+        harness["store"].session_factory,
+        PlatformOutboxProjector(harness["store"], harness["session_factory"]),
+        relay_key="expiry-callback-recovery",
+    )
+    await relay.pump_once()
+    final = await _wait_for_state(harness, parent_ref, "failed", timeout=30, worker=worker)
+    assert final.lifecycle_state is TaskLifecycleState.FAILED
+    assert callback_calls >= 2
+    assert len(stub.calls) == calls_before

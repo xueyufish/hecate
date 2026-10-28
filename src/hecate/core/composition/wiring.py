@@ -445,12 +445,20 @@ async def start_durable_worker(app: FastAPI) -> None:
     from hecate_durable.worker import DurableWorker, OutboxRelay
 
     from hecate.core.database import async_session_factory
+    from hecate.execution.approval_wait_expiration import ApprovalWaitExpirer
     from hecate.execution.event_relay import PlatformOutboxProjector
     from hecate.execution.task_dispatcher import PlatformTaskDispatcher
 
     store = suite.store
     dispatcher = PlatformTaskDispatcher(store, async_session_factory)
-    worker = DurableWorker(store, dispatcher, leases=store.leases)
+    worker = DurableWorker(
+        store,
+        dispatcher,
+        leases=store.leases,
+        # The platform's named wait reconciler: converges expired local
+        # approval waits on the worker's cycle (passive without a worker).
+        wait_reconciler=ApprovalWaitExpirer(store, async_session_factory).expire_once,
+    )
     relay = OutboxRelay(
         store.session_factory,
         PlatformOutboxProjector(store, async_session_factory),

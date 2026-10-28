@@ -108,6 +108,7 @@ class DurableWorker:
         backoff_base: float = 2.0,
         batch: int = 32,
         clock: Callable[[], datetime] | None = None,
+        wait_reconciler: Callable[[], Awaitable[int]] | None = None,
     ) -> None:
         self._store = store
         self._dispatcher = dispatcher
@@ -119,6 +120,9 @@ class DurableWorker:
         self._backoff_base = backoff_base
         self._batch = batch
         self._clock = clock or _utc_now
+        # Named consumer: the platform's approval-wait expirer. Unset by
+        # default — a bare durable worker keeps its exact prior behavior.
+        self._wait_reconciler = wait_reconciler
         self._draining = False
         self._inflight: set[str] = set()
         self._heartbeat_tasks: set[asyncio.Task[None]] = set()
@@ -216,6 +220,11 @@ class DurableWorker:
                 recovered += 1
                 if recovered >= self._batch:
                     break
+        if self._wait_reconciler is not None and not self._draining:
+            try:
+                dispatched += await self._wait_reconciler()
+            except Exception:  # noqa: BLE001 — one bad pass never kills the loop
+                logger.exception("wait reconciliation pass failed")
         return dispatched
 
     async def run_forever(self) -> None:
@@ -572,6 +581,12 @@ def _build_argument_parser() -> Any:
     parser.add_argument(
         "--relay-project", default=None, help="optional 'module:attribute' factory for the outbox projector"
     )
+    parser.add_argument(
+        "--wait-reconciler",
+        default=None,
+        help="optional 'module:attribute' factory for a wait-state reconciliation pass "
+        "(e.g. the platform approval-wait expirer); unset keeps prior behavior",
+    )
     parser.add_argument("--relay-key", default="default")
     parser.add_argument("--poll-interval", type=float, default=1.0)
     parser.add_argument("--lease-ttl", type=float, default=60.0)
@@ -604,6 +619,25 @@ def _main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"worker startup failed: dispatcher factory {args.dispatcher!r} could not be loaded: {exc}", flush=True)
         return 2
+    wait_reconciler = None
+    if args.wait_reconciler:
+        try:
+            reconciler_factory = _load_attr(args.wait_reconciler)
+            if callable(reconciler_factory):
+                import inspect
+
+                parameters = inspect.signature(reconciler_factory).parameters
+                wait_reconciler = reconciler_factory(store=store) if "store" in parameters else reconciler_factory()
+            else:
+                wait_reconciler = reconciler_factory
+            if not callable(wait_reconciler):
+                raise ValueError("wait reconciler factory must return a callable")
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"worker startup failed: wait reconciler {args.wait_reconciler!r} could not be loaded: {exc}",
+                flush=True,
+            )
+            return 2
     worker: DurableWorker = DurableWorker(
         store,
         dispatcher,
@@ -612,6 +646,7 @@ def _main(argv: list[str] | None = None) -> int:
         lease_ttl=args.lease_ttl,
         poll_interval=args.poll_interval,
         max_attempts=args.max_attempts,
+        wait_reconciler=wait_reconciler,
     )
     relay: OutboxRelay | None = None
     if args.relay_project:

@@ -126,3 +126,51 @@ def test_entry_fails_fast_on_bad_dispatcher_factory(tmp_path: Path) -> None:
     )
     assert proc.returncode == 2
     assert "dispatcher factory" in (proc.stdout + proc.stderr)
+
+
+def test_wait_reconciler_argument_defaults_off_and_parses() -> None:
+    """--wait-reconciler is optional; unset keeps the bare worker behavior."""
+
+    from hecate_durable.worker import DurableWorker, _build_argument_parser
+
+    args = _build_argument_parser().parse_args(["--dsn", "sqlite:///:memory:", "--dispatcher", "m:a"])
+    assert args.wait_reconciler is None
+
+    args = _build_argument_parser().parse_args(
+        [
+            "--dsn",
+            "sqlite:///:memory:",
+            "--dispatcher",
+            "m:a",
+            "--wait-reconciler",
+            "hecate.execution.approval_wait_expiration:standalone_expirer",
+        ]
+    )
+    assert args.wait_reconciler == "hecate.execution.approval_wait_expiration:standalone_expirer"
+
+    async def reconciler() -> int:
+        return 0
+
+    worker = DurableWorker(store=object(), dispatcher=object(), leases=object(), wait_reconciler=reconciler)
+    assert worker._wait_reconciler is reconciler
+
+
+async def test_draining_worker_does_not_start_wait_reconciliation() -> None:
+    """Draining stops expiry passes as well as new dispatch claims."""
+    from hecate_durable.worker import DurableWorker
+
+    class StubStore:
+        def list_tasks(self, states):
+            return []
+
+    called = False
+
+    async def reconciler() -> int:
+        nonlocal called
+        called = True
+        return 1
+
+    worker = DurableWorker(store=StubStore(), dispatcher=object(), leases=object(), wait_reconciler=reconciler)
+    worker.request_drain()
+    assert await worker.reconcile() == 0
+    assert called is False
