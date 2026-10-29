@@ -6,8 +6,9 @@ model decision the loop makes. The platform and Runner use the same section
 parser, renderer, decision binding and turn pipeline. This slice supports
 frozen context composition plus the per-turn semantic order — pre-call guard
 rejection, context processor projection, provider shaping and output
-governance; dynamic Skill/Memory loading and planner/model-strategy
-configuration are not part of the declaration.
+governance. Platform Controller tasks can additionally enable the governed Skill
+catalog described below. Dynamic Memory and planner/model-strategy configuration
+are not part of the declaration.
 
 ## Platform tasks
 
@@ -139,6 +140,68 @@ tool side), so stages 1 and 4 are pass-throughs on that host until it declares
 guard hooks. This slice does not certify model quality or production
 profiles, and the declared sections remain static snapshots: they do not load
 a Skill provider, query a Memory backend, or configure a planner.
+
+## Governed skill catalog (platform Controller opt-in)
+
+Submit `"controller_loop": true` and `"controller": {"skill_catalog": true}`
+to enable the platform capability. The flag must be a boolean. Existing tasks
+and submissions without the flag retain their previous Skill behavior.
+Caller-authored static `harness.skills` sections remain text snapshots and do
+not grant access to resources in this catalog.
+
+The first dispatch resolves the frozen AgentVersion's Skill names and reference
+manifest through the existing provider, auto-load, discovery and budget rules.
+It persists the rendered catalog and the renderer's structured selection before
+calling the model. Each selected resource binds its exact identity, workspace,
+rendered L2 bytes and complete content snapshot. Pinned resources additionally
+bind the selected version and its full snapshot digest; resources without an
+explicit version pin freeze the served live content, even if they have other
+published versions. In progressive mode, only auto-load content appears in full
+before an L2 request. The existing `SKILL_PROGRESSIVE_DISCLOSURE` escape hatch
+still applies when first freezing a new task: disabling it renders full admitted
+Skill blocks up front. That rendered choice is frozen too; changing the setting
+does not rewrite an existing catalog.
+
+`load_skill` uses the same task-bound loader through the actual builtin registry,
+including on Agents with no business tools. Budget-clipped and unadvertised
+names cannot be loaded; subsequent discovery, same-name provider overrides,
+live edits and newer versions cannot expand or rewrite the task's surface.
+Skill descriptions are never parsed to derive access rights. Missing or
+cross-workspace pins, mismatched hashes and malformed references refuse initial
+freezing without a model call; the opt-in path never falls back to live content.
+
+Every accepted decision binds the catalog's version and identity/content digest,
+alongside its existing Harness and actual model-input snapshot. Later dispatches
+reuse the committed catalog; an accepted chain with missing, soft-deleted,
+corrupt or differently owned catalog state stops for reconciliation. It does not
+rebuild the catalog from current data. Historical decisions and completed
+`load_skill` actions replay through their existing identities and ledger results,
+without another model call or content load.
+
+Freezing content does not freeze permission. Before each fresh model call and L2
+load, the platform checks the exact resource's current governance: deletion,
+`model_invocable`, plugin status and scope, and the applicable discovery policy
+and trust floor. Withdrawal of automatic exposure also refuses fresh exposure.
+A live denial stops execution; it does not silently replace the frozen catalog.
+Pinned version deletion or content corruption likewise refuses a fresh load.
+Stored historical facts remain intact, and replayed output retains the existing
+output-governance path.
+
+Skill `allowed_tools`, `scripts` and `references` do not install tools, execute
+scripts or widen permissions. Cancellation, deadlines, turn budgets, approval
+and input-wake rules remain in force. The Runner keeps its static Harness;
+dynamic Memory, script execution and a Runner Skill backend remain outside this
+platform capability.
+
+Deploy the Alembic schema upgrade before enabling the flag. Catalog rows are
+recovery state: downgrade refuses while any remain, including soft-deleted rows.
+Do not delete catalog rows to retry a task under a different Skill definition;
+submit a new task with the intended version instead.
+
+Validation uses deterministic model ports with actual Skill rows, rendering,
+registry/builtin loading, durable decisions and action results. A separate
+process verifies frozen builtin loading. These tests do not certify real-model
+quality, PostgreSQL concurrency or the complete cross-process failure matrix.
 
 ## No-progress protection (opt-in)
 

@@ -212,6 +212,9 @@ class _DispatchContext:
     controller_deadline: str | None = None
     controller_no_progress: dict[str, Any] | None = None
     controller_input_wait_timeout_seconds: float | None = None
+    # Explicit opt-in: freeze a governed skill catalog for this task
+    # before its first model call (absent keeps original semantics).
+    skill_catalog: bool = False
     output_schema: dict[str, Any] | None = None
     platform_run_id: str | None = None
     # Versioned acceptance declaration: the goal/standard version plus the
@@ -753,6 +756,7 @@ class PlatformTaskDispatcher:
             workflow_step=payload.get("workflow_step"),
             approval_wait=payload.get("approval_wait") is True,
             controller_loop=payload.get("controller_loop") is True,
+            skill_catalog=controller.get("skill_catalog") is True,
             controller_max_turns=controller.get("max_turns") if isinstance(controller.get("max_turns"), int) else None,
             controller_deadline=controller.get("deadline") if isinstance(controller.get("deadline"), str) else None,
             controller_no_progress=controller.get("no_progress"),
@@ -1115,8 +1119,62 @@ class PlatformTaskDispatcher:
         event_store = get_shared_event_store()
         tool_registry = None
         effective_tools: list[dict[str, Any]] = []
-        if tool_refs:
-            tool_registry = build_tool_registry(db, workspace_id=context.workspace_id)
+        # Explicit skill-catalog opt-in: freeze the governed skill surface
+        # (rendered catalog, advertised L2 membership, version pins,
+        # unversioned snapshots) BEFORE any model usage. The first dispatch
+        # commits the row; every later dispatch of the same task reuses it
+        # verbatim, so recovery and wakes never silently swap the surface.
+        skill_catalog_row = None
+        skill_loader = None
+        if context.skill_catalog:
+            from hecate.execution.skill_catalog import (
+                ControllerSkillLoader,
+                SkillCatalogFreezeError,
+                SkillHarnessTurnPipeline,
+                freeze_controller_skill_catalog,
+            )
+
+            try:
+                skill_catalog_row = await freeze_controller_skill_catalog(
+                    db,
+                    task_id=context.task_id,
+                    workspace_id=context.workspace_id,
+                    agent_id=agent.id,
+                    agent_version_snapshot={
+                        **config,
+                        "skills": config.get("skills") or [],
+                        "ref_manifest": snapshot.get("ref_manifest") or [],
+                        "agent_version_id": snapshot.get("agent_version_id"),
+                    },
+                    session_id=engine_session,
+                    require_existing=(
+                        await SqlAcceptedDecisionStore(self._store).lookup(
+                            RunRef(issuer_domain=PLATFORM_ISSUER, run_id=context.platform_run_id), "agent-turn-000001"
+                        )
+                    )
+                    is not None,
+                )
+                await db.commit()
+            except SkillCatalogFreezeError as exc:
+                logger.warning("task %s skill catalog freeze failed", task_ref.id, exc_info=True)
+                return {
+                    "status": "awaiting_reconciliation" if exc.reconciliation else "failed",
+                    "content": "",
+                    "error": str(exc),
+                    "error_category": "skill_catalog_corrupt" if exc.reconciliation else "skill_catalog_freeze_failed",
+                }
+        if tool_refs or skill_catalog_row is not None:
+            # Opt-in tasks always get a wired registry: load_skill must be
+            # executable (and L2-pinned) even with zero business tools.
+            if skill_catalog_row is not None:
+                skill_loader = ControllerSkillLoader(db, skill_catalog_row)
+                tool_registry = build_tool_registry(
+                    db,
+                    skill_loader=skill_loader,
+                    workspace_id=context.workspace_id,
+                )
+            else:
+                tool_registry = build_tool_registry(db, workspace_id=context.workspace_id)
             effective_tools = await load_agent_tools(db, tool_refs, workspace_id=context.workspace_id)
         bundle = await assemble_guardrails(
             db,
@@ -1167,6 +1225,20 @@ class PlatformTaskDispatcher:
             for definition in effective_tools
             if isinstance(definition, dict) and isinstance(definition.get("function"), dict)
         }
+        if skill_catalog_row is not None:
+            # The frozen catalog advertises load_skill itself, even for
+            # agents with no other business tools: definitions, the
+            # executor and the trusted agent/workspace/session context
+            # are all wired by the assembly below. The builtin entry is
+            # converted to the function-calling shape the same way the
+            # chat path's tool assembly converts it.
+            from hecate_llm.tool_calling import format_tools_for_llm
+
+            from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
+
+            converted = format_tools_for_llm([{"name": "load_skill", **BUILTIN_TOOL_DEFINITIONS["load_skill"]}])
+            if converted:
+                tool_definitions["load_skill"] = converted[0]
         base_refs = {
             "task": str(context.task_id),
             "agent_version": str(version.id),
@@ -1179,6 +1251,11 @@ class PlatformTaskDispatcher:
             # re-presented chain under a different standard conflicts.
             "goal": context.goal,
             "acceptance_version": (context.acceptance or {}).get("version"),
+            **(
+                {"skill_catalog_version": 1, "skill_catalog_sha256": skill_catalog_row.content_sha256}
+                if skill_catalog_row is not None
+                else {}
+            ),
         }
         store = SqlAcceptedDecisionStore(self._store)
         # Acknowledgements commit with the wake and its causal revision.
@@ -1218,6 +1295,15 @@ class PlatformTaskDispatcher:
             if context.harness is not None
             else None
         )
+        if skill_loader is not None:
+            turn_pipeline = SkillHarnessTurnPipeline(
+                skill_loader=skill_loader,
+                context_chain=context_chain_factory,
+                middleware_chains=bundle.middleware_chains if bundle else None,
+                port=port,
+                session_id=str(engine_session),
+                model=model_name,
+            )
         source = PortTurnResponderSource(
             port,
             config={**(config.get("model_config") or {}), "model": model_name},
@@ -1251,7 +1337,10 @@ class PlatformTaskDispatcher:
         harness_spec = None
         harness_declaration = declared_harness(context.harness)
         if harness_declaration is not None:
-            derived_sections = [HarnessSection("persona", config.get("persona") or "You are a helpful assistant.")]
+            derived_sections = []
+            if skill_catalog_row is not None and skill_catalog_row.catalog_rendered:
+                derived_sections.append(HarnessSection("skills", {"catalog": skill_catalog_row.catalog_rendered}))
+            derived_sections.append(HarnessSection("persona", config.get("persona") or "You are a helpful assistant."))
             if context.output_schema is not None:
                 derived_sections.append(HarnessSection("output_schema", context.output_schema))
             derived_sections.append(HarnessSection("task", context.messages))
@@ -1278,6 +1367,10 @@ class PlatformTaskDispatcher:
             base_messages=messages,
             ownership=ownership,
             limits=limits,
+            # Trusted host facts the governed tool surface reads from the
+            # tool context (load_skill resolves its frozen catalog per
+            # task; the catalog membership check needs agent/workspace).
+            context={"task_id": str(context.task_id)} if skill_catalog_row is not None else None,
             execution_context={
                 "session_id": str(engine_session),
                 "agent_id": str(agent.id),

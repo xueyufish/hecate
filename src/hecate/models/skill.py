@@ -13,9 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import JSON
 
 from hecate.models.base import BaseModel
 
@@ -219,3 +218,38 @@ class SkillReadSchema(PydanticBase):
 
     deleted: bool | None = False
     deleted_at: datetime | None
+
+
+class ControllerSkillCatalogModel(BaseModel):
+    """Frozen skill catalog for one explicitly enabled controller task.
+
+    Written once before the task's first model call; every later dispatch
+    of the same task reuses the row verbatim, so a worker restart, an
+    action recovery or a human-input wake can never silently swap the
+    task's skill surface. The row carries the RENDERED catalog (the exact
+    text injected into the harness, post budget), the advertised L2
+    membership, the per-skill version pins, full content snapshots for
+    resources without an immutable version, and a digest over the frozen
+    payload — binding what actually reached the model input, not just the
+    five-field version hash.
+    """
+
+    __tablename__ = "controller_skill_catalogs"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(nullable=False, unique=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    agent_version_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    # The exact rendered <skills> block (L1 catalog + auto_load blocks)
+    # injected into the harness, after budget enforcement.
+    catalog_rendered: Mapped[str] = mapped_column(Text, nullable=False)
+    # Names the task may load through load_skill (L1 advertised members
+    # including discovery hits); auto_load skills are injected wholesale.
+    advertised_names: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Pinned resource identity, rendered L2 bytes, content and version digest.
+    pins: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Exact resource identity and rendered content for resources without an
+    # explicit version pin; live governance is checked independently.
+    unversioned_snapshots: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    budgets: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)

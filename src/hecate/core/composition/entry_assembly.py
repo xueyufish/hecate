@@ -164,6 +164,8 @@ def build_tool_registry(
     *,
     workspace_id: uuid.UUID = _DEFAULT_WORKSPACE,
     explicit_skill_names: list[str] | None = None,
+    strict_pins: bool = False,
+    skill_loader: Any | None = None,
 ) -> Any:
     """Construct a ToolRegistry wired to builtin + DB tools using app settings.
 
@@ -171,6 +173,10 @@ def build_tool_registry(
         db: The async database session.
         skill_ref_manifest: Optional resolved skill-ref manifest from the agent.
         explicit_skill_names: Frozen skill bindings for version-bound L2 tool loads.
+        skill_loader: Optional Task-bound loader supplied by the Controller host.
+        strict_pins: When set, a pinned skill whose snapshot or live row can
+            no longer be resolved raises instead of falling back to live
+            content (durable executions must not silently change surface).
 
     Returns:
         A configured ToolRegistry.
@@ -202,7 +208,14 @@ def build_tool_registry(
     builtin_executor = BuiltInToolExecutor(
         search_provider=search_provider,
         workspace_root=settings.WORKSPACE_ROOT,
-        skill_loader=SkillLoader(db, ref_manifest=skill_ref_manifest, explicit_skill_names=explicit_skill_names),
+        skill_loader=skill_loader
+        if skill_loader is not None
+        else SkillLoader(
+            db,
+            ref_manifest=skill_ref_manifest,
+            explicit_skill_names=explicit_skill_names,
+            strict_pins=strict_pins,
+        ),
         memory_backend=memory_backend,
     )
     return ToolRegistry(db=db, builtin_executor=builtin_executor, workspace_id=workspace_id)

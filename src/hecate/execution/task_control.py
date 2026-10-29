@@ -286,6 +286,8 @@ class TaskControlService:
             if not isinstance(options, dict):
                 raise TaskControlValidationError("input.controller must be an object")
             try:
+                if "skill_catalog" in options and type(options["skill_catalog"]) is not bool:
+                    raise ValueError("controller.skill_catalog must be a boolean")
                 ControllerLimits(max_turns=options.get("max_turns", 16), deadline=options.get("deadline"))
                 from hecate_runtime.agent_controller import NoProgressPolicy
 
@@ -307,6 +309,8 @@ class TaskControlService:
                 )
             except ValueError as exc:
                 raise TaskControlValidationError(str(exc)) from exc
+        elif isinstance(input.get("controller"), dict) and "skill_catalog" in input["controller"]:
+            raise TaskControlValidationError("controller.skill_catalog requires controller_loop")
         elif input.get("harness") is not None:
             raise TaskControlValidationError("input.harness requires controller_loop")
         agent = await self._db.get(AgentModel, agent_id)

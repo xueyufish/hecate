@@ -35,6 +35,7 @@ import hashlib
 import json
 import socket
 import struct
+import sys
 import threading
 import time
 import uuid
@@ -966,6 +967,63 @@ class _SseSocket:
             self._sock.close()
 
 
+SERVER_SHUTDOWN_TIMEOUT = 10.0
+
+
+def _force_close_connections(server: uvicorn.Server) -> int:
+    """Drop the server's lingering connections; return how many were closed.
+
+    Closing a transport fires uvicorn's ``connection_lost``, which marks the
+    cycle disconnected, wakes its message event and resumes the write flow —
+    that is what unblocks a streaming request parked on an abortive client
+    disconnect.
+    """
+    closed = 0
+    for connection in list(server.server_state.connections):
+        transport = getattr(connection, "transport", None)
+        if transport is not None and not transport.is_closing():
+            transport.close()
+            closed += 1
+    return closed
+
+
+async def _stop_server(server: uvicorn.Server, server_task: asyncio.Task) -> None:
+    """Stop the fixture's uvicorn server without leaking a cancellation.
+
+    uvicorn's graceful shutdown waits for in-flight responses indefinitely, so
+    an abortive client disconnect can leave the streaming task parked and the
+    wait time out. The fallback force-drops the lingering transports (which
+    unblocks the parked task) and then cancels the server task.
+
+    Nothing here may escape: a TimeoutError fails the whole test at teardown
+    time, and an escaping CancelledError additionally poisons the worker's
+    event loop, which fails every later test scheduled on that xdist worker.
+    The server task is therefore awaited through ``asyncio.wait`` (which
+    consumes its cancellation instead of raising it), and the first wait
+    shields the task so that the timeout never cancels it behind our back.
+    """
+    server.should_exit = True
+    try:
+        await asyncio.wait_for(asyncio.shield(server_task), SERVER_SHUTDOWN_TIMEOUT)
+    except TimeoutError:
+        _force_close_connections(server)
+    except asyncio.CancelledError:
+        # Either the server task was already cancelled (the shield re-raises
+        # the child's cancellation) or the caller cancelled us. Clean up in
+        # both cases; only the caller's own cancellation may propagate.
+        _force_close_connections(server)
+        if not server_task.done():
+            server_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait({server_task})
+        if asyncio.current_task().cancelling():
+            raise
+        return
+    if not server_task.done():
+        server_task.cancel()
+    await asyncio.wait({server_task}, timeout=SERVER_SHUTDOWN_TIMEOUT)
+
+
 @pytest.fixture
 async def tcp_stack(tmp_path, monkeypatch: pytest.MonkeyPatch, governance_session_factory):
     """uvicorn on a real socket over a file DB with real bearer auth."""
@@ -1108,9 +1166,89 @@ async def tcp_stack(tmp_path, monkeypatch: pytest.MonkeyPatch, governance_sessio
             "reader_factory": server_factory,
         }
     finally:
-        server.should_exit = True
-        await asyncio.wait_for(server_task, 10)
+        await _stop_server(server, server_task)
         store.dispose()
+
+
+class _StubTransport:
+    """Minimal uvicorn transport stand-in for the shutdown fallback."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def is_closing(self) -> bool:
+        return self.closed
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _StubConnection:
+    def __init__(self, transport: _StubTransport) -> None:
+        self.transport = transport
+
+
+class _StubServer:
+    """Server stand-in exposing the attributes the shutdown fallback touches."""
+
+    def __init__(self, connections: list) -> None:
+        self.should_exit = False
+        self.server_state = SimpleNamespace(connections=connections)
+
+
+async def test_stop_server_swallows_an_already_cancelled_server_task() -> None:
+    """A cancelled server task must not leak its cancellation into the teardown.
+
+    The previous teardown awaited the server task a second time after the
+    first wait had already cancelled it, so the await raised CancelledError
+    instead of TimeoutError. That cancellation escaped the fixture teardown
+    and poisoned the xdist worker's event loop, failing every later test
+    scheduled on that worker.
+    """
+    server_task = asyncio.create_task(asyncio.sleep(3600))
+    await asyncio.sleep(0)
+    server_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await server_task
+
+    server = _StubServer([])
+    await _stop_server(server, server_task)
+    assert server.should_exit is True
+    assert server_task.done()
+
+
+async def test_stop_server_closes_lingering_connections_on_timeout(monkeypatch) -> None:
+    """A shutdown that never finishes drops the connections and still returns."""
+    transport = _StubTransport()
+    server = _StubServer([_StubConnection(transport)])
+
+    async def never_finishes() -> None:
+        await asyncio.sleep(3600)
+
+    server_task = asyncio.create_task(never_finishes())
+    await asyncio.sleep(0)
+    monkeypatch.setattr(sys.modules[__name__], "SERVER_SHUTDOWN_TIMEOUT", 0.05)
+
+    await _stop_server(server, server_task)
+
+    assert transport.closed is True
+    assert server_task.done()
+
+
+async def test_stop_server_leaves_no_pending_task_when_the_server_hangs(monkeypatch) -> None:
+    """The fallback cancels the server task instead of leaving it pending."""
+    server = _StubServer([])
+
+    async def never_finishes() -> None:
+        await asyncio.sleep(3600)
+
+    server_task = asyncio.create_task(never_finishes())
+    await asyncio.sleep(0)
+    monkeypatch.setattr(sys.modules[__name__], "SERVER_SHUTDOWN_TIMEOUT", 0.05)
+
+    await _stop_server(server, server_task)
+
+    assert server_task.cancelled() or server_task.done()
 
 
 async def test_real_tcp_membership_removal_closes_stream(tcp_stack) -> None:
