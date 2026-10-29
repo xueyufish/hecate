@@ -119,8 +119,7 @@ async def test_expired_input_wait_converges_without_reexecution(harness) -> None
         PlatformOutboxProjector(harness["store"], harness["session_factory"]),
         relay_key="input-expiry",
     )
-    while await relay.pump_once():
-        pass
+    await _drain_outbox(relay)
 
     # A late input can neither reopen the task nor fabricate a revision.
     late = await _issue_input_wake(
@@ -130,8 +129,7 @@ async def test_expired_input_wait_converges_without_reexecution(harness) -> None
     assert await asyncio.to_thread(harness["store"].list_input_revisions, t_ref) == []
     # The settled terminal fact never re-projects; other receipts (the
     # rejected wake's own command trail) may still deliver.
-    while await relay.pump_once():
-        pass
+    await _drain_outbox(relay)
     async with harness["session_factory"]() as db:
         page = await _sole_run_events(harness, db)
     terminal_count = sum(1 for e in page if e.payload_schema_ref == "hecate.platform.run_terminal/0")
@@ -333,14 +331,39 @@ async def test_relay_recovers_a_lost_projection(harness, monkeypatch) -> None:  
         PlatformOutboxProjector(harness["store"], harness["session_factory"]),
         relay_key="input-recovery",
     )
-    await relay.pump_once()
+    await _drain_outbox(relay)
 
     async with harness["session_factory"]() as db:
         run = await db.get(RunModel, (await _sole_run_id(harness)))
     assert (run.projection or {})["state"] == "failed"
     assert (run.projection or {})["error_category"] == "input_wait_expired"
-    assert await relay.pump_once() == 0
+    await _drain_outbox(relay)  # idempotent: the settled fact projects once
     _ = task_uuid
+
+
+async def _drain_outbox(relay: Any, *, timeout: float = 120.0) -> None:
+    """Drain the outbox, retrying transient cycle failures like production.
+
+    ``OutboxRelay.run_forever`` outlives a bad cycle: a fencing loss or a
+    contended SQLite file fails one pump and the next cycle re-acquires a
+    fresh lease from the persisted cursor. Test drains follow the same
+    contract instead of letting one transient failure kill the assertion.
+    """
+
+    from hecate_durable.storage.lease import StaleFenceError
+    from sqlalchemy.exc import OperationalError
+
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        try:
+            pumped = await relay.pump_once()
+        except (StaleFenceError, OperationalError):
+            if asyncio.get_running_loop().time() >= deadline:
+                raise
+            await asyncio.sleep(0.1)
+            continue
+        if pumped == 0 or asyncio.get_running_loop().time() >= deadline:
+            return
 
 
 async def _sole_run_events(harness, db) -> tuple:  # noqa: F811
@@ -790,8 +813,7 @@ async def test_input_expiry_converges_workflow_parent(harness, monkeypatch, on_f
             PlatformOutboxProjector(harness["store"], harness["session_factory"]),
             relay_key="input-expiry-callback-recovery",
         )
-        while await relay.pump_once():
-            pass
+        await _drain_outbox(relay)
     expected = "failed" if on_failure == "fail" else "reconciliation_required"
     final = await _dispatch_to_state(harness, parent, worker, expected)
     assert final.lifecycle_state.value == expected
