@@ -319,3 +319,99 @@ async def test_corrupt_final_answer_never_requeries_the_model(case, fault):
         await DecisionStep(store, StubForbiddenResponder()).execute(
             run_ref=run, decision_step_id="step", input_refs={"config": "v1"}, ownership=owner
         )
+
+
+# --- harness input snapshot (recovery binding) -------------------------------------
+
+
+def _snapshot_record(run_ref: RunRef, step: str = "snap-step") -> AcceptedDecisionRecord:
+    """An action decision carrying a coherent harness input snapshot."""
+    import hashlib
+
+    messages = [{"role": "user", "content": "shaped model input"}]
+    config = {"model": "test-model", "tools": []}
+    sha256 = hashlib.sha256(canonical_json({"messages": messages, "config": config}).encode("utf-8")).hexdigest()
+    return AcceptedDecisionRecord(
+        run_ref,
+        step,
+        {"config": "v1", "harness_version": 4},
+        {
+            "text": "working",
+            "harness_input_sha256": sha256,
+            "harness_input": {
+                "snapshot_version": 1,
+                "messages": messages,
+                "config": config,
+                "sha256": sha256,
+            },
+        },
+        (AcceptedAction("action-1", "biz_tool", {"nested": {"q": 1}}, "non_idempotent_write"),),
+    )
+
+
+async def test_snapshot_roundtrips_and_recommits_idempotently(case) -> None:
+    store, _backend, _clock, run, owner, _url = case
+    first = await store.commit(_snapshot_record(run), owner)
+    assert first.accepted_output["harness_input"]["messages"] == [{"role": "user", "content": "shaped model input"}]
+    again = await store.commit(_snapshot_record(run), owner)
+    assert again == first  # same digest: idempotent recommit, not a rewrite
+
+
+async def test_outbox_failure_rolls_back_the_snapshot_with_the_decision(case, monkeypatch) -> None:
+    store, backend, _clock, run, owner, _url = case
+    if isinstance(store, SqlAcceptedDecisionStore):
+        emit = backend.events.emit
+
+        def fail_after_event(*args, **kwargs):
+            emit(*args, **kwargs)
+            raise OSError("outbox failure after snapshot append")
+
+        monkeypatch.setattr(backend.events, "emit", fail_after_event)
+    else:
+        store._fail_commits = True
+    with pytest.raises(DecisionStoreUnavailableError):
+        await store.commit(_snapshot_record(run), owner)
+    assert await store.lookup(run, "snap-step") is None
+    assert _accepted_events(backend) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"snapshot_version": 2},
+        {"sha256": "0" * 64},
+    ],
+    ids=["unknown-version", "broken-digest"],
+)
+async def test_corrupt_snapshot_never_reads_as_accepted(case, change) -> None:
+    store, backend, _clock, run, owner, _url = case
+    accepted = await store.commit(_snapshot_record(run), owner)
+    tampered = dict(accepted.accepted_output)
+    tampered["harness_input"] = {**tampered["harness_input"], **change}
+    if isinstance(store, SqlAcceptedDecisionStore):
+        with backend.session_factory() as session, session.begin():
+            row = session.execute(
+                select(AcceptedDecisionRow).where(AcceptedDecisionRow.decision_step_id == accepted.decision_step_id)
+            ).scalar_one()
+            row.accepted_output = tampered
+    else:
+        from dataclasses import replace as _replace
+
+        key = (run.issuer_domain, run.run_id, accepted.decision_step_id)
+        store._records[key] = _replace(store._records[key], accepted_output=tampered)
+    # SQL wraps corruption as unavailable; the in-memory double surfaces
+    # the validation error directly — both are the existing explicit
+    # refusal paths, never a silent miss.
+    from hecate_runtime.accepted_decision import DecisionValidationError
+
+    with pytest.raises((DecisionStoreUnavailableError, DecisionValidationError)):
+        await store.lookup(run, accepted.decision_step_id)
+
+
+async def test_summary_only_record_without_snapshot_still_roundtrips(case) -> None:
+    """The historical digest-only shape keeps validating on both stores."""
+    store, _backend, _clock, run, owner, _url = case
+    record = replace(_final_answer_record(run), accepted_output={"text": "legacy", "harness_input_sha256": "a" * 64})
+    accepted = await store.commit(record, owner)
+    assert accepted.accepted_output["harness_input_sha256"] == "a" * 64
+    assert await store.lookup(run, accepted.decision_step_id) is not None

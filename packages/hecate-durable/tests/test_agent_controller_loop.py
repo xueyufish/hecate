@@ -23,7 +23,7 @@ import pytest
 from _decision_helpers import decision_database, prepare_decision_run
 from hecate_durable.contracts.references import BackendRef, RefKind
 from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
-from hecate_runtime.accepted_decision import RunRef
+from hecate_runtime.accepted_decision import RunRef, harness_input_snapshot
 
 RUN = RunRef("domain", "run-loop-1")
 SQL_RUN = BackendRef(RefKind.RUN, RUN.issuer_domain, RUN.run_id)
@@ -81,13 +81,17 @@ async def test_full_loop_advances_on_real_feedback(database, tmp_path) -> None:
     [None, {"version": 1, "sections": [{"type": "memory", "content": {"facts": ["frozen policy"]}}]}],
     ids=["legacy", "harness"],
 )
-async def test_crash_after_turn2_decision_recovers_in_new_process(database, tmp_path, harness_declaration) -> None:
+@pytest.mark.parametrize("snapshot_pipeline", [False, True], ids=["scripted", "snapshot"])
+async def test_crash_after_turn2_decision_recovers_in_new_process(
+    database, tmp_path, harness_declaration, snapshot_pipeline
+) -> None:
     """Hard crash after turn 2's commit: recovery replays and finishes."""
     backend, _clock, _url = database
     owner = prepare_decision_run(backend, RUN)
     effect = tmp_path / "loop-effects.txt"
 
     config = json.loads(_config(backend, owner))
+    config["snapshots"] = snapshot_pipeline
     if harness_declaration is not None:
         config["harness"] = harness_declaration
     serialized = json.dumps(config)
@@ -99,6 +103,8 @@ async def test_crash_after_turn2_decision_recovers_in_new_process(database, tmp_
     if harness_declaration is not None:
         assert committed.input_refs["harness_version"] == harness_declaration["version"]
         assert committed.input_refs["harness_digest"]
+    original_snapshot = harness_input_snapshot(committed)
+    assert (original_snapshot is not None) is snapshot_pipeline
 
     recovered = _run_probe(serialized, "recover", effect)
     assert recovered.returncode == 0, recovered.stderr
@@ -106,6 +112,11 @@ async def test_crash_after_turn2_decision_recovers_in_new_process(database, tmp_
     assert result["state"] == "final_answer" and result["final_text"] == "the loop answer"
     # Turn 2's decision resumed from storage; only turn 3 was freshly asked.
     assert result["asks"] == ["agent-turn-000003"]
+    if snapshot_pipeline:
+        assert result["pipeline_preparations"] == 1
+        restored = await SqlAcceptedDecisionStore(backend).lookup(RUN, "agent-turn-000002")
+        assert restored == committed
+        assert harness_input_snapshot(restored) == original_snapshot
     assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]  # zero duplicate effects
     assert len(backend.list_run_actions(SQL_RUN)) == 2
 
@@ -221,14 +232,18 @@ def _accept_input(backend, wake_id: str, content: dict) -> None:
     )
 
 
-async def test_two_input_revisions_recover_in_true_causal_order(database, tmp_path) -> None:
+@pytest.mark.parametrize("snapshot_pipeline", [False, True], ids=["scripted", "snapshot"])
+async def test_two_input_revisions_recover_in_true_causal_order(database, tmp_path, snapshot_pipeline) -> None:
     """Two waits, two wakes, three processes — order and effects preserved."""
     backend, _clock, _url = database
     owner = prepare_decision_run(backend, RUN)
     effect = tmp_path / "input-effects.txt"
+    config = json.loads(_config(backend, owner))
+    config["snapshots"] = snapshot_pipeline
+    serialized = json.dumps(config)
 
     # Process 1: turn 1 commits, then the run dies parked awaiting input.
-    parked = _run_probe(_config(backend, owner), "input-park-1", effect)
+    parked = _run_probe(serialized, "input-park-1", effect)
     assert parked.returncode == 9, parked.stderr
     assert _effects(effect) == ["effect-loop-a1"]
     assert await SqlAcceptedDecisionStore(backend).lookup(RUN, "agent-turn-000002") is None
@@ -240,7 +255,7 @@ async def test_two_input_revisions_recover_in_true_causal_order(database, tmp_pa
 
     # Process 2: replays turn 1, decides turn 2 with the revision at the
     # causal tail, executes its action, dies parked again before turn 3.
-    resumed = _run_probe(_config(backend, owner), "input-resume", effect)
+    resumed = _run_probe(serialized, "input-resume", effect)
     assert resumed.returncode == 9, resumed.stderr
     assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]
 
@@ -252,7 +267,7 @@ async def test_two_input_revisions_recover_in_true_causal_order(database, tmp_pa
 
     # Process 3: turns 1-2 replay with zero model calls and zero effects;
     # turn 3 answers with BOTH input values in their true causal order.
-    finished = _run_probe(_config(backend, owner), "input-resume-final", effect)
+    finished = _run_probe(serialized, "input-resume-final", effect)
     assert finished.returncode == 0, finished.stderr
     result = json.loads(finished.stdout)
     assert result["state"] == "final_answer"
@@ -260,6 +275,19 @@ async def test_two_input_revisions_recover_in_true_causal_order(database, tmp_pa
     assert result["asks"] == ["agent-turn-000003"]
     assert _effects(effect) == ["effect-loop-a1", "effect-loop-a2"]
     assert len(backend.list_run_actions(SQL_RUN)) == 2
+    if snapshot_pipeline:
+        assert result["pipeline_preparations"] == 1
+        store = SqlAcceptedDecisionStore(backend)
+        for turn in range(1, 4):
+            decision = await store.lookup(RUN, f"agent-turn-{turn:06d}")
+            snapshot = harness_input_snapshot(decision)
+            assert snapshot is not None
+            inputs = [
+                json.loads(message["content"])["provided_input"]
+                for message in snapshot["messages"]
+                if message.get("role") == "user" and "provided_input" in message["content"]
+            ]
+            assert inputs == [{"region": "EU"}, {"tier": "gold"}][: turn - 1]
 
 
 async def test_duplicate_wake_command_keeps_one_revision(database, tmp_path) -> None:
