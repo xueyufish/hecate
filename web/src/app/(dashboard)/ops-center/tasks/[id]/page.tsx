@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 
+import { TaskApprovalPanel } from "@/components/tasks/task-approval-panel";
 import { RunActionsPanel } from "@/components/tasks/run-actions-panel";
 import { RunDeliveryPanel } from "@/components/tasks/run-delivery-panel";
 import { RunEventsPanel } from "@/components/tasks/run-events-panel";
@@ -142,6 +143,11 @@ export default function TaskDetailPage() {
           </Button>
         </div>
       )}
+
+      <div className="space-y-2" data-testid="task-approval-section">
+        <h2 className="font-medium">审批决定</h2>
+        <TaskApprovalPanel taskId={taskId} detail={detail} onIssued={refreshAfterCommand} />
+      </div>
 
       <div className="space-y-2" data-testid="task-input-section">
         <h2 className="font-medium">补充输入</h2>

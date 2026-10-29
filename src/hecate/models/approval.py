@@ -156,3 +156,36 @@ class ApprovalReadSchema(PydanticBase):
     updated_at: datetime
     deleted: bool | None = False
     deleted_at: datetime | None
+
+
+class ApprovalDecisionModel(BaseModel):
+    """Durable record of one human approval decision operation.
+
+    The authority for WHAT was decided remains ``approval_authority`` (the
+    binding's judgment, reason and decided_by); this row is the operation
+    ledger: the caller's stable operation id (unique — replays and races
+    arbitrate on it), who decided (server-authenticated), the phase
+    linkage to the resume command, and the task/workspace binding the
+    decision was verified against. ``resume_command_id`` stays NULL while
+    the resume phase has not completed — the named recovery consumer
+    re-issues the deterministic resume from this row, never from request
+    data.
+    """
+
+    __tablename__ = "approval_decisions"
+
+    operation_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    approval_ref: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    decision: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    wait_token: Mapped[str] = mapped_column(String(256), nullable=False)
+    expected_revision: Mapped[int | None] = mapped_column(nullable=True)
+    resume_command_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    __table_args__ = (
+        Index("ix_approval_decisions_resume_pending", "resume_command_id", "deleted", "updated_at", "id"),
+    )

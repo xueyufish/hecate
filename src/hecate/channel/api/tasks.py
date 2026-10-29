@@ -104,6 +104,17 @@ class CommandRequest(BaseModel):
     detail_ns: dict[str, Any] = Field(default_factory=dict)
 
 
+class ApprovalDecisionRequest(BaseModel):
+    """One human approval decision bound to the entire observed wait."""
+
+    operation_id: str = Field(min_length=1, max_length=200)
+    approval_ref: str = Field(min_length=1, max_length=128)
+    decision: Literal["approve", "reject"]
+    reason: str = Field(default="", max_length=2000)
+    wait_token: str = Field(min_length=1, max_length=256)
+    expected_revision: int = Field(ge=0)
+
+
 def get_task_control_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> TaskControlService:
@@ -296,6 +307,86 @@ class WorkflowCallbackRequest(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
 
 
+@router.get("/{task_id}/approval")
+async def get_task_approval(task_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dict[str, Any]:
+    """The whitelisted approval view: wait summary, decision facts, resume receipt.
+
+    Observation only — reading never issues a resume. Visibility follows the
+    shared task read gate (foreign, missing and soft-deleted tasks are
+    indistinguishable).
+    """
+    workspace_id = await _task_read_gate(ctx, service, task_id)
+    from hecate.execution.approval_decision import ApprovalDecisionService
+
+    return await ApprovalDecisionService.of(service).get_approval_view(
+        workspace_id,
+        task_id,
+        decided_by=str(ctx.user_id),
+        can_admin=ctx.role is WorkspaceRole.ADMIN and not ctx.is_system_scope,
+    )
+
+
+@router.post("/{task_id}/approval")
+async def submit_task_approval(
+    task_id: uuid.UUID, body: ApprovalDecisionRequest, service: ServiceDep, ctx: AuthDep
+) -> dict[str, Any]:
+    """Record one human approval decision and drive the resume phase.
+
+    Decision authority requires the server-side ADMIN role — an EDITOR's
+    resume permission never manufactures an approval fact — and the
+    decider identity comes from the AuthContext, never the request body.
+    The self-approval ban and the approval-reference binding are enforced
+    in the service, before any authority query.
+    """
+    from hecate.execution.approval_decision import ApprovalDecisionError, ApprovalDecisionService
+
+    workspace_id = _workspace_id(ctx)
+    try:
+        await service.assert_task_visible(workspace_id=workspace_id, task_id=task_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+    try:
+        if ctx.is_system_scope or ctx.role is not WorkspaceRole.ADMIN:
+            raise _error("FORBIDDEN", "a workspace ADMIN human identity is required", status.HTTP_403_FORBIDDEN)
+        ensure_workspace_role(ctx, WorkspaceRole.ADMIN)
+    except WorkspaceRoleRequiredError as exc:
+        raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
+    decided_by = str(ctx.user_id) if ctx.user_id is not None else ""
+    if not decided_by:
+        raise _error(
+            "IDENTITY_REQUIRED",
+            "approval decisions require an authenticated identity",
+            status.HTTP_403_FORBIDDEN,
+        )
+    try:
+        return await ApprovalDecisionService.of(service).submit_decision(
+            workspace_id,
+            task_id,
+            operation_id=body.operation_id,
+            approval_ref=body.approval_ref,
+            decision=body.decision,
+            reason=body.reason,
+            wait_token=body.wait_token,
+            expected_revision=body.expected_revision,
+            decided_by=decided_by,
+        )
+    except ApprovalDecisionError as exc:
+        http_status = {
+            "SELF_APPROVAL": status.HTTP_403_FORBIDDEN,
+            "REVISION_CONFLICT": status.HTTP_409_CONFLICT,
+            "WAIT_EXPIRED": status.HTTP_409_CONFLICT,
+            "NOT_WAITING_APPROVAL": status.HTTP_409_CONFLICT,
+            "ALREADY_DECIDED": status.HTTP_409_CONFLICT,
+            "OPERATION_CONFLICT": status.HTTP_409_CONFLICT,
+            "OPERATION_BOUND_ELSEWHERE": status.HTTP_409_CONFLICT,
+            "OPERATION_RACE": status.HTTP_409_CONFLICT,
+            "INITIATOR_UNPARSEABLE": status.HTTP_409_CONFLICT,
+        }.get(exc.code, status.HTTP_422_UNPROCESSABLE_ENTITY)
+        raise _error(exc.code, exc.message, http_status) from exc
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+
+
 @router.post("/{task_id}/workflow-callback")
 async def workflow_callback(
     task_id: uuid.UUID, body: WorkflowCallbackRequest, service: ServiceDep, ctx: AuthDep
@@ -408,6 +499,12 @@ async def _issue(
         ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
     except WorkspaceRoleRequiredError as exc:
         raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
+    from hecate.execution.approval_decision import APPROVAL_DECISION_RESUME_PREFIX
+
+    if body.command_id and body.command_id.startswith(APPROVAL_DECISION_RESUME_PREFIX):
+        raise _error(
+            "RESERVED_COMMAND_ID", "approval resume ids are server-owned", status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
     try:
         issued = await service.issue_command(
             workspace_id=workspace_id,

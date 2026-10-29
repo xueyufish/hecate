@@ -135,15 +135,26 @@ class SqlApprovalLedger(ApprovalLedger):
                 return await SqlApprovalLedger(db).decide(
                     approval_ref, approved=approved, reason=reason, decided_by=decided_by
                 )
+        target = ApprovalJudgment.APPROVED.value if approved else ApprovalJudgment.REJECTED.value
+        # The CAS: only a still-pending row can be judged. Two racing
+        # decisions (approve vs reject, or duplicate submissions) yield at
+        # most one transition — the loser's UPDATE matches zero rows and
+        # re-reads the authoritative record.
+        result = await self._db.execute(
+            update(ApprovalAuthorityModel)
+            .where(
+                ApprovalAuthorityModel.approval_ref == approval_ref,
+                ApprovalAuthorityModel.judgment == ApprovalJudgment.PENDING.value,
+                ApprovalAuthorityModel.deleted.is_(False),
+            )
+            .values(judgment=target, reason=reason, decided_by=decided_by)
+        )
+        await self._db.flush()
         row = await self._get_row(approval_ref)
         if row is None:
             raise KeyError(f"unknown approval_ref {approval_ref!r}")
-        if row.judgment != ApprovalJudgment.PENDING.value:
+        if result.rowcount == 0:
             raise ValueError(f"approval {approval_ref!r} already decided")
-        row.judgment = ApprovalJudgment.APPROVED.value if approved else ApprovalJudgment.REJECTED.value
-        row.reason = reason
-        row.decided_by = decided_by
-        await self._db.flush()
         return _binding_from_row(row)
 
     async def revoke(self, approval_ref: str) -> ApprovalBinding:
