@@ -1439,3 +1439,108 @@ async def test_harness_context_cap_never_accepts_a_runner_final_answer(loop_prof
             await harness.engine.close()
             harness.durable.store.dispose()
         await model.stop()
+
+
+# --- no-progress policy binding (runner host) --------------------------------------
+
+
+async def test_no_progress_policy_pins_the_committed_decision(tmp_path, loop_profile) -> None:
+    """A declared policy rides every decision's frozen references; undeclared
+    runs keep replaying without the pin."""
+    model = _ScriptedModelServer("query_inventory", {"domain": "domain_a", "sku": "H-1"}, json.dumps("done"))
+    await model.start()
+    try:
+        config = json.loads((loop_profile / "runner.json").read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        (loop_profile / "runner.json").write_text(json.dumps(config), encoding="utf-8")
+        harness = _Harness(loop_profile, _BusinessApi())
+        run_id, _state = await harness.engine.submit(
+            "app-reader",
+            {
+                "prompt": "check stock",
+                "controller": {"no_progress": {"limit": 2, "observations": ["query_inventory"]}},
+            },
+            ("domain_a",),
+        )
+        final = await harness.engine.wait_for(run_id)
+        assert final.status == "succeeded"
+
+        from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+        from hecate_runtime.accepted_decision import RunRef
+
+        durable_run = harness.durable.store.run_for_task(final.task_ref)
+        decision = await SqlAcceptedDecisionStore(harness.durable.store).lookup(
+            RunRef(durable_run.issuer_domain, durable_run.id), "agent-turn-000001"
+        )
+        assert decision is not None
+        assert decision.input_refs["no_progress_version"] == 1
+        assert decision.input_refs["no_progress_digest"]
+    finally:
+        await model.stop()
+
+
+async def test_invalid_no_progress_policy_is_rejected_before_runner_submission(loop_profile) -> None:
+    harness = _Harness(loop_profile, _BusinessApi())
+    try:
+        with pytest.raises(ValueError, match="no-progress"):
+            await harness.engine.submit(
+                "app-reader", {"prompt": "never run", "controller": {"no_progress": {"limit": 0}}}, ("domain_a",)
+            )
+        assert harness.durable.store.list_tasks() == []
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+
+
+async def test_runner_stops_identical_native_reads_with_queryable_facts(loop_profile) -> None:
+    model = _ScriptedModelServer("query_inventory", {}, "never")
+    model.response_override = {
+        "content": "",
+        "tool_calls": [
+            {
+                "type": "function",
+                "function": {"name": "query_inventory", "arguments": json.dumps({"domain": "domain_a", "sku": "SAME"})},
+            }
+        ],
+    }
+    await model.start()
+    harness = None
+    try:
+        config = json.loads((loop_profile / "runner.json").read_text(encoding="utf-8"))
+        config["model"] = {"backend": "endpoint", "endpoint": model.url}
+        (loop_profile / "runner.json").write_text(json.dumps(config), encoding="utf-8")
+        api = _BusinessApi()
+        harness = _Harness(loop_profile, api)
+        run_id, _ = await harness.engine.submit(
+            "app-reader",
+            {"prompt": "watch", "controller": {"no_progress": {"limit": 2, "observations": ["query_inventory"]}}},
+            ("domain_a",),
+        )
+        state = await harness.engine.wait_for(run_id)
+        assert state.status == "failed"
+        assert state.result is not None
+        assert state.result["error_category"] == "controller_no_progress_limit"
+        assert state.result["no_progress"]["consecutive_turns"] == 2
+        assert len(model.requests) == len(api.calls) == 2
+        stored = harness.durable.store.get_task_state(state.task_ref)
+        assert stored.extra["result"]["no_progress"] == state.result["no_progress"]
+        restored = harness.engine._durable_task_state(state.task_ref, "app-reader", ("domain_a",), state.run_ref)
+        assert restored.status == "failed"
+        assert restored.result == state.result
+        from hecate_durable.storage.models import TaskStateRow
+
+        with harness.durable.store.session_factory.begin() as db:
+            row = db.get(TaskStateRow, (state.task_ref.issuer_domain, state.task_ref.id))
+            damaged = {
+                **row.extra["result"],
+                "no_progress": {**row.extra["result"]["no_progress"], "last_decision_step_id": "foreign-step"},
+            }
+            row.extra = {**row.extra, "result": damaged}
+        unreadable = harness.engine._durable_task_state(state.task_ref, "app-reader", ("domain_a",), state.run_ref)
+        assert unreadable.status == "reconciliation_required" and unreadable.result is None
+        assert len(api.calls) == 2
+    finally:
+        if harness is not None:
+            await harness.engine.close()
+            harness.durable.store.dispose()
+        await model.stop()

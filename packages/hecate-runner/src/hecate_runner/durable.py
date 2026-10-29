@@ -167,6 +167,42 @@ class DurableRuntime:
             return None
         if not isinstance(result, dict):
             raise ValueError("stored delivery result is malformed")
+        if result.get("error_category") == "controller_no_progress_limit":
+            from hecate_runtime.agent_controller import NoProgressPolicy, decision_step_id_for_turn
+
+            payload = self.store.get_task_input(task_ref) or {}
+            policy = NoProgressPolicy.from_declaration((payload.get("controller") or {}).get("no_progress"))
+            summary = result.get("no_progress")
+            if (
+                state.lifecycle_state is not TaskLifecycleState.FAILED
+                or result.get("status") != "failed"
+                or policy is None
+                or not isinstance(summary, dict)
+                or summary.get("policy_sha256") != policy.sha256
+                or type(summary.get("policy_version")) is not int
+                or summary.get("policy_version") != policy.version
+                or type(summary.get("limit")) is not int
+                or summary.get("limit") != policy.limit
+                or type(summary.get("consecutive_turns")) is not int
+                or summary["consecutive_turns"] != policy.limit
+                or type(summary.get("through_turn")) is not int
+                or summary["through_turn"] < policy.limit
+                or not isinstance(summary.get("observation_sha256"), str)
+                or len(summary["observation_sha256"]) != 64
+                or any(char not in "0123456789abcdef" for char in summary["observation_sha256"])
+            ):
+                raise ValueError("stored no-progress stop is malformed")
+            step = decision_step_id_for_turn("agent-turn", summary["through_turn"])
+            decision = SqlAcceptedDecisionStore(self.store).lookup_sync(RunRef(run_ref.issuer_domain, run_ref.id), step)
+            if (
+                summary.get("last_decision_step_id") != step
+                or decision is None
+                or decision.input_refs.get("no_progress_digest") != policy.sha256
+                or decision.input_refs.get("no_progress_version") != policy.version
+                or self.store.count_accepted_decisions(run_ref) != summary["through_turn"]
+            ):
+                raise ValueError("stored no-progress stop does not match its decision history")
+            return result
         record = result.get("acceptance")
         if not isinstance(record, dict) or "checker_version" not in record:
             raise ValueError("stored delivery has no verifiable acceptance history")

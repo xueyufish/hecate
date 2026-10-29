@@ -11,6 +11,7 @@ integration suite.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -29,6 +30,7 @@ from hecate_runtime.agent_controller import (
     ControllerExecutionDriver,
     ControllerLimits,
     ControllerRunSpec,
+    NoProgressPolicy,
     PortTurnResponderSource,
     TurnResponderSource,
     decision_step_id_for_turn,
@@ -882,3 +884,366 @@ async def test_projection_policy_replay_skips_pipeline_and_conflicts_on_policy_d
     with pytest.raises(DecisionConflictError):
         await _controller(store, source(fresh, ["round_window"], replay=True), fresh).run(spec)
     assert not hasattr(fresh, "model_calls")
+
+
+# --- recoverable no-progress protection --------------------------------------------
+
+
+class DigestLedger(StubLedger):
+    """Records the canonical result digest like the SQL ledger does.
+
+    First-run records return the digest; ledger resolutions replay the SAME
+    stored value, so first-run and recovery must judge observations
+    identically no matter how the displayed content re-serializes.
+    """
+
+    async def record_outcome(self, **kwargs):
+        from dataclasses import replace
+
+        result = kwargs.get("result")
+        digest = (
+            None
+            if result is None
+            else hashlib.sha256(json.dumps(result, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        )
+        await super().record_outcome(**kwargs)
+        state = self.states.get(kwargs["execution_id"])
+        if state is not None and digest is not None:
+            self.states[kwargs["execution_id"]] = replace(state, result_digest=digest)
+        return digest
+
+
+def _read_action(key: str, args: dict[str, Any]) -> AcceptedAction:
+    return AcceptedAction(action_key=key, tool="web_search", arguments=args, side_effect_class="readonly")
+
+
+def _write_action(key: str, args: dict[str, Any]) -> AcceptedAction:
+    return AcceptedAction(action_key=key, tool="memory_add", arguments=args, side_effect_class="non_idempotent_write")
+
+
+def _observed_turn(key: str, args: dict[str, Any]) -> DecisionProposal:
+    return DecisionProposal(accepted_output={"text": "working"}, actions=(_read_action(key, args),))
+
+
+def test_no_progress_policy_validation() -> None:
+    from hecate_runtime.agent_controller import NoProgressPolicy
+
+    assert NoProgressPolicy.from_declaration(None) is None
+    policy = NoProgressPolicy.from_declaration({"limit": 2, "observations": ["web_search"]})
+    assert policy is not None and policy.limit == 2 and policy.sha256
+    for bad in (
+        {"limit": 0, "observations": ["web_search"]},
+        {"limit": True, "observations": ["web_search"]},
+        {"limit": 2},
+        {"limit": 2, "observations": []},
+        {"limit": 2, "observations": ["web_search", "web_search"]},
+        {"limit": 2, "observations": [" web_search"]},
+        {"limit": 2, "observations": "web_search"},
+        "no_progress",
+    ):
+        with pytest.raises(DecisionValidationError):
+            NoProgressPolicy.from_declaration(bad)
+
+
+async def test_consecutive_identical_read_observations_stop_before_the_next_ask() -> None:
+    """Two identical recorded observations stop the loop without a third ask."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), DigestLedger()
+    source = LoopScriptedSource(
+        {
+            (0, ""): _observed_turn("a1", {"q": 1}),
+            (1, _RESULT_SEARCH): _observed_turn("a2", {"q": 1}),
+        }
+    )
+    outcome = await _controller(store, source, port, ledger).run(
+        _spec(no_progress=NoProgressPolicy(limit=2, observations=("web_search",)), limits=ControllerLimits(max_turns=8))
+    )
+    assert outcome.state == "stopped" and outcome.reason == "no_progress_limit"
+    assert outcome.final_text is None and outcome.turns == 2
+    assert outcome.no_progress is not None
+    assert outcome.no_progress["consecutive_turns"] == 2
+    assert outcome.no_progress["limit"] == 2
+    # The stop fired before the third model call: both asks were fresh turns.
+    assert source.model_asks == [
+        decision_step_id_for_turn("agent-turn", 1),
+        decision_step_id_for_turn("agent-turn", 2),
+    ]
+    assert len(port.calls) == 2
+
+
+async def test_changed_result_facts_keep_the_loop_moving() -> None:
+    """Different recorded results are progress even with identical calls."""
+
+    class CountingPort(StubToolPort):
+        """Return a distinct payload per call: the world moved."""
+
+        async def tool_execute(self, name, args, context=None):
+            self.calls.append((name, args, dict(context or {})))
+            return {"ok": True, "by": name, "call": len(self.calls)}
+
+    store, ledger = InMemoryDecisionStore(), DigestLedger()
+    port = CountingPort()
+    first_read = str({"ok": True, "by": "web_search", "call": 1})
+    second_read = str({"ok": True, "by": "web_search", "call": 2})
+    source = LoopScriptedSource(
+        {
+            (0, ""): _observed_turn("a1", {"q": 1}),
+            (1, first_read): _observed_turn("a2", {"q": 1}),
+            (2, second_read): _final("changed under me"),
+        }
+    )
+    outcome = await _controller(store, source, port, ledger).run(
+        _spec(no_progress=NoProgressPolicy(limit=2, observations=("web_search",)), limits=ControllerLimits(max_turns=8))
+    )
+    assert outcome.is_final_answer and outcome.final_text == "changed under me"
+
+
+async def test_unobserved_write_resets_the_observation_window() -> None:
+    """A succeeded action outside the policy is change evidence, not noise."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), DigestLedger()
+    source = LoopScriptedSource(
+        {
+            (0, ""): _observed_turn("a1", {"q": 1}),
+            (1, _RESULT_SEARCH): _observed_turn("a2", {"q": 1}),
+            (2, _RESULT_SEARCH): DecisionProposal(
+                accepted_output={"text": "working"}, actions=(_write_action("a3", {"q": 2}),)
+            ),
+            (3, _RESULT_OK): _observed_turn("a4", {"q": 1}),
+            (4, _RESULT_SEARCH): _final("done after the write"),
+        }
+    )
+    outcome = await _controller(store, source, port, ledger).run(
+        _spec(no_progress=NoProgressPolicy(limit=3, observations=("web_search",)), limits=ControllerLimits(max_turns=8))
+    )
+    # The streak stands at 2 of 3 when the write lands; the write resets
+    # the window, so the third identical read would have stopped without it.
+    assert outcome.is_final_answer
+
+
+async def test_input_revision_opens_a_fresh_window_without_resetting_the_budget() -> None:
+    """A durable revision restarts observation; the turn budget stands."""
+    from hecate_runtime.agent_controller import ControllerInputRevision
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), DigestLedger()
+    source = LoopScriptedSource(
+        {
+            (0, ""): _observed_turn("a1", {"q": 1}),
+            (1, _RESULT_SEARCH): _observed_turn("a2", {"q": 1}),
+            (2, _RESULT_SEARCH): _observed_turn("a3", {"q": 1}),
+            (3, _RESULT_SEARCH): _final("done after the hint"),
+        }
+    )
+    outcome = await _controller(store, source, port, ledger).run(
+        _spec(
+            no_progress=NoProgressPolicy(limit=2, observations=("web_search",)),
+            limits=ControllerLimits(max_turns=8),
+            input_revisions=(ControllerInputRevision("rev-1", {"hint": "look again"}, 2),),
+        )
+    )
+    # Without the revision the loop stops at turn 2 (two identical reads);
+    # the revision opens a fresh window, so turn 2 runs and only the NEXT
+    # identical observation pair stops the loop at turn 3. The turn budget
+    # advanced under the same policy throughout.
+    assert outcome.state == "stopped" and outcome.reason == "no_progress_limit"
+    assert outcome.turns == 3
+    assert source.model_asks == [decision_step_id_for_turn("agent-turn", i) for i in (1, 2, 3)]
+
+
+async def test_policy_binding_conflicts_on_same_version_rewrite() -> None:
+    """A rewritten policy under the same version cannot reinterpret history."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), DigestLedger()
+    script = {
+        (0, ""): _observed_turn("a1", {"q": 1}),
+        (1, _RESULT_SEARCH): _observed_turn("a2", {"q": 1}),
+        (2, _RESULT_SEARCH): _final("done"),
+    }
+    source = LoopScriptedSource(script)
+    run_ref = _run_ref()
+    first = await _controller(store, source, port, ledger).run(
+        _spec(
+            no_progress=NoProgressPolicy(limit=8, observations=("web_search",)),
+            run_ref=run_ref,
+            limits=ControllerLimits(max_turns=8),
+        )
+    )
+    assert first.is_final_answer
+
+    fresh_port = StubToolPort()
+    recovery = LoopScriptedSource({})
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, recovery, fresh_port, ledger).run(
+            _spec(
+                no_progress=NoProgressPolicy(limit=8, observations=("web_search", "read_file")),
+                run_ref=run_ref,
+                limits=ControllerLimits(max_turns=8),
+            )
+        )
+    assert recovery.model_asks == [] and fresh_port.calls == []
+
+
+async def test_no_policy_pins_nothing_and_a_later_policy_conflicts() -> None:
+    """Undeclared tasks run unchanged; like every binding, adding one later
+    to a committed chain conflicts instead of reinterpreting history."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), DigestLedger()
+    source = LoopScriptedSource(
+        {
+            (0, ""): _actions(("a1", "memory_add", {"q": 1})),
+            (1, _RESULT_OK): _final("done"),
+        }
+    )
+    run_ref = _run_ref()
+    outcome = await _controller(store, source, port, ledger).run(
+        _spec(run_ref=run_ref, limits=ControllerLimits(max_turns=8))
+    )
+    assert outcome.is_final_answer
+
+    # The committed decisions pin no observation fields.
+    for step in outcome.decision_step_ids:
+        (recorded,) = [
+            stored
+            for (issuer, run, decision), stored in store._records.items()
+            if run == run_ref.run_id and decision == step
+        ]
+        assert "no_progress_version" not in recorded.input_refs
+        assert "no_progress_digest" not in recorded.input_refs
+
+    # Like every binding, adding a policy to a committed chain conflicts on
+    # the first replay instead of reinterpreting history.
+    recovery = LoopScriptedSource({})
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, recovery, StubToolPort(), ledger).run(
+            _spec(
+                no_progress=NoProgressPolicy(limit=1, observations=("web_search",)),
+                run_ref=run_ref,
+                limits=ControllerLimits(max_turns=1),
+            )
+        )
+    assert recovery.model_asks == []
+
+
+async def test_recovery_replays_stop_at_the_same_place() -> None:
+    """A re-entered loop rebuilds the streak from durable facts and stops."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), DigestLedger()
+    script = {
+        (0, ""): _observed_turn("a1", {"q": 1}),
+        (1, _RESULT_SEARCH): _observed_turn("a2", {"q": 1}),
+    }
+    source = LoopScriptedSource(script)
+    run_ref = _run_ref()
+    first = await _controller(store, source, port, ledger).run(
+        _spec(
+            no_progress=NoProgressPolicy(limit=2, observations=("web_search",)),
+            run_ref=run_ref,
+            limits=ControllerLimits(max_turns=8),
+        )
+    )
+    assert first.state == "stopped" and first.reason == "no_progress_limit"
+
+    fresh_port = StubToolPort()
+    recovery = LoopScriptedSource({})
+    second = await _controller(store, recovery, fresh_port, ledger).run(
+        _spec(
+            no_progress=NoProgressPolicy(limit=2, observations=("web_search",)),
+            run_ref=run_ref,
+            limits=ControllerLimits(max_turns=8),
+        )
+    )
+    assert second.state == "stopped" and second.reason == "no_progress_limit"
+    assert recovery.model_asks == [] and fresh_port.calls == []
+    assert second.decision_step_ids == first.decision_step_ids
+    assert second.no_progress == first.no_progress
+
+
+def test_unknown_no_progress_options_are_not_silently_ignored() -> None:
+    with pytest.raises(DecisionValidationError, match="unknown"):
+        NoProgressPolicy.from_declaration({"limit": 2, "observations": ["web_search"], "polling": True})
+
+
+async def test_missing_observation_digest_requires_reconciliation() -> None:
+    from hecate_runtime.accepted_decision import DecisionStoreUnavailableError
+
+    source = LoopScriptedSource({(0, ""): _observed_turn("a1", {"q": 1})})
+    with pytest.raises(DecisionStoreUnavailableError, match="observation"):
+        await _controller(InMemoryDecisionStore(), source, StubToolPort(), StubLedger()).run(
+            _spec(no_progress=NoProgressPolicy(limit=1, observations=("web_search",)))
+        )
+
+
+async def test_acknowledged_input_request_is_not_a_stagnant_observation(monkeypatch) -> None:
+    from hecate_runtime.agent_controller import ControllerInputRevision
+
+    envelope = {"status": "input_required", "contract": {"fields": ["region"]}}
+
+    class InputPort(StubToolPort):
+        """Replay the confirmed input request after a human wake."""
+
+        async def tool_execute(self, name, args, context=None):
+            return envelope
+
+    source = LoopScriptedSource(
+        {(0, ""): _observed_turn("input-request", {}), (1, json.dumps(envelope)): _final("human input consumed")}
+    )
+    store, ledger = InMemoryDecisionStore(), DigestLedger()
+    spec = _spec(
+        no_progress=NoProgressPolicy(limit=1, observations=("web_search",)),
+        input_revisions=(ControllerInputRevision("human-wake", {"region": "EU"}, 2),),
+    )
+    outcome = await _controller(store, source, InputPort(), ledger).run(spec)
+    assert outcome.is_final_answer
+
+    async def redact_replay(self, result, **kwargs):
+        return {**result, "content": "request details withheld by current governance"}
+
+    monkeypatch.setattr(ToolCallExecutor, "_maybe_govern_recovery", redact_replay)
+    recovery, fresh = LoopScriptedSource({}), StubToolPort()
+    restored = await _controller(store, recovery, fresh, ledger).run(spec)
+    assert restored.is_final_answer
+    assert recovery.model_asks == [] and fresh.calls == []
+
+
+async def test_declared_observation_scope_excludes_legitimate_polling() -> None:
+    """A polling tool outside the observation set remains bounded by normal limits."""
+    read = AcceptedAction("poll-1", "read_file", {}, "readonly")
+    reply = str({"ok": True, "by": "read_file"})
+    source = LoopScriptedSource(
+        {
+            (0, ""): DecisionProposal({"text": "poll"}, (read,)),
+            (1, reply): DecisionProposal({"text": "poll"}, (AcceptedAction("poll-2", "read_file", {}, "readonly"),)),
+            (2, reply): _final("poll complete"),
+        }
+    )
+    outcome = await _controller(InMemoryDecisionStore(), source, StubToolPort(), DigestLedger()).run(
+        _spec(no_progress=NoProgressPolicy(limit=1, observations=("web_search",)))
+    )
+    assert outcome.is_final_answer
+
+
+async def test_observation_policy_cannot_attest_its_own_write_tool() -> None:
+    with pytest.raises(DecisionValidationError, match="confirmed read-only"):
+        await _controller(InMemoryDecisionStore(), LoopScriptedSource({}), StubToolPort(), DigestLedger()).run(
+            _spec(no_progress=NoProgressPolicy(limit=1, observations=("memory_add",)))
+        )
+
+
+async def test_channel_backfill_cannot_replace_the_ledger_observation_digest(monkeypatch) -> None:
+    """Governed channel text may differ; the raw ledger fact must remain stable."""
+    from hecate_runtime.action_ledger import ToolExecutionResolution, ToolExecutionState, tool_arguments_digest
+
+    store, ledger = InMemoryDecisionStore(), DigestLedger()
+    source = LoopScriptedSource({(0, ""): _observed_turn("read", {})})
+    spec = _spec(no_progress=NoProgressPolicy(limit=1, observations=("web_search",)))
+    first = await _controller(store, source, StubToolPort(), ledger).run(spec)
+
+    async def event_resolution(*args):
+        return ToolExecutionResolution(
+            ToolExecutionState.SUCCEEDED,
+            arguments_digest=tool_arguments_digest({}),
+            result_digest="e" * 64,
+            tool_name="web_search",
+            result_content="previously governed channel content",
+        )
+
+    monkeypatch.setattr("hecate_runtime.tool_call_executor.resolve_tool_execution_state", event_resolution)
+    fresh = StubToolPort()
+    recovered = await _controller(store, LoopScriptedSource({}), fresh, ledger).run(spec)
+    assert recovered.no_progress == first.no_progress
+    assert fresh.calls == []

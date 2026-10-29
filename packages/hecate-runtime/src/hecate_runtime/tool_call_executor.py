@@ -175,10 +175,20 @@ def _tool_result_content(result: Any) -> str:
 
 @dataclass(frozen=True)
 class AcceptedToolCallOutcome:
-    """Semantic outcome from control flow, without parsing tool message text."""
+    """Semantic outcome from control flow, without parsing tool message text.
+
+    ``result_digest`` is the action ledger's canonical result digest — the
+    stable fact reference that survives restarts — or ``None`` when no
+    ledger recorded the outcome. Never a digest of the displayed content:
+    recovery re-serialization differs, the ledger fact does not.
+    ``is_input_request`` identifies the explicit governed input envelope;
+    settling its wake never turns that control fact into progress evidence.
+    """
 
     status: Literal["succeeded", "failed", "withheld"]
     result: dict[str, Any]
+    result_digest: str | None = None
+    is_input_request: bool = False
 
 
 @dataclass
@@ -186,6 +196,8 @@ class _AcceptedCall:
     run_ref: RunRef
     ownership: DecisionOwnership
     status: Literal["succeeded", "failed", "withheld"] = "withheld"
+    result_digest: str | None = None
+    is_input_request: bool = False
 
 
 class ToolCallExecutor:
@@ -397,6 +409,7 @@ class ToolCallExecutor:
         tool_name: str = "",
         arguments: dict | None = None,
         ledger_claimed: bool = False,
+        accepted: _AcceptedCall | None = None,
     ) -> dict[str, Any] | None:
         """Resolve the execution's recovery state into an action.
 
@@ -456,6 +469,19 @@ class ToolCallExecutor:
                 result = self._checked_recovery_result(decision, execution_id)
                 if result is not None and from_ledger and self._is_governed_backfill(result):
                     result = {**result, "_replay_govern": True}
+                if (
+                    accepted is not None
+                    and hook_resolution is not None
+                    and hook_resolution.state is ToolExecutionState.SUCCEEDED
+                    and result is not None
+                    and not result.get("is_error")
+                ):
+                    # The stable ledger fact travels beside the recovered
+                    # content: recovery re-serialization may differ, the
+                    # recorded digest does not.
+                    accepted.result_digest = hook_resolution.result_digest
+                    raw = _input_request_value(hook_resolution.result_content)
+                    accepted.is_input_request = isinstance(raw, dict) and raw.get("status") == "input_required"
                 return result
         if claim and execution_context is not None and arguments is not None and self._event_store is not None:
             await self._append_tool_call(
@@ -732,16 +758,18 @@ class ToolCallExecutor:
         result: Any = None,
         error: str | None = None,
         strict: bool = False,
-    ) -> None:
+    ) -> str | None:
         """Mirror the real outcome to the ledger; never undo the effect.
 
-        A failed ledger write leaves the action claimed — recovery then
-        fails closed (pending reconciliation) instead of silently re-running
-        the side effect. The result still flows through the channel.
+        Returns the ledger's canonical result digest, or ``None`` when no
+        digest was recorded. A failed ledger write leaves the action
+        claimed — recovery then fails closed (pending reconciliation)
+        instead of silently re-running the side effect. The result still
+        flows through the channel.
         """
 
         try:
-            await self._action_hook.record_outcome(
+            return await self._action_hook.record_outcome(
                 session_id=str(session_key),
                 execution_id=execution_id,
                 tool_call_id=tc_id,
@@ -761,6 +789,7 @@ class ToolCallExecutor:
                 execution_id,
                 exc_info=True,
             )
+            return None
 
     async def execute_call(
         self, tool_call: dict, context: dict, execution_context: dict | None = None, node_id: str = ""
@@ -790,7 +819,11 @@ class ToolCallExecutor:
             if accepted.status != "withheld":
                 raise ExecutionStoppedError("reconciliation_required", "action receipt could not be confirmed") from exc
             raise
-        return AcceptedToolCallOutcome(accepted.status, result)
+        value = _input_request_value(result.get("content"))
+        is_input_request = accepted.status == "succeeded" and (
+            accepted.is_input_request or (isinstance(value, dict) and value.get("status") == "input_required")
+        )
+        return AcceptedToolCallOutcome(accepted.status, result, accepted.result_digest, is_input_request)
 
     async def _execute_call(
         self,
@@ -858,6 +891,7 @@ class ToolCallExecutor:
             messages=messages,
             claim=False,
             tool_name=name,
+            accepted=accepted,
         )
         if recovery is not None:
             if accepted is not None and not recovery.get("is_error"):
@@ -1051,6 +1085,7 @@ class ToolCallExecutor:
                         execution_context=execution_context,
                         tool_name=name,
                         arguments=arguments,
+                        accepted=accepted,
                     )
             except Exception:
                 logger.warning("Event lock failed for tool execution %s — fail closed", execution_id, exc_info=True)
@@ -1176,6 +1211,8 @@ class ToolCallExecutor:
             }
         if accepted is not None:
             accepted.status = "succeeded"
+            raw = _input_request_value(result)
+            accepted.is_input_request = isinstance(raw, dict) and raw.get("status") == "input_required"
         # Memory tools flag weak/empty retrieval results; the escalation hint
         # processor consumes this marker at the next context assembly
         # (agent-memory-tools, retrieval escalation gating).
@@ -1210,7 +1247,7 @@ class ToolCallExecutor:
                 )
             )
         if self._action_hook is not None and session_key:
-            await self._mirror_outcome(
+            recorded_digest = await self._mirror_outcome(
                 session_key=session_key,
                 execution_id=execution_id,
                 tc_id=tc_id,
@@ -1220,6 +1257,8 @@ class ToolCallExecutor:
                 result=result,
                 strict=accepted is not None,
             )
+            if accepted is not None:
+                accepted.result_digest = recorded_digest
 
         if span_ctx:
             await self._port.end_span(

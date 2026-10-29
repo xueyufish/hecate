@@ -185,7 +185,7 @@ class SqlActionLedgerHook(ActionLedgerHook):
         status: str,
         result: Any = None,
         error: str | None = None,
-    ) -> None:
+    ) -> str | None:
         outcome = ActionOutcome.UNKNOWN if status == "unknown" else ActionOutcome(status)
         record = ActionOutcomeRecord(
             action_key=execution_id,
@@ -211,6 +211,7 @@ class SqlActionLedgerHook(ActionLedgerHook):
                 exc_info=True,
             )
             raise
+        return record.result_digest
 
     @staticmethod
     def _result_digest(result: Any, error: str | None) -> str | None:

@@ -287,6 +287,11 @@ class TaskControlService:
                 raise TaskControlValidationError("input.controller must be an object")
             try:
                 ControllerLimits(max_turns=options.get("max_turns", 16), deadline=options.get("deadline"))
+                from hecate_runtime.agent_controller import NoProgressPolicy
+
+                progress_policy = NoProgressPolicy.from_declaration(options.get("no_progress"))
+                if progress_policy is not None:
+                    progress_policy.validate_observations()
                 schema = input.get("output_schema")
                 if schema is not None:
                     if not isinstance(schema, dict):

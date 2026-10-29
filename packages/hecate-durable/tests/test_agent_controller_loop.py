@@ -76,6 +76,35 @@ async def test_full_loop_advances_on_real_feedback(database, tmp_path) -> None:
     assert len(backend.list_run_actions(SQL_RUN)) == 2
 
 
+async def test_no_progress_stop_recovers_after_process_exit_before_terminal(database, tmp_path) -> None:
+    """Recover the identical stop from SQL without another model ask or read."""
+    from hecate_durable.contracts.durable import TaskLifecycleState
+
+    backend, _clock, _url = database
+    owner = prepare_decision_run(backend, RUN)
+    effect = tmp_path / "observations.txt"
+    config = json.loads(_config(backend, owner))
+    config["no_progress"] = {"limit": 2, "observations": ["web_search"]}
+    serialized = json.dumps(config)
+    crashed = _run_probe(serialized, "no-progress-crash", effect)
+    assert crashed.returncode == 9, crashed.stderr
+    first = json.loads(crashed.stdout)
+    assert first["reason"] == "no_progress_limit"
+    assert len(first["asks"]) == 2
+    assert backend.get_task_state(SQL_TASK).lifecycle_state is TaskLifecycleState.RUNNING
+    recovered = _run_probe(serialized, "no-progress-recover", effect)
+    assert recovered.returncode == 0, recovered.stderr
+    second = json.loads(recovered.stdout)
+    assert second["asks"] == []
+    assert second["no_progress"] == first["no_progress"]
+    assert _effects(effect) == ["effect-same", "effect-same"]
+    state = backend.get_task_state(SQL_TASK)
+    assert state.lifecycle_state is TaskLifecycleState.FAILED
+    assert state.extra["result"]["no_progress"] == first["no_progress"]
+    events = backend.read_events(SQL_RUN, limit=100).events
+    assert sum(event.payload.get("event_type") == "run_terminal" for event in events) == 1
+
+
 @pytest.mark.parametrize(
     "harness_declaration",
     [None, {"version": 1, "sections": [{"type": "memory", "content": {"facts": ["frozen policy"]}}]}],
