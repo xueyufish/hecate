@@ -555,7 +555,8 @@ async def test_operation_replay_returns_facts_and_conflicts_on_change(harness) -
         assert excinfo.value.code == "OPERATION_CONFLICT"
 
 
-async def test_crash_before_resume_is_healed_by_named_recovery(harness, monkeypatch) -> None:
+@pytest.mark.parametrize("profile", ["embedded", "dedicated"])
+async def test_crash_before_resume_is_healed_by_named_recovery(harness, monkeypatch, profile) -> None:
     """Decision committed, resume phase lost: the recovery consumer completes it."""
     task_uuid, t_ref, worker, _stub = await _parked_task(harness)
     state = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
@@ -592,9 +593,18 @@ async def test_crash_before_resume_is_healed_by_named_recovery(harness, monkeypa
     assert receipt_probe is None
     monkeypatch.setattr(_Svc, "_issue_resume", original_issue)  # the worker restarts healthy
 
-    recovery = ApprovalResumeRecovery(harness["suite"].store, harness["session_factory"])
-    processed = await recovery.resume_once()
+    if profile == "dedicated":
+        from hecate.execution.approval_wait_expiration import standalone_wait_reconcilers
+
+        monkeypatch.setattr("hecate.core.database.async_session_factory", harness["session_factory"])
+        recover = standalone_wait_reconcilers(store=harness["store"])
+    else:
+        recover = ApprovalResumeRecovery(harness["suite"].store, harness["session_factory"]).resume_once
+    processed = await recover()
     assert processed >= 1
+    if profile == "dedicated":
+        queued = await asyncio.to_thread(harness["store"].get_task_state, t_ref)
+        assert queued.lifecycle_state is TaskLifecycleState.QUEUED
 
     final_state = await _wait_for_state(harness, t_ref, "succeeded", worker=worker)
     assert final_state == "succeeded"
@@ -603,7 +613,7 @@ async def test_crash_before_resume_is_healed_by_named_recovery(harness, monkeypa
     assert view["decision"]["resume_command_id"] == resume_command_id_for("op-crash-1")
     assert view["decision"]["resume_receipt"]["state"] == "applied"
     # Running the recovery again is a no-op (the linkage is now recorded).
-    assert await recovery.resume_once() == 0
+    assert await recover() == 0
 
 
 async def test_cancel_race_after_decision_rejects_the_resume(harness, monkeypatch) -> None:
@@ -1114,9 +1124,9 @@ async def test_recovery_rotates_poisoned_batch_and_reaches_later_decision(harnes
     assert await _wait_for_state(harness, t_ref, "succeeded", worker=worker) == "succeeded"
 
 
-@pytest.mark.parametrize("failure", ["expiry", "decision"])
-async def test_worker_composition_preserves_both_approval_consumers(monkeypatch, failure):
-    """A failing expiry pass and a failing recovery pass remain independent."""
+@pytest.mark.parametrize("failure", ["expiry", "decision", "input"])
+async def test_worker_composition_preserves_all_wait_consumers(monkeypatch, failure):
+    """All wait consumers run even when any other consumer fails."""
     from types import SimpleNamespace
 
     import hecate_durable.worker as worker_module
@@ -1126,6 +1136,7 @@ async def test_worker_composition_preserves_both_approval_consumers(monkeypatch,
     import hecate.core.config as config
     import hecate.execution.approval_decision as decisions
     import hecate.execution.approval_wait_expiration as expiry
+    import hecate.execution.input_wait_expiration as input_expiry
     from hecate.core.composition.wiring import start_durable_worker, stop_durable_worker
 
     calls = []
@@ -1173,6 +1184,16 @@ async def test_worker_composition_preserves_both_approval_consumers(monkeypatch,
                 raise RuntimeError("decision recovery unavailable")
             return 2
 
+    class _InputExpirer:
+        def __init__(self, *args):
+            pass
+
+        async def expire_once(self):
+            calls.append("input")
+            if failure == "input":
+                raise RuntimeError("input expiry unavailable")
+            return 4
+
     monkeypatch.setattr(config.settings, "HECATE_DURABLE_WORKER", "on")
     monkeypatch.setattr(
         platform,
@@ -1183,11 +1204,12 @@ async def test_worker_composition_preserves_both_approval_consumers(monkeypatch,
     monkeypatch.setattr(worker_module, "OutboxRelay", _Relay)
     monkeypatch.setattr(expiry, "ApprovalWaitExpirer", _Expirer)
     monkeypatch.setattr(decisions, "ApprovalResumeRecovery", _Recovery)
+    monkeypatch.setattr(input_expiry, "InputWaitExpirer", _InputExpirer)
     app = FastAPI()
     await start_durable_worker(app)
     try:
-        assert await app.state.durable_worker.reconcile() == (2 if failure == "expiry" else 1)
-        assert calls == ["expiry", "decision"]
+        assert await app.state.durable_worker.reconcile() == 7 - {"expiry": 1, "decision": 2, "input": 4}[failure]
+        assert calls == ["expiry", "decision", "input"]
     finally:
         await stop_durable_worker(app)
 

@@ -46,7 +46,7 @@ from hecate.contracts.execution.references import BackendRef, RefKind, deploymen
 from hecate.execution.delivery_acceptance_view import delivery_projection
 from hecate.execution.entry_events import RunEventMapper
 from hecate.execution.governance_events import PlatformEventService
-from hecate.execution.task_input import human_input_contract
+from hecate.execution.task_input import human_input_contract, input_wait_timeout, plain_human_input_wait
 from hecate.execution.task_run_registry import TaskRunRegistry, TaskRunRegistryError
 from hecate.execution.workflow_child import WorkflowChildTaskAdapter, WorkflowPlan
 from hecate.models.agent import AgentModel
@@ -211,6 +211,7 @@ class _DispatchContext:
     controller_max_turns: int | None = None
     controller_deadline: str | None = None
     controller_no_progress: dict[str, Any] | None = None
+    controller_input_wait_timeout_seconds: float | None = None
     output_schema: dict[str, Any] | None = None
     platform_run_id: str | None = None
     # Versioned acceptance declaration: the goal/standard version plus the
@@ -755,6 +756,7 @@ class PlatformTaskDispatcher:
             controller_max_turns=controller.get("max_turns") if isinstance(controller.get("max_turns"), int) else None,
             controller_deadline=controller.get("deadline") if isinstance(controller.get("deadline"), str) else None,
             controller_no_progress=controller.get("no_progress"),
+            controller_input_wait_timeout_seconds=input_wait_timeout(controller.get("input_wait_timeout_seconds")),
             output_schema=payload.get("output_schema") if isinstance(payload.get("output_schema"), dict) else None,
             platform_run_id=payload.get("platform_run_id") if isinstance(payload.get("platform_run_id"), str) else None,
             acceptance=payload.get("acceptance") if isinstance(payload.get("acceptance"), dict) else None,
@@ -1506,6 +1508,59 @@ class PlatformTaskDispatcher:
         record = await asyncio.to_thread(self._store.get_task_state, task_ref)
         if record is None or record.lifecycle_state is not TaskLifecycleState.RUNNING:
             return  # cancelled or otherwise moved while the execution ran
+        if (
+            target is TaskLifecycleState.WAITING_INPUT
+            and context.controller_input_wait_timeout_seconds is not None
+            and plain_human_input_wait(wait.contract_ref)
+        ):
+            # The declared timeout anchors on the input-requesting action's
+            # durable receipt time, so the crash window between the outcome
+            # commit and this wait commit never restarts the clock; a
+            # recovered park re-derives the same absolute deadline. The
+            # anchor is required: an unverifiable one fails the park into
+            # reconciliation instead of inventing a deadline.
+            try:
+                contract = wait.contract_ref
+                anchor_raw = await asyncio.to_thread(
+                    self._store.action_receipt_time,
+                    contract["execution_id"],
+                    task_ref=task_ref,
+                    run_ref=run_ref,
+                    action_name=contract["tool"],
+                    arguments_digest=contract["arguments_digest"],
+                )
+                anchor = datetime.fromisoformat(anchor_raw) if anchor_raw else None
+                if anchor is not None and anchor.tzinfo is None:
+                    anchor = anchor.replace(tzinfo=UTC)
+                if anchor is None:
+                    raise ValueError("input request receipt time is unavailable")
+                now = await asyncio.to_thread(self._store.wait_now)
+                if anchor > now + timedelta(seconds=1):
+                    raise ValueError("input request receipt is in the future")
+                expires_at = (anchor + timedelta(seconds=context.controller_input_wait_timeout_seconds)).isoformat()
+                if context.controller_deadline:
+                    task_deadline = datetime.fromisoformat(context.controller_deadline)
+                    if task_deadline.tzinfo is None:
+                        task_deadline = task_deadline.replace(tzinfo=UTC)
+                    expires_at = min(datetime.fromisoformat(expires_at), task_deadline).isoformat()
+            except (OverflowError, TypeError, ValueError) as exc:
+                await asyncio.to_thread(
+                    self._store.apply_task_state,
+                    task_ref,
+                    TaskLifecycleState.RECONCILIATION_REQUIRED,
+                    expected_revision=expected_revision,
+                    extra_update={
+                        "reconciliation_reason": f"input wait anchor is unverifiable: {exc}",
+                        "result": {
+                            "status": "awaiting_reconciliation",
+                            "content": "",
+                            "error": "input wait deadline anchor is unverifiable",
+                            "error_category": "input_wait_unverifiable",
+                        },
+                    },
+                )
+                logger.warning("task %s input wait parked for reconciliation: %s", task_ref.id, exc)
+                return
         if context.approval_wait and target is TaskLifecycleState.WAITING_APPROVAL:
             await TaskRunRegistry(db).finalize_run(
                 uuid.UUID(run_ref.id), context.workspace_id, state="failed", error_category="waiting_approval"

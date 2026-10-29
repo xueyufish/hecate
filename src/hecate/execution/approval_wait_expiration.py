@@ -219,48 +219,7 @@ class ApprovalWaitExpirer:
             return await self._converge(db, t_ref, record, wait, category, authority_deadline, trusted_now)
 
     async def _is_local(self, db: Any, t_ref: BackendRef, record: Any) -> bool:
-        from sqlalchemy import select
-
-        from hecate.execution.task_run_registry import TaskRunRegistry
-        from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
-        from hecate.models.managed_delivery import ManagedDeliveryModel
-        from hecate.models.run import RunOrigin
-
-        run_ref = await asyncio.to_thread(self._store.run_for_task, t_ref)
-        try:
-            workspace = uuid.UUID(str(record.extra["workspace_id"]))
-            registry = TaskRunRegistry(db)
-            task = await registry.get_task(uuid.UUID(t_ref.id), workspace)
-            if run_ref is None or run_ref.issuer_domain != t_ref.issuer_domain:
-                return False
-            run = await registry.get_run(uuid.UUID(run_ref.id), workspace)
-            if run.task_id != task.id or run.issuer_domain != t_ref.issuer_domain:
-                return False
-            if run.origin != RunOrigin.PLATFORM or run.control_owner != "platform":
-                return False
-            deployment = await db.get(AgentDeploymentModel, run.deployment_id)
-            if (
-                deployment is None
-                or deployment.deleted
-                or deployment.workspace_id != workspace
-                or deployment.backend_type != BackendType.BUILTIN
-                or deployment.access_mode != AccessMode.IN_PROCESS
-            ):
-                return False
-            managed = await db.scalar(
-                select(ManagedDeliveryModel.id)
-                .where(
-                    ManagedDeliveryModel.workspace_id == workspace,
-                    ManagedDeliveryModel.deleted.is_(False),
-                    ManagedDeliveryModel.task_ref["id"].as_string() == t_ref.id,
-                    ManagedDeliveryModel.task_ref["issuer_domain"].as_string() == t_ref.issuer_domain,
-                )
-                .limit(1)
-            )
-            return managed is None
-        except (KeyError, ValueError):
-            logger.warning("task %s has unverifiable local ownership; wait unchanged", t_ref.id)
-            return False
+        return await verify_platform_local(db, self._store, t_ref, record)
 
     async def _converge(
         self,
@@ -360,6 +319,58 @@ def _parse(value: Any) -> datetime | None:
     return deadline if deadline.tzinfo is not None else deadline.replace(tzinfo=UTC)
 
 
+async def verify_platform_local(db: Any, store: Any, t_ref: BackendRef, record: Any) -> bool:
+    """Verify the task is a platform-local builtin execution this worker owns.
+
+    Shared by the approval and input wait reconcilers: issuer matching alone
+    proves nothing — the Task/Run registry must resolve the run to a
+    platform-origin, platform-controlled builtin in-process deployment with
+    no managed-delivery claim. Unverifiable facts leave the wait untouched.
+    """
+    from sqlalchemy import select
+
+    from hecate.execution.task_run_registry import TaskRunRegistry
+    from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
+    from hecate.models.managed_delivery import ManagedDeliveryModel
+    from hecate.models.run import RunOrigin
+
+    run_ref = await asyncio.to_thread(store.run_for_task, t_ref)
+    try:
+        workspace = uuid.UUID(str(record.extra["workspace_id"]))
+        registry = TaskRunRegistry(db)
+        task = await registry.get_task(uuid.UUID(t_ref.id), workspace)
+        if run_ref is None or run_ref.issuer_domain != t_ref.issuer_domain:
+            return False
+        run = await registry.get_run(uuid.UUID(run_ref.id), workspace)
+        if run.task_id != task.id or run.issuer_domain != t_ref.issuer_domain:
+            return False
+        if run.origin != RunOrigin.PLATFORM or run.control_owner != "platform":
+            return False
+        deployment = await db.get(AgentDeploymentModel, run.deployment_id)
+        if (
+            deployment is None
+            or deployment.deleted
+            or deployment.workspace_id != workspace
+            or deployment.backend_type != BackendType.BUILTIN
+            or deployment.access_mode != AccessMode.IN_PROCESS
+        ):
+            return False
+        managed = await db.scalar(
+            select(ManagedDeliveryModel.id)
+            .where(
+                ManagedDeliveryModel.workspace_id == workspace,
+                ManagedDeliveryModel.deleted.is_(False),
+                ManagedDeliveryModel.task_ref["id"].as_string() == t_ref.id,
+                ManagedDeliveryModel.task_ref["issuer_domain"].as_string() == t_ref.issuer_domain,
+            )
+            .limit(1)
+        )
+        return managed is None
+    except (KeyError, ValueError):
+        logger.warning("task %s has unverifiable local ownership; wait unchanged", t_ref.id)
+        return False
+
+
 WaitReconciler = Callable[[], Awaitable[int]]
 
 
@@ -382,3 +393,44 @@ def standalone_expirer(*, store: Any | None = None) -> WaitReconciler:
     if not hasattr(store, "engine") or store.engine.url != platform_url:
         raise ValueError("approval wait reconciler and platform must use the same SQL database")
     return ApprovalWaitExpirer(store, async_session_factory).expire_once
+
+
+def standalone_wait_reconcilers(*, store: Any | None = None) -> WaitReconciler:
+    """Composite ``--wait-reconciler`` factory: approval AND input waits.
+
+    The dedicated worker process must run against the same platform
+    database as the app process (enforced against the bound engine URL);
+    each reconciler stays fault-isolated inside the composite.
+    """
+
+    from hecate.core.composition.durable_platform import get_durable_suite
+    from hecate.core.database import async_session_factory
+    from hecate.execution.approval_decision import ApprovalResumeRecovery
+    from hecate.execution.input_wait_expiration import InputWaitExpirer
+
+    store = store if store is not None else get_durable_suite().store
+    approval = standalone_expirer(store=store)
+    input_expiry = InputWaitExpirer(store, async_session_factory).expire_once
+    # A non-None worker suppresses inline dispatch in the control service.
+    # Resumes only requeue here; the dedicated worker acquires the normal
+    # dispatch lease in its next cycle, after this callback returns.
+    resume = ApprovalResumeRecovery(store, async_session_factory, worker=_QueuedResumeWorker()).resume_once
+    reconcilers = (("approval expiry", approval), ("approval resume", resume), ("input expiry", input_expiry))
+
+    async def reconcile() -> int:
+        processed = 0
+        for name, callback in reconcilers:
+            try:
+                processed += await callback()
+            except Exception:  # noqa: BLE001 — one broken pass never blocks the others
+                logger.exception("%s reconciliation pass failed", name)
+        return processed
+
+    return reconcile
+
+
+class _QueuedResumeWorker:
+    """Leave resumed commands queued for the dedicated worker's leased cycle."""
+
+    async def dispatch_once(self, task_ref: BackendRef) -> bool:
+        return False

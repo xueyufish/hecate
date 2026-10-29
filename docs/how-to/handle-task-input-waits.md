@@ -93,3 +93,13 @@ token — refresh and resubmit against the current wait.
 - The panel is read-only but the task is `waiting_input`: check the
   reason line — consumed (already continuing), approval wait, or
   workflow child wait (callback-only).
+
+## Wait expiry (opt-in)
+
+A task can declare how long an input wait may sit: `controller.input_wait_timeout_seconds` (positive, finite seconds within datetime precision and range, validated at submission). Without the declaration the wait keeps its historical meaning — resumable until someone resolves it, with no deadline.
+
+- The deadline is anchored to the first successful transactional receipt event of the input-requesting action, never to the wall clock at parking or a repeated receipt: a crash between the outcome commit and the wait commit re-derives the same absolute deadline on recovery. A declared timeout can never extend past the task's own `controller.deadline`. Unverifiable action linkage, receipt or clock routes a locally owned wait to reconciliation. Expiry and input commits use the SQL clock after acquiring the lock and refuse significant local clock divergence.
+- The durable worker converges expired waits automatically: the task fails with the stop category `input_wait_expired`, the wait token is consumed, and the request, deadline and action facts are preserved verbatim. Nothing re-invokes a model or tool, no input revision is fabricated, and the request is never marked as answered.
+- Races resolve atomically: a legal `provide_input`, a cancel and the expiry scan share one commit-time re-verification under the row lock, so exactly one outcome lands. A wake that was valid at the gate but crosses the deadline while waiting for the lock is rejected without an applied receipt or a recorded revision.
+- Reads stay passive — viewing the task page never expires a wait. The page shows the real deadline when one is declared.
+- Worker-off profiles have no automatic convergence: an expired wait stays parked until cancellation or a worker is enabled; late input is rejected. Dedicated worker processes opt in with `--wait-reconciler hecate.execution.approval_wait_expiration:standalone_wait_reconcilers` (covers approval expiry, pending approval resumes and input expiry together, requires the same SQL database as the app). Scanners keep their paging cursors between cycles and failures in one scanner do not block the others.
