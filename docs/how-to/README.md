@@ -16,6 +16,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Configure LLM providers](configure-llm-providers.md)** — set up OpenAI, Anthropic, DeepSeek, Qwen, GLM, Ollama, or any LiteLLM-supported provider via env vars or the database-backed provider registry.
 - **[Configure frozen Controller context](configure-controller-harness.md)** — declare static context sections, understand host-specific composition, and preserve recovery bindings.
 - **[Handle human input waits](handle-task-input-waits.md)** — the waiting_input closed loop: tool-declared input requests, page submission with real command receipts, and what stays read-only.
+- **[Decide human approval waits](decide-task-approvals.md)** — the waiting_approval loop: ADMIN-only decisions with the self-approval ban, phase-safe resume, and the recovery semantics.
 - **[Configure budget and cost tracking](configure-budget.md)** — set per-workspace / per-agent budgets, degradation profiles, alerts, and respond to 429 budgets.
 - **[Set up webhooks](set-up-webhooks.md)** — receive events from GitHub, Slack, or custom services; verify signatures; bind to workflows; handle retries and dead-letter queue.
 - **[Enable MCP Server](enable-mcp-server.md)** — expose Hecate agents, knowledge bases, and tools as MCP primitives so Claude Desktop, Cursor, or any MCP client can invoke them.
