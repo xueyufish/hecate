@@ -380,6 +380,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         applied_command_id: str | None = None,
         input_revision: dict[str, Any] | None = None,
         expected_wait: dict[str, Any] | None = None,
+        expected_wait_state: TaskLifecycleState = TaskLifecycleState.WAITING_APPROVAL,
         wait_expired: bool | None = None,
         approval_deadline: str | None = None,
         wait_clock: Callable[[], datetime] | None = None,
@@ -399,21 +400,25 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
             # may have waited for that lock across its approval deadline.
             recorded = recorded_at or self._clock()
             if expected_wait is not None:
+                # Approval and ordinary human-input waits share the same
+                # commit-time re-verification: the exact wait, token, run
+                # linkage and effective deadline, re-checked under the row
+                # lock so exactly one of {expire, cancel, wake} can land.
                 wait = (row.extra or {}).get("wait") if row is not None else None
                 if (
                     row is None
-                    or row.lifecycle_state != TaskLifecycleState.WAITING_APPROVAL.value
+                    or row.lifecycle_state != expected_wait_state.value
                     or wait != expected_wait
                     or not isinstance(wait, dict)
                     or wait.get("consumed")
                     or not wait.get("wait_token")
                 ):
-                    raise ValueError("approval wait changed before effect commit")
+                    raise ValueError("durable wait changed before effect commit")
                 if event_run_ref is not None and (row.run_issuer, row.run_id) != (
                     event_run_ref.issuer_domain,
                     event_run_ref.id,
                 ):
-                    raise ValueError("approval wait run linkage changed")
+                    raise ValueError("durable wait run linkage changed")
                 raw_deadline = wait.get("wait_expires_at")
                 if raw_deadline is not None and not isinstance(raw_deadline, str):
                     raise ValueError("approval wait deadline is malformed")
@@ -425,7 +430,12 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                     if authority_end.tzinfo is None:
                         authority_end = authority_end.replace(tzinfo=UTC)
                     deadline = min(deadline, authority_end) if deadline is not None else authority_end
-                now = wait_clock() if wait_clock is not None else datetime.fromisoformat(recorded)
+                if wait_clock is not None:
+                    now = wait_clock()
+                elif expected_wait_state is TaskLifecycleState.WAITING_INPUT and deadline is not None:
+                    now = self._wait_now(session, recorded)
+                else:
+                    now = datetime.fromisoformat(recorded)
                 if now.tzinfo is None:
                     now = now.replace(tzinfo=UTC)
                 if wait_expired is None or (deadline is not None and deadline <= now) != wait_expired:
@@ -1318,6 +1328,83 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         return may_auto_replay(ActionLedgerState.CLAIMED, ToolSideEffectClass(intent.side_effect_class))
 
     # -- host-facing queries -----------------------------------------------------
+
+    def wait_now(self) -> datetime:
+        """Read the SQL clock, refusing an unverifiable local clock divergence."""
+        with self._session() as session:
+            return self._wait_now(session, self._clock())
+
+    def _wait_now(self, session: Session, local_raw: str) -> datetime:
+        # PostgreSQL current_timestamp is the transaction start, potentially
+        # before a row-lock wait. Read actual wall time after acquiring it.
+        dialect = self.engine.dialect.name
+        expression = (
+            func.clock_timestamp()
+            if dialect == "postgresql"
+            else func.strftime("%Y-%m-%dT%H:%M:%f+00:00", "now")
+            if dialect == "sqlite"
+            else func.current_timestamp()
+        )
+        raw = session.scalar(select(expression))
+        now = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+        local = datetime.fromisoformat(local_raw)
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        local = local if local.tzinfo is not None else local.replace(tzinfo=UTC)
+        if abs((local - now).total_seconds()) > 300:
+            raise ValueError("input wait clock cannot be trusted")
+        return now
+
+    def action_receipt_time(
+        self,
+        action_key: str,
+        *,
+        task_ref: BackendRef | None = None,
+        run_ref: BackendRef | None = None,
+        action_name: str | None = None,
+        arguments_digest: str | None = None,
+    ) -> str | None:
+        """First immutable successful receipt, optionally scoped to its caller.
+
+        The latest outcome row can be rewritten by an idempotent receipt.
+        The transactional event log preserves the original deadline anchor.
+        Missing or mismatched evidence is never replaced by the current time.
+        """
+        from hecate_durable.storage.models import EventRow
+
+        with self._session() as session:
+            intent = session.get(ActionIntentRow, action_key)
+            outcome = session.get(ActionOutcomeRow, action_key)
+            if (
+                intent is None
+                or outcome is None
+                or outcome.outcome != ActionOutcome.SUCCEEDED.value
+                or (
+                    task_ref is not None
+                    and (intent.task_issuer, intent.task_id) != (task_ref.issuer_domain, task_ref.id)
+                )
+                or (run_ref is not None and (intent.run_issuer, intent.run_id) != (run_ref.issuer_domain, run_ref.id))
+                or (action_name is not None and intent.action_name != action_name)
+                or (arguments_digest is not None and intent.arguments_digest != arguments_digest)
+            ):
+                return None
+            payload = EventRow.envelope["payload"]
+            first = session.scalar(
+                select(EventRow)
+                .where(
+                    EventRow.run_issuer == intent.run_issuer,
+                    EventRow.run_id == intent.run_id,
+                    EventRow.envelope["task_ref"]["issuer_domain"].as_string() == intent.task_issuer,
+                    EventRow.envelope["task_ref"]["id"].as_string() == intent.task_id,
+                    payload["event_type"].as_string() == "action_outcome",
+                    payload["action_key"].as_string() == action_key,
+                    payload["outcome"].as_string() == ActionOutcome.SUCCEEDED.value,
+                )
+                .order_by(EventRow.id)
+                .limit(1)
+            )
+            if first is None or first.envelope["payload"].get("result_digest") != outcome.result_digest:
+                return None
+            return first.received_at
 
     def action_result(self, action_key: str, task_ref: BackendRef) -> Any:
         """Read the real result of an action owned by this logical task."""

@@ -60,7 +60,7 @@ from hecate.execution.delivery_acceptance_view import read_acceptance_view
 from hecate.execution.durable import ControlCommandRecorder, DurableTaskStore
 from hecate.execution.governance_events import RUN_TERMINAL, PlatformEventService
 from hecate.execution.task_dispatcher import PlatformTaskDispatcher, run_row_ref
-from hecate.execution.task_input import TASK_USER_INPUT_SCHEMA_REF, human_input_contract
+from hecate.execution.task_input import TASK_USER_INPUT_SCHEMA_REF, human_input_contract, input_wait_timeout
 from hecate.execution.task_run_registry import (
     TaskNotFoundError,
     TaskRunRegistry,
@@ -292,6 +292,7 @@ class TaskControlService:
                 progress_policy = NoProgressPolicy.from_declaration(options.get("no_progress"))
                 if progress_policy is not None:
                     progress_policy.validate_observations()
+                input_wait_timeout(options.get("input_wait_timeout_seconds"))
                 schema = input.get("output_schema")
                 if schema is not None:
                     if not isinstance(schema, dict):
@@ -1235,6 +1236,7 @@ class TaskControlService:
                 "applied_fact_id": record.command_id,
             }
             extra_update["_workflow_callbacks"] = callbacks
+        wait_run = await asyncio.to_thread(self._store.run_for_task, t_ref) if hasattr(self._store, "engine") else None
         try:
             await asyncio.to_thread(
                 self._store.apply_task_state,
@@ -1249,11 +1251,14 @@ class TaskControlService:
                 **(
                     {
                         "expected_wait": wait,
+                        "expected_wait_state": expected_state,
+                        "event_run_ref": wait_run,
                         "wait_expired": False,
                         "approval_deadline": approval_deadline,
                         "wait_clock": approval_clock,
                     }
-                    if expected_state is TaskLifecycleState.WAITING_APPROVAL and hasattr(self._store, "engine")
+                    if expected_state in (TaskLifecycleState.WAITING_APPROVAL, TaskLifecycleState.WAITING_INPUT)
+                    and hasattr(self._store, "engine")
                     else {}
                 ),
                 **({"applied_command_id": record.command_id} if hasattr(self._store, "engine") else {}),
