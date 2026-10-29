@@ -50,6 +50,7 @@ from hecate_runtime.agent_controller import (
     ControllerInputRevision,
     ControllerLimits,
     ControllerRunSpec,
+    NoProgressPolicy,
     TurnResponderSource,
 )
 from hecate_runtime.agent_turn import AgentTurn
@@ -96,6 +97,11 @@ class BusinessPort(StubRuntimePort):
         self.calls: list[str] = []
 
     async def tool_execute(self, name, args, context=None):
+        if _MODE.startswith("no-progress"):
+            if _MODE == "no-progress-recover":
+                raise AssertionError("a settled observation executed after process restart")
+            _record_effect(args["q"])
+            return {"quantity": 3}
         key = args["action_key"]
         if _MODE == "recover-unknown" or (_MODE == "recover" and key == "loop-a1"):
             raise AssertionError("completed action re-executed during recovery")
@@ -211,6 +217,36 @@ class LoopSource(TurnResponderSource):
                 raise AssertionError(f"scripted loop asked for an unsolicited turn at ({count}, {tail!r})")
 
         return _One()
+
+
+class NoProgressSource(TurnResponderSource):
+    """Ask for identical reads; recovery must ask for nothing at all."""
+
+    def __init__(self) -> None:
+        self.asks: list[str] = []
+
+    def frozen_refs(self) -> dict[str, Any]:
+        """Pin the same observation source across processes."""
+        return {"config": "no-progress-probe/1"}
+
+    def responder_for(self, messages, input_refs) -> DecisionResponder:
+        """Produce one read proposal only when the decision is not committed."""
+        source = self
+
+        class ReadResponder(DecisionResponder):
+            """A scripted read whose stable business input never changes."""
+
+            async def respond(self, run_ref, decision_step_id, refs):
+                """Count fresh model work and reject any recovery ask."""
+                if _MODE == "no-progress-recover":
+                    raise AssertionError("a committed observation decision was re-asked")
+                source.asks.append(decision_step_id)
+                return DecisionProposal(
+                    {"text": "observing"},
+                    (AcceptedAction(decision_step_id, "web_search", {"q": "same"}, "readonly"),),
+                )
+
+        return ReadResponder()
 
 
 class SnapshotLoopSource(LoopSource):
@@ -368,7 +404,13 @@ async def main() -> None:
 
         backend.record_outcome_ex = exit_after_first_outcome
     port = BusinessPort()
-    source = SnapshotLoopSource() if data.get("snapshots") else LoopSource()
+    source = (
+        NoProgressSource()
+        if _MODE.startswith("no-progress")
+        else SnapshotLoopSource()
+        if data.get("snapshots")
+        else LoopSource()
+    )
     base_messages = [{"role": "user", "content": "run the loop"}]
     from hecate_runtime.agent_harness import HarnessSection, declared_harness
 
@@ -397,7 +439,27 @@ async def main() -> None:
         input_revisions=spec_revisions,
         acceptance=declared_acceptance(data["acceptance"]) if _ACCEPTANCE and data.get("acceptance") else None,
         harness=harness_spec,
+        no_progress=NoProgressPolicy.from_declaration(data.get("no_progress")),
     )
+    if _MODE.startswith("no-progress"):
+        from hecate_durable.contracts.durable import TaskLifecycleState
+
+        if backend.get_task_state(SQL_TASK).lifecycle_state is TaskLifecycleState.QUEUED:
+            backend.apply_task_state(SQL_TASK, TaskLifecycleState.RUNNING)
+        outcome = await controller.run(spec)
+        report = {"reason": outcome.reason, "no_progress": outcome.no_progress, "asks": source.asks}
+        if _MODE == "no-progress-crash":
+            print(json.dumps(report), flush=True)
+            os._exit(9)  # The observations committed; the host terminal never did.
+        backend.apply_task_state(
+            SQL_TASK,
+            TaskLifecycleState.FAILED,
+            extra_update={"result": {"status": "failed", "no_progress": outcome.no_progress}},
+            event_run_ref=SQL_RUN,
+            terminal_payload={"status": "failed", "no_progress": outcome.no_progress},
+        )
+        print(json.dumps(report), flush=True)
+        os._exit(0)
     if _ACCEPTANCE and _MODE != "acceptance-crash":
         from hecate_runtime.accepted_decision import DecisionConflictError
         from hecate_runtime.delivery_acceptance import evaluate_delivery

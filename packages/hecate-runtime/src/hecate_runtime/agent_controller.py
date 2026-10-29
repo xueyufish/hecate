@@ -42,6 +42,7 @@ from typing import Any, Literal
 
 from hecate_runtime.accepted_decision import (
     DecisionOwnership,
+    DecisionStoreUnavailableError,
     DecisionValidationError,
     RunRef,
     canonical_json,
@@ -61,6 +62,7 @@ __all__ = [
     "ControllerExecutionDriver",
     "ControllerInputRevision",
     "ControllerLimits",
+    "NoProgressPolicy",
     "ControllerRunSpec",
     "PortTurnResponderSource",
     "TurnResponderSource",
@@ -114,6 +116,84 @@ class ControllerLimits:
                 datetime.fromisoformat(self.deadline)
             except (TypeError, ValueError) as exc:
                 raise DecisionValidationError("deadline must be an ISO-8601 timestamp") from exc
+
+
+@dataclass(frozen=True)
+class NoProgressPolicy:
+    """Explicit, first-version no-progress observation policy.
+
+    The declaring task names the tool calls worth watching (``observations``
+    — read-only tools only) and how many consecutive identical observation
+    turns the loop tolerates (``limit``). Everything else is deliberately
+    out of scope: observations judge RECORDED FACTS — the accepted action's
+    tool, canonical arguments and the action ledger's stable result digest —
+    never tool-name repetition, model text or Todo state; any succeeded
+    action outside the observation set makes the window inapplicable and resets the
+    window; approval/input waits and their wakeups are control facts that
+    never count as observations. ``version`` and the content digest are
+    pinned by every decision, so a policy rewritten under the same version
+    conflicts on replay instead of reinterpreting committed turns.
+    """
+
+    limit: int
+    observations: tuple[str, ...]
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if type(self.limit) is not int or self.limit < 1:
+            raise DecisionValidationError("no-progress limit must be a positive integer")
+        if type(self.version) is not int or self.version < 1:
+            raise DecisionValidationError("no-progress policy version must be a positive integer")
+        if not isinstance(self.observations, tuple) or not self.observations:
+            raise DecisionValidationError("no-progress observations must be a nonempty list")
+        for name in self.observations:
+            if not isinstance(name, str) or not name.strip() or name.strip() != name or len(name) > 256:
+                raise DecisionValidationError(
+                    "no-progress observation tools must be nonblank, trimmed strings of at most 256 characters"
+                )
+        if len(set(self.observations)) != len(self.observations):
+            raise DecisionValidationError("no-progress observation tools must be unique")
+
+    @property
+    def sha256(self) -> str:
+        """Content digest over version, limit and the observation set."""
+        return hashlib.sha256(
+            canonical_json(
+                {"version": self.version, "limit": self.limit, "observations": sorted(self.observations)}
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @classmethod
+    def from_declaration(cls, declaration: Any) -> NoProgressPolicy | None:
+        """Validate a host's declaration (JSON) into a policy; ``None`` when absent."""
+        if declaration is None:
+            return None
+        if not isinstance(declaration, dict):
+            raise DecisionValidationError("no-progress declaration must be an object")
+        if set(declaration) - {"limit", "observations", "version"}:
+            raise DecisionValidationError("unknown no-progress declaration fields")
+        observations = declaration.get("observations")
+        if not isinstance(observations, list):
+            raise DecisionValidationError("no-progress observations must be a list")
+        return cls(
+            limit=declaration.get("limit"),
+            observations=tuple(observations),
+            version=declaration.get("version", 1),
+        )
+
+    def validate_observations(self, host_readonly_tools: tuple[str, ...] = ()) -> None:
+        """Require kernel or trusted-host evidence of each tool's read-only role."""
+        from hecate_runtime.tool_side_effects import SideEffectClass, classify
+
+        if not isinstance(host_readonly_tools, tuple) or any(
+            not isinstance(name, str) or not name.strip() for name in host_readonly_tools
+        ):
+            raise DecisionValidationError("host read-only observations must be a tuple of tool names")
+        if any(
+            classify(name) is not SideEffectClass.READONLY and name not in host_readonly_tools
+            for name in self.observations
+        ):
+            raise DecisionValidationError("no-progress observations require confirmed read-only tools")
 
 
 @dataclass(frozen=True)
@@ -187,6 +267,13 @@ class ControllerRunSpec:
     # cancel/deadline classification. Example: a durable input wait parked
     # mid-turn must stop the turn's remaining actions claim-free.
     stop_check: Callable[[], str | None] | None = None
+    # Explicitly declared no-progress policy (see :class:`NoProgressPolicy`).
+    # Every decision pins its version and digest; absent pins nothing, so
+    # chains committed before the declaration replay byte-for-byte.
+    no_progress: NoProgressPolicy | None = None
+    # Host attestations affect observation eligibility only, never action
+    # authorization, retry classification or caller-supplied policy data.
+    readonly_observation_tools: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -209,6 +296,7 @@ class AgentControllerOutcome:
     decision_step_ids: tuple[str, ...] = ()
     final_decision_step_id: str | None = None
     final_decision_digest: str | None = None
+    no_progress: dict[str, Any] | None = None
 
     @property
     def is_final_answer(self) -> bool:
@@ -224,6 +312,7 @@ class AgentControllerOutcome:
             "decision_step_ids": list(self.decision_step_ids),
             "final_decision_step_id": self.final_decision_step_id,
             "final_decision_digest": self.final_decision_digest,
+            **({"no_progress": json_copy(self.no_progress)} if self.no_progress is not None else {}),
         }
 
     @classmethod
@@ -236,6 +325,7 @@ class AgentControllerOutcome:
             decision_step_ids=tuple(data.get("decision_step_ids") or ()),
             final_decision_step_id=data.get("final_decision_step_id"),
             final_decision_digest=data.get("final_decision_digest"),
+            no_progress=json_copy(data["no_progress"]) if data.get("no_progress") is not None else None,
         )
 
 
@@ -399,6 +489,15 @@ class AgentController:
                 raise DecisionValidationError("base_messages must equal the frozen harness composition")
             frozen["harness_version"] = spec.harness.version
             frozen["harness_digest"] = spec.harness.sha256
+        if spec.no_progress is not None:
+            # The no-progress binding is identifiable per decision: version
+            # and content digest ride every input_refs, so a policy
+            # rewritten under the same version conflicts on replay.
+            frozen["no_progress_version"] = spec.no_progress.version
+            frozen["no_progress_digest"] = spec.no_progress.sha256
+            spec.no_progress.validate_observations(spec.readonly_observation_tools)
+            if spec.readonly_observation_tools:
+                frozen["no_progress_readonly_tools"] = sorted(set(spec.readonly_observation_tools))
         # Stable causal order: by effective boundary, then given (durable
         # seq) order inside one boundary. Ids are unique — two revisions
         # can share a boundary, never an identity.
@@ -418,6 +517,13 @@ class AgentController:
         messages = base_messages
         committed: list[str] = []
         turn_index = 1
+        # No-progress observation window: consecutive identical observation
+        # turns, rebuilt from durable facts as turns replay — a restart
+        # re-derives the same series and stops at the same place. A new
+        # input revision opens a fresh window WITHOUT resetting the turn
+        # budget, deadline or policy.
+        no_progress_streak = 0
+        previous_signature: str | None = None
         while True:
             # Stop gates run before every turn — replays included: a replayed
             # turn's pending actions are still undispatched work, and the
@@ -522,7 +628,50 @@ class AgentController:
             if stop is not None:
                 yield self._terminal(_STOPPED, committed, turn_index, reason=stop)
                 return
+            # Validate the complete, identity-bound report before any
+            # observation can classify the turn as a no-progress stop.
             messages = project_turn_messages(outcome, messages)
+            if spec.no_progress is not None:
+                # Consecutive identical observation turns stop the loop
+                # before the next model call. A succeeded action outside the
+                # observation set resets this scoped window; otherwise the recorded
+                # facts — tool, arguments, ledger result digest — form the
+                # turn's observation. A human input revision opens a fresh
+                # window (control facts never fabricate progress); total
+                # turns, budget and deadline are untouched.
+                if any(item.effective_turn == turn_index for item in revisions):
+                    no_progress_streak = 0
+                    previous_signature = None
+                signature, saw_unobserved = self._observation_signature(
+                    spec.no_progress, outcome, spec.readonly_observation_tools
+                )
+                if saw_unobserved or signature is None:
+                    no_progress_streak = 0
+                    previous_signature = None
+                elif signature == previous_signature:
+                    no_progress_streak += 1
+                else:
+                    no_progress_streak = 1
+                    previous_signature = signature
+                if no_progress_streak >= spec.no_progress.limit:
+                    yield self._terminal(
+                        _STOPPED,
+                        committed,
+                        turn_index,
+                        reason="no_progress_limit",
+                        detail=f"no-progress observations reached the declared limit "
+                        f"({no_progress_streak} consecutive identical observation turns)",
+                        no_progress={
+                            "policy_version": spec.no_progress.version,
+                            "policy_sha256": spec.no_progress.sha256,
+                            "limit": spec.no_progress.limit,
+                            "consecutive_turns": no_progress_streak,
+                            "through_turn": turn_index,
+                            "last_decision_step_id": step_id,
+                            "observation_sha256": signature,
+                        },
+                    )
+                    return
             turn_index += 1
 
     @staticmethod
@@ -555,8 +704,59 @@ class AgentController:
             return f"action_{last.status}"
         return None
 
+    @staticmethod
+    def _observation_signature(
+        policy: NoProgressPolicy, outcome: AgentTurnOutcome, host_readonly_tools: tuple[str, ...] = ()
+    ) -> tuple[str | None, bool]:
+        """One fully-succeeded turn's observation signature over recorded facts.
+
+        Returns ``(signature, saw_unobserved)``: the signature hashes the
+        ordered observation identities — tool, canonical arguments and the
+        ledger's stable result digest per observed succeeded action — and
+        ``saw_unobserved`` marks any succeeded action outside the policy
+        (outside this scoped window). ``None`` means the turn
+        carried no comparable observation fact.
+        """
+        identities: list[dict[str, Any]] = []
+        saw_unobserved = False
+        for action, action_outcome in zip(outcome.record.actions, outcome.report.outcomes, strict=True):
+            if action_outcome.status != "succeeded":
+                continue
+            if action_outcome.is_input_request:
+                return None, True
+            observed = action.tool in policy.observations and (
+                action.side_effect_class == "readonly" or action.tool in host_readonly_tools
+            )
+            if not observed:
+                saw_unobserved = True
+                continue
+            digest = action_outcome.result_digest
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)
+            ):
+                raise DecisionStoreUnavailableError("no-progress observation has no verifiable ledger result digest")
+            identities.append(
+                {
+                    "tool": action.tool,
+                    "arguments": action.arguments,
+                    "result_digest": action_outcome.result_digest,
+                }
+            )
+        if not identities:
+            return None, saw_unobserved
+        return hashlib.sha256(canonical_json(identities).encode("utf-8")).hexdigest(), saw_unobserved
+
     def _terminal(
-        self, event_type: str, committed: list[str], turns: int, *, reason: str, detail: str | None = None
+        self,
+        event_type: str,
+        committed: list[str],
+        turns: int,
+        *,
+        reason: str,
+        detail: str | None = None,
+        no_progress: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         outcome = AgentControllerOutcome(
             state="stopped",
@@ -564,6 +764,7 @@ class AgentController:
             final_text=None,
             turns=turns,
             decision_step_ids=tuple(committed),
+            no_progress=no_progress,
         )
         event: dict[str, Any] = {"type": event_type, "reason": reason, "outcome": outcome.to_dict()}
         if detail is not None:

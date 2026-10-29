@@ -920,7 +920,7 @@ class ExecutionEngine:
         if not isinstance(raw, dict):
             raise ValueError("tool_arguments must be an object")
         if self._controller_loop:
-            from hecate_runtime.agent_controller import ControllerLimits
+            from hecate_runtime.agent_controller import ControllerLimits, NoProgressPolicy
             from hecate_runtime.delivery_acceptance import validate_acceptance_declaration
 
             schema = run_input.get("output_schema")
@@ -954,6 +954,9 @@ class ExecutionEngine:
             if not isinstance(controller, dict):
                 raise ValueError("controller must be an object")
             ControllerLimits(max_turns=controller.get("max_turns", 16), deadline=controller.get("deadline"))
+            progress_policy = NoProgressPolicy.from_declaration(controller.get("no_progress"))
+            if progress_policy is not None:
+                progress_policy.validate_observations(self._controller_readonly_observations())
             return
         if run_input.get("harness") is not None:
             raise ValueError("harness composition requires the controller loop")
@@ -979,6 +982,15 @@ class ExecutionEngine:
         if run_input.get("_host_definition") != self._definition_digest:
             raise ValueError("execution definition is missing or changed since admission")
         self.validate_run_input({key: value for key, value in run_input.items() if not key.startswith("_")})
+
+    def _controller_readonly_observations(self) -> tuple[str, ...]:
+        """Attest admitted manifest reads and the native read-only adapter."""
+        return tuple(
+            name
+            for name in self._profile.config.tool_allowlist
+            if self._side_effects.get(name) is ToolSideEffectClass.READONLY
+            or (name == "query_inventory" and name not in self._side_effects)
+        )
 
     async def submit(
         self,
@@ -1608,6 +1620,9 @@ class ExecutionEngine:
         limits = ControllerLimits(
             max_turns=controller_options.get("max_turns", 16), deadline=controller_options.get("deadline")
         )
+        from hecate_runtime.agent_controller import NoProgressPolicy
+
+        no_progress = NoProgressPolicy.from_declaration(controller_options.get("no_progress"))
         # Harness context composition: a declared block (persisted with the
         # task input, validated on submission) composes the frozen base
         # through the shared module — caller semantic sections, then the
@@ -1645,6 +1660,10 @@ class ExecutionEngine:
             # the real outcome) stops the turn's remaining actions
             # BEFORE their ledger claim and ends the pass for parking.
             stop_check=lambda: "input_wait_requested" if state.wait_request is not None else None,
+            # An explicitly declared no-progress policy pins its version
+            # and digest on every decision; absent keeps prior behavior.
+            no_progress=no_progress,
+            readonly_observation_tools=self._controller_readonly_observations() if no_progress is not None else (),
         )
         initial_refs = {**source.frozen_refs(), "controller": "agent-loop/1", "turn": 1}
         first_responder = source.responder_for(base_messages, initial_refs)
@@ -1770,6 +1789,13 @@ class ExecutionEngine:
             return
         state.status = "failed"
         state.error = f"controller loop stopped: {outcome.reason}"
+        if outcome.no_progress is not None:
+            state.result = {
+                "status": "failed",
+                "error_category": f"controller_{outcome.reason}",
+                "error": state.error,
+                "no_progress": outcome.no_progress,
+            }
 
     async def _controller_input_revisions(
         self, state: RunState, run_input: dict, durable_run: Any

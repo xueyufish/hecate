@@ -33,12 +33,19 @@ class AcceptedActionLookupError(LookupError):
 
 @dataclass(frozen=True)
 class AcceptedActionOutcome:
-    """One action result, independent of any Task completion decision."""
+    """One action result, independent of any Task completion decision.
+
+    ``result_digest`` is the action ledger's canonical recorded fact —
+    stable across restarts and recovery re-serialization — or ``None``
+    when no ledger recorded a digest.
+    """
 
     status: Literal["succeeded", "failed", "withheld", "stopped"]
     execution_id: str
     result: dict[str, Any] | None = None
     stop_reason: str | None = None
+    result_digest: str | None = None
+    is_input_request: bool = False
 
 
 def session_key_for_run(run_ref: RunRef) -> str:
@@ -141,7 +148,13 @@ class AcceptedActionStep:
             )
         except ExecutionStoppedError as exc:
             return AcceptedActionOutcome("stopped", execution_id, stop_reason=exc.reason_category)
-        return AcceptedActionOutcome(outcome.status, execution_id, result=outcome.result)
+        return AcceptedActionOutcome(
+            outcome.status,
+            execution_id,
+            result=outcome.result,
+            result_digest=outcome.result_digest,
+            is_input_request=outcome.is_input_request,
+        )
 
     @staticmethod
     def _verified(record: AcceptedDecisionRecord, run_ref: RunRef, step: str) -> AcceptedDecisionRecord:

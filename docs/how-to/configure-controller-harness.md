@@ -139,3 +139,23 @@ tool side), so stages 1 and 4 are pass-throughs on that host until it declares
 guard hooks. This slice does not certify model quality or production
 profiles, and the declared sections remain static snapshots: they do not load
 a Skill provider, query a Memory backend, or configure a planner.
+
+## No-progress protection (opt-in)
+
+A controller task can declare how many consecutive identical observation turns it tolerates:
+
+```json
+{"controller": {"max_turns": 8, "no_progress": {"limit": 3, "observations": ["web_search"]}}}
+```
+
+- **Explicit only.** Without the declaration nothing changes. Unknown declaration fields are rejected. Observation tools must have a confirmed read-only role before the first model call. The platform uses the kernel classification; the Runner also attests its native `query_inventory` adapter and admitted manifest read tools, pinning that host scope in the decision references. This does not change action authorization or retry classification.
+- **Facts, not appearances.** A turn's observation is the ordered set of recorded facts — tool, canonical arguments, and the ledger's canonical result digest (the same value recovery resolves). Tool-name repetition, model text and Todo state never trigger a stop; a changed result resets the window.
+- **Change and waits.** Keep legitimate polling tools outside `observations`; they retain the normal turn, deadline and budget bounds. Any succeeded action outside the observation set makes the current window inapplicable and resets it, without claiming that the business goal progressed. Approval waits and explicit input-request outcomes are control facts, never observations, including after a wake acknowledges the request. A consumed human-input revision opens a fresh window without resetting the turn budget, deadline or policy.
+- **Missing facts.** An observed action without a verifiable ledger result digest requires reconciliation; missing evidence never resets the window as if progress occurred. The complete, identity-bound action report is validated before the stop is classified.
+- **Binding and recovery.** Every decision pins the policy's version and digest; a policy rewritten under the same version conflicts on replay. Re-entry rebuilds the streak from the committed decisions and ledger facts and stops at the same place — no parallel progress ledger.
+- **The stop is honest.** Reaching the limit stops the loop before the next model call with the stop reason `no_progress_limit` and category `controller_no_progress_limit`. Both hosts persist a `no_progress` summary with the policy version/digest, limit, consecutive count, turn boundary and last decision reference. Completed results stay queryable, the task is never marked successful, and nothing re-queues or re-runs. Cancellation, deadlines, authorization denials and unknown side effects keep their original classifications and precedence.
+
+Independent-process stop recovery is covered by
+[`test_agent_controller_loop.py`](../../packages/hecate-durable/tests/test_agent_controller_loop.py).
+This is scoped repeated-observation protection, not certification that arbitrary
+business stagnation or semantic cycles can be detected.

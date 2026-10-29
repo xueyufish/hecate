@@ -210,6 +210,7 @@ class _DispatchContext:
     controller_loop: bool = False
     controller_max_turns: int | None = None
     controller_deadline: str | None = None
+    controller_no_progress: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     platform_run_id: str | None = None
     # Versioned acceptance declaration: the goal/standard version plus the
@@ -753,6 +754,7 @@ class PlatformTaskDispatcher:
             controller_loop=payload.get("controller_loop") is True,
             controller_max_turns=controller.get("max_turns") if isinstance(controller.get("max_turns"), int) else None,
             controller_deadline=controller.get("deadline") if isinstance(controller.get("deadline"), str) else None,
+            controller_no_progress=controller.get("no_progress"),
             output_schema=payload.get("output_schema") if isinstance(payload.get("output_schema"), dict) else None,
             platform_run_id=payload.get("platform_run_id") if isinstance(payload.get("platform_run_id"), str) else None,
             acceptance=payload.get("acceptance") if isinstance(payload.get("acceptance"), dict) else None,
@@ -1225,6 +1227,9 @@ class PlatformTaskDispatcher:
             max_turns=context.controller_max_turns or 16,
             deadline=context.controller_deadline,
         )
+        from hecate_runtime.agent_controller import NoProgressPolicy
+
+        no_progress = NoProgressPolicy.from_declaration(context.controller_no_progress)
         revisions, revisions_error = await self._controller_input_revisions(context, task_ref, controller_run)
         if revisions_error is not None:
             return {
@@ -1289,6 +1294,10 @@ class PlatformTaskDispatcher:
             # and digest on every decision; the controller additionally
             # verifies the base messages equal the frozen composition.
             harness=harness_spec,
+            # An explicitly declared no-progress policy pins its version and
+            # digest on every decision; absent keeps the loop's prior
+            # behavior (no observation, no stop).
+            no_progress=no_progress,
             # A recorded input request stops the turn's remaining actions
             # BEFORE their ledger claim — the request rides as the real
             # outcome of the action that produced it.
@@ -1364,6 +1373,7 @@ class PlatformTaskDispatcher:
             "content": "",
             "error": f"controller loop stopped: {outcome.reason}",
             "error_category": f"controller_{outcome.reason}",
+            **({"no_progress": outcome.no_progress} if outcome.no_progress is not None else {}),
         }
 
     async def _controller_input_revisions(

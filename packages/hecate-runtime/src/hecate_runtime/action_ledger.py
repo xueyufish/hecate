@@ -223,8 +223,14 @@ class ActionLedgerHook(ABC):
         status: str,
         result: Any = None,
         error: str | None = None,
-    ) -> None:
-        """Record the real outcome; ``result`` carries the raw tool output."""
+    ) -> str | None:
+        """Record the real outcome; ``result`` carries the raw tool output.
+
+        Returns the canonical result digest the ledger stored — the stable
+        fact reference recovery will resolve to — or ``None`` when nothing
+        was recorded. Consumers needing cross-restart-stable result facts
+        must use this digest, never a digest of the displayed content.
+        """
 
 
 def withheld_result(tc_id: str, content: str) -> dict[str, Any]:

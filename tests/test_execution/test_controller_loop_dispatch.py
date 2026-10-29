@@ -1379,3 +1379,168 @@ async def test_harness_turns_commit_verified_input_snapshots(harness) -> None:
     # Governance events carry decision facts, never the full input snapshot.
     events = harness["store"].read_events(harness["store"].run_for_task(t_ref), limit=200).events
     assert all("harness_input" not in json.dumps(event.payload) for event in events)
+
+
+# --- recoverable no-progress protection (platform end to end) ----------------------
+
+
+async def test_no_progress_declared_reads_stop_and_crash_recover(harness, monkeypatch) -> None:
+    """Two identical governed reads stop before a third ask. A crash after
+    the stop decision but before the terminal commit replays the chain in a
+    fresh dispatch, rebuilds the streak from ledger facts and commits the
+    same stop once — zero extra model calls, zero extra reads."""
+    import json as _json
+    import uuid as _uuid
+
+    from hecate_durable.worker import DurableWorker
+
+    from hecate.contracts.execution.durable import TaskLifecycleState as State
+    from hecate.execution.task_control import TaskControlService, task_ref_of
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    definition = {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "read-only stock lookup",
+            "parameters": {"type": "object", "required": ["sku"], "properties": {"sku": {"type": "string"}}},
+        },
+    }
+
+    class ReadingPort(ScriptedLoopPort):
+        """Always read the same fact through the declared read-only tool."""
+
+        def __init__(self) -> None:
+            super().__init__(final_text="unused", always_tool=True)
+
+        async def llm_invoke_structured(self, messages: list[dict], config: dict):
+            self.model_calls += 1
+            self.messages = messages
+            yield {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"call-{id(self)}-{self.model_calls}",
+                        "type": "function",
+                        "function": {"name": "web_search", "arguments": _json.dumps({"sku": "SAME"})},
+                    }
+                ],
+            }
+
+        async def tool_execute(self, name, args, context=None):
+            self.tool_calls.append((name, dict(args)))
+            return {"quantity": 3}
+
+    async def _load_web_search(db, tool_names, *, workspace_id=None):
+        return [definition]
+
+    ports: list[ReadingPort] = []
+
+    def _install_worker() -> DurableWorker:
+        port = ReadingPort()
+        ports.append(port)
+        assembly = _ScriptedAssembly(port)
+        assembly.patch()
+        harness["cleanups"].append(assembly.unpatch)
+        # Installed AFTER the assembly patch so the declared read-only tool
+        # is what the frozen snapshot carries.
+        import hecate.core.composition.entry_assembly as entry_assembly
+
+        entry_assembly.load_agent_tools = _load_web_search
+        harness["cleanups"].append(
+            lambda: setattr(entry_assembly, "load_agent_tools", assembly._saved["load_agent_tools"])
+        )
+        dispatcher = PlatformTaskDispatcher(harness["store"], harness["session_factory"])
+        return DurableWorker(
+            harness["store"], dispatcher, leases=harness["store"].leases, max_attempts=5, backoff_base=0.05
+        )
+
+    # The first terminal commit dies (the stop decision is in-memory only);
+    # the bounded worker retries into a fresh dispatch that replays.
+    finish_calls = {"n": 0}
+    real_finish = PlatformTaskDispatcher._finish
+
+    async def crash_first_finish(self, *args, **kwargs):  # noqa: ANN001, ANN003
+        finish_calls["n"] += 1
+        if finish_calls["n"] == 1:
+            raise RuntimeError("terminal commit lost (simulated crash)")
+        return await real_finish(self, *args, **kwargs)
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_finish", crash_first_finish)
+    worker = _install_worker()
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["suite"].store,
+            recorder=harness["suite"].recorder,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+            dispatcher=None,
+            worker=worker,
+        )
+        result = await service.submit(
+            workspace_id=WS,
+            user_id=OWNER,
+            goal="watch the reads",
+            agent_id=harness["agent_id"],
+            input={
+                "messages": [{"role": "user", "content": "check the stock"}],
+                "controller_loop": True,
+                "controller": {
+                    "max_turns": 8,
+                    "no_progress": {"limit": 2, "observations": ["web_search"]},
+                },
+            },
+        )
+    task_uuid = _uuid.UUID(result.task_ref.id)
+    t_ref = task_ref_of(task_uuid)
+    record = await _dispatch_to_state(harness, t_ref, worker, *_TERMINAL_STATES, timeout=120.0)
+    monkeypatch.setattr(PlatformTaskDispatcher, "_finish", real_finish)
+
+    assert finish_calls["n"] == 2  # the stop terminal committed exactly once
+    assert record.lifecycle_state is State.FAILED
+    outcome = (record.extra or {})["result"] or {}
+    assert outcome["error_category"] == "controller_no_progress_limit"
+    assert outcome["no_progress"]["consecutive_turns"] == 2
+    assert outcome["no_progress"]["last_decision_step_id"] == "agent-turn-000002"
+    assert "no_progress_limit" in str(outcome.get("error"))
+    # First pass asked twice and stopped; the recovery replayed both turns
+    # with zero model calls and zero reads, then stopped again — the same
+    # port served both passes because the worker owns one assembly.
+    assert ports[0].model_calls == 2
+    assert ports[0].tool_calls.count(("web_search", {"sku": "SAME"})) == 2
+
+    # One terminal governance event; both decisions pin the policy.
+    from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+    from hecate_runtime.accepted_decision import RunRef
+
+    events = harness["store"].read_events(harness["store"].run_for_task(t_ref), limit=200).events
+    assert sum(1 for e in events if e.payload.get("event_type") == "run_terminal") == 1
+    store = SqlAcceptedDecisionStore(harness["store"])
+    run_ref = harness["store"].run_for_task(t_ref)
+    for step in ("agent-turn-000001", "agent-turn-000002"):
+        decision = await store.lookup(RunRef(run_ref.issuer_domain, run_ref.id), step)
+        assert decision is not None, step
+        assert decision.input_refs["no_progress_version"] == 1
+        assert decision.input_refs["no_progress_digest"]
+
+
+async def test_invalid_no_progress_declaration_is_rejected_before_submission(harness) -> None:
+    """Authoring errors fail at submission, never as runtime stops."""
+    from hecate.execution.task_control import TaskControlValidationError
+
+    for declaration in (
+        {"limit": 0, "observations": ["web_search"]},
+        {"limit": 2},
+        {"limit": 2, "observations": []},
+        {"limit": 2, "observations": "web_search"},
+        "no_progress",
+    ):
+        with pytest.raises(TaskControlValidationError):
+            await _dispatch_to_completion(
+                harness,
+                port=ScriptedLoopPort(final_text="never"),
+                controller={"max_turns": 4, "no_progress": declaration},
+            )
+    assert harness["store"].list_tasks() == []
