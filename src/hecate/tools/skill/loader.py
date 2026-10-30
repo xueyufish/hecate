@@ -70,6 +70,15 @@ class SkillNotAdvertisedError(Exception):
     """Requested skill is not advertised in the agent's L1 catalog."""
 
 
+class SkillPinResolutionError(Exception):
+    """A pinned skill cannot be resolved to frozen content.
+
+    Raised in strict mode only: the frozen surface a durable execution
+    was bound to is missing, disabled or corrupt, and silently falling
+    back to live content would change what the execution sees.
+    """
+
+
 class SkillLoader:
     """Loads agent skills from DB and formats them for context injection.
 
@@ -94,6 +103,7 @@ class SkillLoader:
         progressive: bool | None = None,
         ref_manifest: list[dict] | None = None,
         explicit_skill_names: list[str] | None = None,
+        strict_pins: bool = False,
     ) -> None:
         self._db = db
         if progressive is None:
@@ -101,10 +111,51 @@ class SkillLoader:
 
             progressive = settings.SKILL_PROGRESSIVE_DISCLOSURE
         self._progressive = progressive
+        if strict_pins:
+            self._validate_strict_manifest(ref_manifest or [])
+        self._manifest = {
+            entry.get("resource_id") or entry.get("name"): entry
+            for entry in (ref_manifest or [])
+            if strict_pins
+            if isinstance(entry, dict) and entry.get("resource_type") == "skill"
+        }
         self._pins_by_name = self._extract_pins(ref_manifest)
+        self._strict_pins = strict_pins
+        self._catalog_members: dict[str, SkillModel] = {}
+        self._catalog_discovered: set[str] = set()
         self._explicit_skill_names = list(explicit_skill_names) if explicit_skill_names is not None else None
         # Lazy per-instance cache for the resolved discovery policy (5.9c).
         self._discovery_policy: DiscoveryPolicy | None = None
+
+    @property
+    def catalog_members(self) -> tuple[SkillModel, ...]:
+        """Resolved resources actually retained by the last catalog rendering."""
+        return tuple(self._catalog_members.values())
+
+    @property
+    def catalog_discovered(self) -> frozenset[str]:
+        """Names admitted by discovery in the last rendered catalog."""
+        return frozenset(self._catalog_discovered)
+
+    @staticmethod
+    def _validate_strict_manifest(manifest: list[dict]) -> None:
+        seen: set[str] = set()
+        for entry in manifest:
+            if not isinstance(entry, dict):
+                raise SkillPinResolutionError("Invalid skill reference manifest")
+            if entry.get("resource_type") != "skill":
+                continue
+            name = entry.get("resource_id") or entry.get("name")
+            if not isinstance(name, str) or not name.strip() or name in seen:
+                raise SkillPinResolutionError("Invalid or duplicate skill reference")
+            seen.add(name)
+            try:
+                uuid.UUID(str(entry["skill_id"]))
+            except (KeyError, ValueError, TypeError) as exc:
+                raise SkillPinResolutionError(f"Skill '{name}' has no verifiable resource identity") from exc
+            version = entry.get("version")
+            if version is not None and (type(version) is not int or version < 1):
+                raise SkillPinResolutionError(f"Skill '{name}' has an invalid version pin")
 
     @staticmethod
     def _extract_pins(ref_manifest: list[dict] | None) -> dict[str, tuple[UUID, int]]:
@@ -155,6 +206,8 @@ class SkillLoader:
             Formatted XML string (L1 catalog, or full blocks in legacy mode);
             empty string if the agent has no usable skills.
         """
+        self._catalog_members = {}
+        self._catalog_discovered = set()
         agent = await self._load_agent(agent_id)
         if agent is None:
             logger.warning("Agent %s not found for skill loading", agent_id)
@@ -256,6 +309,10 @@ class SkillLoader:
         if not catalog_entries and not auto_blocks:
             return ""
 
+        selected = {name for name, _ in catalog_entries + auto_blocks}
+        self._catalog_discovered = {skill.name for skill in discovery_skills if skill.name in selected}
+        candidates = {skill.name: skill for skill in [*skills, *discovery_skills]}
+        self._catalog_members = {name: candidates[name] for name in sorted(selected)}
         parts: list[str] = ["<skills>"]
         parts.extend(text for _, text in catalog_entries)
         parts.extend(text for _, text in auto_blocks)
@@ -529,6 +586,8 @@ class SkillLoader:
         if not truncated:
             return ""
 
+        selected = {name for name, _ in truncated}
+        self._catalog_members = {skill.name: skill for skill in skills if skill.name in selected}
         parts = ["<skills>"]
         parts.extend(text for _, text in truncated)
         parts.append("</skills>")
@@ -599,8 +658,95 @@ class SkillLoader:
             )
         )
         winners = resolve_precedence_map(list(result.scalars().all()))
+        if self._strict_pins:
+            return await self._load_strict_content(winners, names, workspace_id)
         merged = await self._apply_pinned_content(winners)
         return list(merged.values())
+
+    async def _load_strict_content(
+        self,
+        winners: dict[str, SkillModel],
+        names: list[str],
+        workspace_id: UUID,
+    ) -> list[SkillModel]:
+        """Resolve exact pinned identities without cross-scope or live fallback."""
+        from hecate.core.canonical_hash import canonical_hash
+        from hecate.models.skill_version import SkillVersionModel
+        from hecate.tools.skill.versioning import snapshot_skill
+
+        resolved = dict(winners)
+        for name in names:
+            entry = self._manifest.get(name)
+            if entry is None:
+                continue
+            resource_id = uuid.UUID(str(entry["skill_id"]))
+            live = (
+                await self._db.execute(
+                    select(SkillModel)
+                    .outerjoin(PluginModel, SkillModel.plugin_id == PluginModel.id)
+                    .where(
+                        SkillModel.id == resource_id,
+                        SkillModel.name == name,
+                        SkillModel.workspace_id.in_([workspace_id, uuid.UUID(int=0)]),
+                        SkillModel.deleted.is_(False),
+                        self._plugin_enabled_condition(),
+                    )
+                )
+            ).scalar_one_or_none()
+            if live is None:
+                raise SkillPinResolutionError(f"Pinned skill '{name}' has no eligible resource in this workspace")
+            version = entry.get("version")
+            content = snapshot_skill(live)
+            if version is not None:
+                record = (
+                    await self._db.execute(
+                        select(SkillVersionModel).where(
+                            SkillVersionModel.skill_id == resource_id,
+                            SkillVersionModel.version == version,
+                            SkillVersionModel.workspace_id == live.workspace_id,
+                            SkillVersionModel.deleted.is_(False),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if record is None or record.schema_version != 1:
+                    raise SkillPinResolutionError(f"Pinned skill '{name}' version {version} is unavailable")
+                content = record.config_snapshot
+                actual = canonical_hash(
+                    {
+                        key: content.get(key)
+                        for key in ("name", "instructions", "allowed_tools", "scripts", "references")
+                    }
+                )
+                if actual != record.content_hash:
+                    raise SkillPinResolutionError(f"Pinned skill '{name}' content hash mismatch")
+            if content.get("name") != name:
+                raise SkillPinResolutionError(f"Pinned skill '{name}' snapshot identity mismatch")
+            expected = entry.get("content_hash")
+            actual = canonical_hash(
+                {key: content.get(key) for key in ("name", "instructions", "allowed_tools", "scripts", "references")}
+            )
+            if expected is not None and expected != actual:
+                raise SkillPinResolutionError(f"Pinned skill '{name}' manifest hash mismatch")
+            # Detach content from the live ORM row; live governance remains
+            # attached to the exact resource identity, never a same-name winner.
+            resolved[name] = SkillModel(
+                id=live.id,
+                workspace_id=live.workspace_id,
+                name=name,
+                description=content.get("description", ""),
+                instructions=content.get("instructions", ""),
+                allowed_tools=list(content.get("allowed_tools") or []),
+                scripts=list(content.get("scripts") or []),
+                references=list(content.get("references") or []),
+                max_tokens=content.get("max_tokens", 2000),
+                provider=live.provider,
+                source=live.source,
+                plugin_id=live.plugin_id,
+                trust_tier=live.trust_tier,
+                auto_load=live.auto_load,
+                model_invocable=live.model_invocable,
+            )
+        return list(resolved.values())
 
     async def _apply_pinned_content(self, winners: dict[str, SkillModel]) -> dict[str, SkillModel]:
         """Overlay pinned snapshot content onto the resolved live rows.
