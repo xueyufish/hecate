@@ -30,7 +30,7 @@ import asyncio
 import json
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -215,6 +215,10 @@ class _DispatchContext:
     # Explicit opt-in: freeze a governed skill catalog for this task
     # before its first model call (absent keeps original semantics).
     skill_catalog: bool = False
+    # Bounded-continuation declaration: corrections after an
+    # acceptance-failed candidate, persisted as durable trigger facts.
+    # Validated at context build (shape + the acceptance co-requirement).
+    controller_continuation: dict[str, Any] | None = None
     output_schema: dict[str, Any] | None = None
     platform_run_id: str | None = None
     # Versioned acceptance declaration: the goal/standard version plus the
@@ -415,6 +419,10 @@ class PlatformTaskDispatcher:
                 run = await self._new_attempt(db, task, latest, context)
         r_ref = run_row_ref(run)
         engine_session = self._engine_session_of(run)
+        # The live lifecycle revision: starts at the post-claim value and is
+        # advanced by dispatch-internal writes (continuation triggers) so
+        # the park/finish CAS never races our own committed facts.
+        live_revision = {"value": record.revision + 1}
         try:
             if context.workflow_plan is not None:
                 outcome = await self._execute_workflow(db, context, task_ref=task_ref, lease=lease)
@@ -428,6 +436,7 @@ class PlatformTaskDispatcher:
                     lease=lease,
                     resume_interrupted=resume_interrupted,
                     run=run,
+                    live_revision=live_revision,
                 )
             else:
                 outcome = await self._execute(
@@ -443,7 +452,7 @@ class PlatformTaskDispatcher:
         except TaskWaitingSignalError as wait:
             await db.commit()
             await self._park(
-                db, task_ref, wait, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease
+                db, task_ref, wait, context, run_ref=r_ref, expected_revision=live_revision["value"], lease=lease
             )
             return
         except ApprovalWaitSignal as signal:
@@ -460,7 +469,13 @@ class PlatformTaskDispatcher:
                 wait_error.contract_ref["run_id"] = str(run.id)
                 wait_error.contract_ref["engine_session_id"] = str(engine_session)
                 await self._park(
-                    db, task_ref, wait_error, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease
+                    db,
+                    task_ref,
+                    wait_error,
+                    context,
+                    run_ref=r_ref,
+                    expected_revision=live_revision["value"],
+                    lease=lease,
                 )
             except Exception:
                 logger.warning("task %s could not persist approval wait", task_ref.id, exc_info=True)
@@ -478,7 +493,7 @@ class PlatformTaskDispatcher:
                         "error_category": "approval_wait_persistence_failed",
                     },
                     run=run,
-                    expected_revision=record.revision + 1,
+                    expected_revision=live_revision["value"],
                     lease=lease,
                 )
             return
@@ -500,7 +515,7 @@ class PlatformTaskDispatcher:
                         "error_category": exc.reason_category,
                     },
                     run=run,
-                    expected_revision=record.revision + 1,
+                    expected_revision=live_revision["value"],
                     lease=lease,
                 )
                 return
@@ -518,7 +533,7 @@ class PlatformTaskDispatcher:
                 context,
                 {"status": "failed", "content": "", "error": str(exc)},
                 run=run,
-                expected_revision=record.revision + 1,
+                expected_revision=live_revision["value"],
                 lease=lease,
             )
             return
@@ -530,7 +545,7 @@ class PlatformTaskDispatcher:
                     self._store.apply_task_state,
                     task_ref,
                     TaskLifecycleState.RECONCILIATION_REQUIRED,
-                    expected_revision=record.revision + 1,
+                    expected_revision=live_revision["value"],
                     extra_update={"reconciliation_reason": "action outcome is not established"},
                     **({"lease": lease} if lease is not None else {}),
                 )
@@ -542,7 +557,7 @@ class PlatformTaskDispatcher:
             context,
             outcome,
             run=run,
-            expected_revision=record.revision + 1,
+            expected_revision=live_revision["value"],
             lease=lease,
         )
 
@@ -741,6 +756,19 @@ class PlatformTaskDispatcher:
         harness = payload.get("harness")
         validate_harness_declaration(harness, allowed_types=frozenset({"instructions", "skills", "memory"}))
         controller = payload.get("controller") if isinstance(payload.get("controller"), dict) else {}
+        controller_continuation = controller.get("continuation")
+        if controller_continuation is not None:
+            # Fail fast on a malformed declaration (positive integer bound,
+            # no bool, no unknown fields) and refuse the combination with a
+            # missing acceptance block: corrections without a frozen
+            # standard would be an unbounded revision channel. Accepted
+            # only with an explicitly declared standard — a bare
+            # output_schema pins nothing on decisions.
+            from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+            ControllerContinuationPolicy.from_declaration(controller_continuation)
+            if not isinstance(payload.get("acceptance"), dict):
+                raise ValueError("controller.continuation requires a declared acceptance block")
         return _DispatchContext(
             task_id=uuid.UUID(task_ref.id),
             workspace_id=workspace_id,
@@ -761,6 +789,7 @@ class PlatformTaskDispatcher:
             controller_deadline=controller.get("deadline") if isinstance(controller.get("deadline"), str) else None,
             controller_no_progress=controller.get("no_progress"),
             controller_input_wait_timeout_seconds=input_wait_timeout(controller.get("input_wait_timeout_seconds")),
+            controller_continuation=controller_continuation,
             output_schema=payload.get("output_schema") if isinstance(payload.get("output_schema"), dict) else None,
             platform_run_id=payload.get("platform_run_id") if isinstance(payload.get("platform_run_id"), str) else None,
             acceptance=payload.get("acceptance") if isinstance(payload.get("acceptance"), dict) else None,
@@ -1063,6 +1092,7 @@ class PlatformTaskDispatcher:
         lease: Any = None,
         resume_interrupted: bool = False,
         run: RunModel | None = None,
+        live_revision: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         """Run the opt-in agent-controller loop over the shared assembly.
 
@@ -1315,9 +1345,10 @@ class PlatformTaskDispatcher:
             max_turns=context.controller_max_turns or 16,
             deadline=context.controller_deadline,
         )
-        from hecate_runtime.agent_controller import NoProgressPolicy
+        from hecate_runtime.agent_controller import ControllerContinuationPolicy, NoProgressPolicy
 
         no_progress = NoProgressPolicy.from_declaration(context.controller_no_progress)
+        continuation_policy = ControllerContinuationPolicy.from_declaration(context.controller_continuation)
         revisions, revisions_error = await self._controller_input_revisions(context, task_ref, controller_run)
         if revisions_error is not None:
             return {
@@ -1397,7 +1428,25 @@ class PlatformTaskDispatcher:
             # BEFORE their ledger claim — the request rides as the real
             # outcome of the action that produced it.
             stop_check=input_watch.stop_reason,
+            continuation_policy=continuation_policy,
         )
+        # Persisted trigger facts are the durable authority for the
+        # continuation position: rebuilt BEFORE the first pass so a
+        # redelivery replays committed turns, skips already-rejected
+        # candidates and projects their feedback deterministically.
+        try:
+            continuations = self._persisted_continuations(
+                task_ref, continuation_policy, spec.acceptance, controller_run
+            )
+        except (ValueError, TypeError, KeyError) as exc:
+            return {
+                "status": "awaiting_reconciliation",
+                "content": "",
+                "error": f"continuation history is unverifiable: {exc}",
+                "error_category": "continuation_history_unavailable",
+            }
+        if continuations:
+            spec = replace(spec, continuations=continuations)
         first_responder = source.responder_for(messages, {**base_refs, "controller": "agent-loop/1", "turn": 1})
         controller = AgentController(AgentTurn(store, first_responder, executor), source)
 
@@ -1412,64 +1461,222 @@ class PlatformTaskDispatcher:
                 return RuntimeEventDecision.STOP_UNKNOWN
             return RuntimeEventDecision.CONTINUE
 
-        driver = ControllerExecutionDriver(controller, spec, should_cancel=should_cancel)
-        result = await runtime_execution_service.execute(
-            RuntimeExecutionRequest(
-                runtime=driver,
-                session_id=engine_session,
-                initial_input={},
-                should_cancel=should_cancel,
-                observer=observe,
-            )
-        )
-        if input_watch.requested is not None:
-            # Both fresh execution and ledger replay reach this boundary.
-            # No process-local observation is required to recover the wait.
-            request = input_watch.requested
-            raise TaskWaitingSignalError(
-                ControlCommandKind.PROVIDE_INPUT,
-                {
-                    "tool": request["tool"],
-                    "execution_id": request["execution_id"],
-                    "arguments_digest": request["arguments_digest"],
-                    "kind": "input",
-                    "contract": request["contract"],
-                    **({"run_id": str(run.id)} if run is not None else {}),
-                    "engine_session_id": str(engine_session),
-                },
-            )
-        if result.state.value == "failed":
-            if result.detail.get("requires_reconciliation"):
+        last_delivery: dict[str, Any] = {}
+        if spec.continuations:
+            entry = spec.continuations[-1]
+            try:
+                candidate = await store.lookup(controller_run, entry.candidate_decision_step_id)
+            except Exception as exc:  # noqa: BLE001 - unavailable history cannot resume
                 return {
                     "status": "awaiting_reconciliation",
                     "content": "",
-                    "error": result.error or "accepted decision history is unavailable",
+                    "error": f"continuation candidate is unavailable: {exc}",
                     "error_category": "decision_history_unavailable",
                 }
-            raise RuntimeError(result.error or "controller execution failed")
-        if result.state.value in ("unknown", "cancelled"):
-            return {"status": "unknown", "content": "", "error": f"controller execution {result.state.value}"}
-        outcome = driver.outcome
-        if outcome is None:  # pragma: no cover - a completed stream always carries one
-            return {"status": "unknown", "content": "", "error": "controller stream ended without an outcome"}
-        if outcome.is_final_answer:
-            return self._evaluate_delivery(
-                outcome.final_text or "",
-                context,
-                task_ref=task_ref,
-                run_ref=controller_run,
-                final_decision_step_id=outcome.final_decision_step_id,
-                final_decision_digest=outcome.final_decision_digest,
+            if candidate is not None:
+                last_delivery = {
+                    "content": candidate.accepted_output.get("text", ""),
+                    "acceptance": entry.acceptance_record,
+                }
+        while True:
+            driver = ControllerExecutionDriver(controller, spec, should_cancel=should_cancel)
+            result = await runtime_execution_service.execute(
+                RuntimeExecutionRequest(
+                    runtime=driver,
+                    session_id=engine_session,
+                    initial_input={},
+                    should_cancel=should_cancel,
+                    observer=observe,
+                )
             )
-        if outcome.reason == "cancel_requested":
-            return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
-        return {
-            "status": "failed",
-            "content": "",
-            "error": f"controller loop stopped: {outcome.reason}",
-            "error_category": f"controller_{outcome.reason}",
-            **({"no_progress": outcome.no_progress} if outcome.no_progress is not None else {}),
+            if input_watch.requested is not None:
+                # Both fresh execution and ledger replay reach this boundary.
+                # No process-local observation is required to recover the wait.
+                request = input_watch.requested
+                raise TaskWaitingSignalError(
+                    ControlCommandKind.PROVIDE_INPUT,
+                    {
+                        "tool": request["tool"],
+                        "execution_id": request["execution_id"],
+                        "arguments_digest": request["arguments_digest"],
+                        "kind": "input",
+                        "contract": request["contract"],
+                        **({"run_id": str(run.id)} if run is not None else {}),
+                        "engine_session_id": str(engine_session),
+                    },
+                )
+            if result.state.value == "failed":
+                if result.detail.get("requires_reconciliation"):
+                    return {
+                        "status": "awaiting_reconciliation",
+                        "content": "",
+                        "error": result.error or "accepted decision history is unavailable",
+                        "error_category": "decision_history_unavailable",
+                    }
+                raise RuntimeError(result.error or "controller execution failed")
+            if result.state.value in ("unknown", "cancelled"):
+                return {"status": "unknown", "content": "", "error": f"controller execution {result.state.value}"}
+            outcome = driver.outcome
+            if outcome is None:  # pragma: no cover - a completed stream always carries one
+                return {"status": "unknown", "content": "", "error": "controller stream ended without an outcome"}
+            if outcome.is_final_answer:
+                evaluated = self._evaluate_delivery(
+                    outcome.final_text or "",
+                    context,
+                    task_ref=task_ref,
+                    run_ref=controller_run,
+                    final_decision_step_id=outcome.final_decision_step_id,
+                    final_decision_digest=outcome.final_decision_digest,
+                )
+                last_delivery = {"content": evaluated["content"], "acceptance": evaluated["acceptance"]}
+                if evaluated.get("status") == "succeeded" or continuation_policy is None:
+                    return evaluated
+                # A rejected answer at the last turn has no correction budget.
+                # Preserve its delivery and verdict without consuming a trigger.
+                if outcome.turns >= limits.max_turns:
+                    return evaluated
+                if limits.deadline:
+                    deadline = datetime.fromisoformat(limits.deadline)
+                    if datetime.now(UTC) >= (deadline if deadline.tzinfo else deadline.replace(tzinfo=UTC)):
+                        return evaluated
+                # Bounded continuation: only an acceptance record whose
+                # checks are ALL verifiable with at least one explicit
+                # failure may consume a persisted trigger. Unverified
+                # checks, checker outages and malformed records never
+                # continue — they keep their real classification.
+                advanced = await self._advance_continuation(
+                    task_ref,
+                    evaluated,
+                    policy=continuation_policy,
+                    attempts=list(spec.continuations),
+                    lease=lease,
+                    r_ref=run_ref,
+                    live_revision=live_revision,
+                )
+                if advanced is None:
+                    return evaluated
+                if advanced == "cancelled":
+                    # The task moved off RUNNING while the trigger was being
+                    # persisted: the cancel won the race and keeps its real
+                    # classification.
+                    return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
+                spec = replace(spec, continuations=(*spec.continuations, advanced))
+                continue
+            if outcome.reason == "cancel_requested":
+                return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
+            return {
+                **last_delivery,
+                "status": "failed",
+                "content": last_delivery.get("content", ""),
+                "error": f"controller loop stopped: {outcome.reason}",
+                "error_category": f"controller_{outcome.reason}",
+                **({"no_progress": outcome.no_progress} if outcome.no_progress is not None else {}),
+            }
+
+    def _persisted_continuations(
+        self,
+        task_ref: BackendRef,
+        policy: Any,
+        acceptance: Any,
+        controller_run: Any,
+    ) -> tuple[Any, ...]:
+        """Restore the validated continuation trail without rerunning checks."""
+        from hecate_runtime.agent_controller import ControllerContinuation
+
+        state = self._store.get_task_state(task_ref)
+        block = (state.extra or {}).get("continuation") if state else None
+        return ControllerContinuation.from_block(
+            block,
+            policy,
+            acceptance,
+            task_ref={"issuer": task_ref.issuer_domain, "id": task_ref.id},
+            run_ref={"issuer": controller_run.issuer_domain, "id": controller_run.run_id},
+        )
+
+    async def _advance_continuation(
+        self,
+        task_ref: BackendRef,
+        evaluated: dict[str, Any],
+        *,
+        policy: Any,
+        attempts: list[Any],
+        lease: Any,
+        r_ref: BackendRef,
+        live_revision: dict[str, int] | None = None,
+    ) -> Any | None:
+        """Persist the next trigger fact and return its loop entry.
+
+        Returns ``None`` when the delivery record is ineligible (unverified
+        checks) or the declared bound is already reached — the caller keeps
+        the evaluated outcome as the task's real terminal classification.
+        A lost CAS re-reads the durable state: a task that moved off
+        RUNNING (cancel won the race) yields a cancelled outcome, and an
+        already-recorded candidate is the idempotent replay path.
+        """
+
+        from hecate_runtime.agent_controller import ControllerContinuation
+        from hecate_runtime.delivery_acceptance import continuation_feedback_payload
+
+        record = evaluated.get("acceptance")
+        if not isinstance(record, dict) or record.get("status") != "acceptance_failed":
+            return None
+        checks = record.get("checks") or []
+        verifiable = all(check.get("status") in ("passed", "failed") for check in checks if isinstance(check, dict))
+        explicitly_failed = any(check.get("status") == "failed" for check in checks if isinstance(check, dict))
+        if not verifiable or not explicitly_failed:
+            return None
+        if len(attempts) >= policy.max_continuations:
+            return None
+        candidate = record.get("final_decision") or {}
+        candidate_id = candidate.get("decision_step_id")
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
+            return None
+        if any(entry.candidate_decision_step_id == candidate_id for entry in attempts):
+            # The loop exited at a candidate that already carries a
+            # persisted trigger: the durable facts and the replay disagree.
+            raise ValueError("continuation candidate already recorded but the loop re-proposed it")
+        candidate_turn = int(candidate_id.rsplit("-", 1)[1])
+        attempt = {
+            "attempt": len(attempts) + 1,
+            "candidate_decision_step_id": candidate_id,
+            "candidate_digest": str(candidate.get("content_digest")),
+            "effective_turn": candidate_turn + 1,
+            "standard_version": record.get("version"),
+            "standard_sha256": record.get("declaration_sha256"),
+            "status": record.get("status"),
+            "policy_sha256": policy.sha256,
+            "acceptance_record": record,
+            "feedback": continuation_feedback_payload(
+                record, attempt=len(attempts) + 1, max_continuations=policy.max_continuations
+            ),
         }
+        while True:
+            current = await asyncio.to_thread(self._store.get_task_state, task_ref)
+            if current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING:
+                return "cancelled"
+            try:
+                state = await asyncio.to_thread(
+                    self._store.record_continuation_trigger,
+                    task_ref,
+                    attempt,
+                    policy_sha256=policy.sha256,
+                    max_continuations=policy.max_continuations,
+                    expected_revision=current.revision,
+                    **({"lease": lease} if lease is not None else {}),
+                    **({"event_run_ref": r_ref} if hasattr(self._store, "engine") else {}),
+                )
+            except ValueError:
+                # Either the task moved between the read and the CAS or the
+                # stored block refuses this attempt. Re-read once: a stored
+                # identical trigger (crash-replay race) is consumed already.
+                latest = await asyncio.to_thread(self._store.get_task_state, task_ref)
+                if latest is None or latest.lifecycle_state is not TaskLifecycleState.RUNNING:
+                    return "cancelled"
+                raise
+            if live_revision is not None:
+                live_revision["value"] = state.revision
+            stored = (state.extra or {}).get("continuation") or {}
+            return ControllerContinuation.from_record(stored["attempts"][-1])
 
     async def _controller_input_revisions(
         self, context: _DispatchContext, task_ref: BackendRef, controller_run: Any

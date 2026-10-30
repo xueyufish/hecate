@@ -145,6 +145,13 @@ def bind_worker_state(state: Any) -> None:
     _worker_state = state
 
 
+def unbind_worker_state(state: Any) -> None:
+    """Unbind a stopped application's worker without disturbing another app."""
+    global _worker_state
+    if _worker_state is state:
+        _worker_state = None
+
+
 def _current_request_stack() -> Any:
     return _worker_state or SimpleNamespace()
 

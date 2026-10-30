@@ -516,6 +516,9 @@ async def stop_durable_worker(app: FastAPI) -> None:
                 await task
     if remaining:
         logger.warning("durable worker stopped with %d dispatch(es) in flight", remaining)
+    from hecate.channel.api.tasks import unbind_worker_state
+
+    unbind_worker_state(app.state)
 
 
 @asynccontextmanager

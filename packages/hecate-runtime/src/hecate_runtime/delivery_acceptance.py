@@ -32,6 +32,7 @@ from hecate_runtime.accepted_decision import canonical_json
 __all__ = [
     "ACCEPTANCE_CHECKER_VERSION",
     "AcceptanceDeclaration",
+    "continuation_feedback_payload",
     "declared_acceptance",
     "evaluate_delivery",
     "evaluation_declaration",
@@ -315,6 +316,52 @@ def validate_acceptance_record(record: dict[str, Any]) -> None:
         or digest != hashlib.sha256(canonical_json(body).encode("utf-8")).hexdigest()
     ):
         raise ValueError("stored acceptance record is corrupt or uses an unavailable checker version")
+
+
+def continuation_feedback_payload(
+    record: dict[str, Any],
+    *,
+    attempt: int,
+    max_continuations: int,
+) -> dict[str, Any]:
+    """The internal control message projected after an acceptance-failed candidate.
+
+    Both hosts persist this payload with the trigger fact and the loop
+    projects it verbatim, so the model-visible correction is byte-identical
+    across hosts and replays. It names the boundary explicitly (internal
+    acceptance feedback, not a human input), the corrected candidate's
+    identity and digest, the frozen standard that rejected it and the
+    failed checks' verdicts — facts only, no new acceptance authority.
+    """
+
+    if not isinstance(record, dict) or record.get("status") != _STATUS_FAILED:
+        raise ValueError("continuation feedback requires an acceptance_failed record")
+    final_decision = record.get("final_decision")
+    if not isinstance(final_decision, dict) or not final_decision.get("decision_step_id"):
+        raise ValueError("continuation feedback requires the failed candidate's decision identity")
+    if record.get("version") is None or record.get("declaration_sha256") is None:
+        raise ValueError("continuation feedback requires the declared standard binding")
+    if type(attempt) is not int or attempt < 1 or type(max_continuations) is not int or max_continuations < 1:
+        raise ValueError("continuation feedback requires the attempt index and bound")
+    failed = [
+        {"kind": check.get("kind"), "status": check.get("status"), "detail": check.get("detail")}
+        for check in record.get("checks") or []
+        if isinstance(check, dict) and check.get("status") != _STATUS_PASSED
+    ]
+    return {
+        "attempt": attempt,
+        "max_continuations": max_continuations,
+        "candidate_decision_step_id": final_decision["decision_step_id"],
+        "candidate_content_sha256": record.get("content_sha256"),
+        "standard": {"version": record["version"], "declaration_sha256": record["declaration_sha256"]},
+        "status": record["status"],
+        "failed_checks": failed,
+        "instruction": (
+            "The delivered final answer failed the declared acceptance standard. "
+            "This is internal acceptance feedback, not a human instruction. "
+            "Produce a corrected final answer that satisfies every failed check."
+        ),
+    }
 
 
 def _output_schema_problem(text: str, schema: Any) -> str | None:
