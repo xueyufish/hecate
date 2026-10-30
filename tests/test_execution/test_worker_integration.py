@@ -326,6 +326,46 @@ async def test_lifespan_shutdown_drains_protected_dispatch_before_cancelling(har
     assert store.get_task_state(ref).lifecycle_state is TaskLifecycleState.SUCCEEDED
 
 
+async def test_stopping_an_old_app_preserves_the_new_app_binding(monkeypatch) -> None:
+    """Shutdown must only remove the binding owned by the stopping app."""
+    from types import SimpleNamespace
+
+    from hecate.channel.api import tasks
+    from hecate.core.composition.wiring import stop_durable_worker
+
+    monkeypatch.setattr(tasks, "_worker_state", None)
+    old = SimpleNamespace(state=SimpleNamespace(durable_worker=None))
+    new = SimpleNamespace(state=SimpleNamespace(durable_worker=None))
+    tasks.bind_worker_state(old.state)
+    tasks.bind_worker_state(new.state)
+    await stop_durable_worker(old)
+    assert tasks._current_request_stack() is new.state
+    await stop_durable_worker(new)
+    assert tasks._current_request_stack() is not new.state
+
+
+async def test_shutdown_unbinds_worker_when_drain_fails(monkeypatch) -> None:
+    """A failed drain must not leave a stopped app bound to future requests."""
+    from types import SimpleNamespace
+
+    from hecate.channel.api import tasks
+    from hecate.core.composition.wiring import stop_durable_worker
+
+    class StubWorker:
+        def request_drain(self):
+            pass
+
+        async def drain(self):
+            raise RuntimeError("drain failed")
+
+    monkeypatch.setattr(tasks, "_worker_state", None)
+    app = SimpleNamespace(state=SimpleNamespace(durable_worker=StubWorker()))
+    tasks.bind_worker_state(app.state)
+    with pytest.raises(RuntimeError, match="drain failed"):
+        await stop_durable_worker(app)
+    assert tasks._current_request_stack() is not app.state
+
+
 async def test_protected_interrupt_does_not_treat_conversation_as_checkpoint(harness, monkeypatch) -> None:
     """Conversation history cannot establish native protected-action recovery."""
     from hecate_durable.contracts.durable import ActionIntent, TaskLifecycleState
