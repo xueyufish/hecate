@@ -556,6 +556,131 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                     )
         return record
 
+    def record_continuation_trigger(
+        self,
+        task_ref: BackendRef,
+        attempt: dict[str, Any],
+        *,
+        policy_sha256: str,
+        max_continuations: int,
+        expected_revision: int | None = None,
+        lease: LeaseHandle | None = None,
+        event_run_ref: BackendRef | None = None,
+        recorded_at: str = "",
+    ) -> TaskStateRecord:
+        """Persist one bounded-continuation trigger fact under the row lock.
+
+        The trigger names the exact accepted final answer a delivery gate
+        rejected (candidate step id + content digest) and its failed
+        standard. The append is the consume-once boundary: the same
+        candidate redelivered after a crash returns the stored record
+        unchanged (never a second attempt), a different candidate under a
+        used index or a reached bound is corruption, and a policy digest
+        that differs from the recorded block refuses to extend an old
+        chain's budget. Runs in one transaction with the revision CAS and
+        the governance event, like every other task-state write.
+        """
+
+        if not isinstance(attempt, dict):
+            raise ValueError("continuation attempt must be an object")
+        index = attempt.get("attempt")
+        candidate_id = attempt.get("candidate_decision_step_id")
+        candidate_digest = attempt.get("candidate_digest")
+        if type(index) is not int or index < 1:
+            raise ValueError("continuation attempt index must be a positive integer")
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
+            raise ValueError("continuation attempt requires the candidate decision step id")
+        if not isinstance(candidate_digest, str) or len(candidate_digest) != 64:
+            raise ValueError("continuation attempt requires the candidate content digest")
+        if not isinstance(policy_sha256, str) or len(policy_sha256) != 64:
+            raise ValueError("continuation policy digest must be a 64-character hex digest")
+        if type(max_continuations) is not int or max_continuations < 1:
+            raise ValueError("max_continuations must be a positive integer")
+        with self._session() as session, session.begin():
+            if lease is not None:
+                self.leases.assert_valid(session, lease)
+            row = session.execute(
+                select(TaskStateRow)
+                .where(
+                    TaskStateRow.task_issuer == task_ref.issuer_domain,
+                    TaskStateRow.task_id == task_ref.id,
+                )
+                .with_for_update()
+            ).scalar_one_or_none()
+            if row is None:
+                raise ValueError("continuation trigger requires a durable task")
+            if expected_revision is not None and expected_revision != row.revision:
+                raise ValueError(f"stale revision: expected {expected_revision}, current is {row.revision}")
+            current = TaskLifecycleState(row.lifecycle_state)
+            if current is not TaskLifecycleState.RUNNING:
+                raise ValueError(f"continuation trigger requires a running task, got {current.value}")
+            block = (row.extra or {}).get("continuation")
+            if block is None:
+                block = {"policy_sha256": policy_sha256, "max_continuations": max_continuations, "attempts": []}
+            if not isinstance(block, dict) or not isinstance(block.get("attempts"), list):
+                raise ValueError("stored continuation block is corrupt")
+            if block.get("policy_sha256") != policy_sha256:
+                raise ValueError("continuation policy changed after its first recorded trigger")
+            attempts = block["attempts"]
+            if block.get("max_continuations") != max_continuations:
+                raise ValueError("continuation bound changed after its first recorded trigger")
+            # Detach every nested object BEFORE writing: mutating the loaded
+            # JSON structures in place would make the "old" and "new" column
+            # values compare equal, so the UPDATE would silently drop the
+            # extra change while still bumping the revision.
+            detached: list[dict[str, Any]] = []
+            for existing in attempts:
+                if not isinstance(existing, dict):
+                    raise ValueError("stored continuation attempt is corrupt")
+                detached.append(dict(existing))
+                if existing.get("candidate_decision_step_id") == candidate_id:
+                    if existing == attempt:
+                        # Already consumed by a dispatch that died before its
+                        # next model call: replay re-reads the stored facts.
+                        return TaskStateRecord(
+                            task_ref=task_ref,
+                            lifecycle_state=current,
+                            revision=row.revision,
+                            recorded_at=row.recorded_at,
+                            writer_source=row.writer_source,
+                            extra=dict(row.extra or {}),
+                        )
+                    raise ValueError("continuation candidate is already recorded with different facts")
+            if len(attempts) >= max_continuations:
+                raise ValueError("continuation bound is already reached")
+            if index != len(detached) + 1:
+                raise ValueError("continuation attempt index must be exactly the next recorded position")
+            detached.append(dict(attempt))
+            recorded = recorded_at or self._clock()
+            row.extra = {**(row.extra or {}), "continuation": {**block, "attempts": detached}}
+            row.revision = row.revision + 1
+            row.recorded_at = recorded
+            row.updated_at = recorded
+            run_ref = self._run_linkage(session, task_ref)
+            if event_run_ref is not None:
+                run_ref = event_run_ref
+            if run_ref is not None:
+                self.events.emit(
+                    session,
+                    task_ref=task_ref,
+                    run_ref=run_ref,
+                    event_type="task_continuation",
+                    payload={
+                        "attempt": index,
+                        "candidate_decision_step_id": candidate_id,
+                        "candidate_digest": candidate_digest,
+                        "status": attempt.get("status"),
+                    },
+                )
+            return TaskStateRecord(
+                task_ref=task_ref,
+                lifecycle_state=current,
+                revision=row.revision,
+                recorded_at=recorded,
+                writer_source=row.writer_source,
+                extra=dict(row.extra or {}),
+            )
+
     def _run_linkage(self, session: Session, task_ref: BackendRef) -> BackendRef | None:
         # A select (not session.get) so autoflush surfaces a task row added
         # earlier in this same transaction.

@@ -50,7 +50,11 @@ from hecate_runtime.accepted_decision import (
 from hecate_runtime.agent_harness import HarnessSpec
 from hecate_runtime.agent_turn import AgentTurn, AgentTurnOutcome
 from hecate_runtime.decision_step import DecisionResponder
-from hecate_runtime.delivery_acceptance import AcceptanceDeclaration
+from hecate_runtime.delivery_acceptance import (
+    AcceptanceDeclaration,
+    continuation_feedback_payload,
+    validate_acceptance_record,
+)
 from hecate_runtime.execution_driver import ExecutionDriver
 from hecate_runtime.harness_turn import HarnessTurnPipeline, ModelCallRejectedError
 from hecate_runtime.turn_projection import project_turn_messages
@@ -59,6 +63,8 @@ __all__ = [
     "CONTROLLER_LOOP_MARKER",
     "AgentController",
     "AgentControllerOutcome",
+    "ControllerContinuation",
+    "ControllerContinuationPolicy",
     "ControllerExecutionDriver",
     "ControllerInputRevision",
     "ControllerLimits",
@@ -75,6 +81,7 @@ _TURN_STARTED = "controller/turn_started"
 _TURN_COMPLETED = "controller/turn_completed"
 _FINAL_ANSWER = "controller/final_answer"
 _STOPPED = "controller/stopped"
+_CONTINUATION = "controller/continuation"
 
 
 def decision_step_id_for_turn(prefix: str, turn_index: int) -> str:
@@ -197,6 +204,205 @@ class NoProgressPolicy:
 
 
 @dataclass(frozen=True)
+class ControllerContinuationPolicy:
+    """Explicit, first-version bounded continuation after acceptance failure.
+
+    Declaring the policy lets a host re-enter the loop after its delivery
+    gate rejected a final answer under a declared acceptance standard —
+    never after unverified checks, cancels, budget/deadline stops or
+    no-progress stops. ``max_continuations`` bounds the total number of
+    persisted corrections for one task across restarts; the count is
+    durable host state, not loop memory. The policy is only meaningful
+    with a declared acceptance standard (the loop refuses the combination
+    without one), and its version and content digest are pinned by every
+    decision, so a policy rewritten under the same version conflicts on
+    replay instead of silently extending an old chain's budget.
+    """
+
+    max_continuations: int
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if type(self.max_continuations) is not int or self.max_continuations < 1:
+            raise DecisionValidationError("max_continuations must be a positive integer")
+        if type(self.version) is not int or self.version < 1:
+            raise DecisionValidationError("continuation policy version must be a positive integer")
+
+    @property
+    def sha256(self) -> str:
+        """Content digest over version and the continuation bound."""
+        return hashlib.sha256(
+            canonical_json({"version": self.version, "max_continuations": self.max_continuations}).encode("utf-8")
+        ).hexdigest()
+
+    @classmethod
+    def from_declaration(cls, declaration: Any) -> ControllerContinuationPolicy | None:
+        """Validate a host's declaration (JSON) into a policy; ``None`` when absent."""
+        if declaration is None:
+            return None
+        if not isinstance(declaration, dict):
+            raise DecisionValidationError("continuation declaration must be an object")
+        if set(declaration) - {"max_continuations", "version"}:
+            raise DecisionValidationError("unknown continuation declaration fields")
+        return cls(max_continuations=declaration.get("max_continuations"), version=declaration.get("version", 1))
+
+
+@dataclass(frozen=True)
+class ControllerContinuation:
+    """One persisted acceptance-failure correction, projected at its boundary.
+
+    ``attempt`` is the 1-based continuation index (durable host fact);
+    ``candidate_decision_step_id``/``candidate_digest`` pin the exact
+    committed final answer the feedback corrects; ``effective_turn`` is the
+    first turn that may consume the feedback (the candidate turn + 1 — the
+    loop verifies the pairing against the deterministic step ids);
+    ``feedback`` is the persisted internal control payload projected
+    verbatim as one user message — never a human input revision and never
+    part of the frozen base input.
+    """
+
+    attempt: int
+    candidate_decision_step_id: str
+    candidate_digest: str
+    effective_turn: int
+    feedback: dict[str, Any]
+    acceptance_record: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.attempt) is not int or self.attempt < 1:
+            raise DecisionValidationError("continuation attempt must be a positive integer")
+        if (
+            not isinstance(self.candidate_decision_step_id, str)
+            or not self.candidate_decision_step_id.strip()
+            or self.candidate_decision_step_id.strip() != self.candidate_decision_step_id
+            or len(self.candidate_decision_step_id) > 256
+        ):
+            raise DecisionValidationError(
+                "candidate_decision_step_id must be a nonblank, trimmed string of at most 256 characters"
+            )
+        if (
+            not isinstance(self.candidate_digest, str)
+            or len(self.candidate_digest) != 64
+            or any(char not in "0123456789abcdef" for char in self.candidate_digest)
+        ):
+            raise DecisionValidationError("candidate_digest must be a 64-character hex digest")
+        if type(self.effective_turn) is not int or self.effective_turn < 1 or self.effective_turn > 10**6:
+            raise DecisionValidationError("effective_turn must be a positive integer")
+        if not isinstance(self.feedback, dict):
+            raise DecisionValidationError("continuation feedback must be a JSON object")
+        canonical_json(self.feedback)
+
+    @classmethod
+    def from_record(cls, record: Any) -> ControllerContinuation:
+        """Rebuild the entry from a persisted trigger fact (strict shape).
+
+        The five loop-bearing fields are required and validated; the
+        record's known host-metadata fields (standard binding, verdict
+        status, policy digest) are accepted and ignored here, and anything
+        else is storage corruption: the host stops for reconciliation
+        instead of projecting an invented message.
+        """
+        if not isinstance(record, dict):
+            raise DecisionValidationError("continuation attempt record must be an object")
+        unknown = set(record) - {
+            "attempt",
+            "candidate_decision_step_id",
+            "candidate_digest",
+            "effective_turn",
+            "feedback",
+            "standard_version",
+            "standard_sha256",
+            "status",
+            "policy_sha256",
+            "acceptance_record",
+        }
+        if unknown:
+            raise DecisionValidationError(f"unknown continuation attempt record fields: {sorted(unknown)}")
+        missing = {"attempt", "candidate_decision_step_id", "candidate_digest", "effective_turn", "feedback"} - set(
+            record
+        )
+        if missing:
+            raise DecisionValidationError(f"continuation attempt record is missing fields: {sorted(missing)}")
+        feedback = record["feedback"]
+        if not isinstance(feedback, dict):
+            raise DecisionValidationError("continuation feedback must be a JSON object")
+        return cls(
+            attempt=record["attempt"],
+            candidate_decision_step_id=record["candidate_decision_step_id"],
+            candidate_digest=record["candidate_digest"],
+            effective_turn=record["effective_turn"],
+            feedback=json.loads(canonical_json(feedback)),
+            acceptance_record=json_copy(record["acceptance_record"])
+            if isinstance(record.get("acceptance_record"), dict)
+            else None,
+        )
+
+    @classmethod
+    def from_block(
+        cls,
+        block: Any,
+        policy: ControllerContinuationPolicy | None,
+        acceptance: AcceptanceDeclaration | None,
+        *,
+        task_ref: dict[str, str],
+        run_ref: dict[str, str],
+    ) -> tuple[ControllerContinuation, ...]:
+        """Restore host trigger facts without rerunning their historical checks.
+
+        The retained receipt binds checker semantics, standard, candidate and
+        namespace; feedback must reproduce that receipt exactly. Missing or
+        inconsistent evidence requires reconciliation before any fresh work.
+        """
+        if block is None:
+            return ()
+        if policy is None or acceptance is None:
+            raise ValueError("stored continuations require their declared policy and standard")
+        if not isinstance(block, dict) or not isinstance(block.get("attempts"), list):
+            raise ValueError("stored continuation block is corrupt")
+        if block.get("policy_sha256") != policy.sha256 or block.get("max_continuations") != policy.max_continuations:
+            raise ValueError("stored continuation policy does not match the declared policy")
+        if len(block["attempts"]) > policy.max_continuations:
+            raise ValueError("stored continuation attempts exceed the declared bound")
+        entries = []
+        for index, item in enumerate(block["attempts"], start=1):
+            entry = cls.from_record(item)
+            receipt = item.get("acceptance_record")
+            if not isinstance(receipt, dict):
+                raise ValueError("continuation acceptance receipt is missing")
+            validate_acceptance_record(receipt)
+            if (
+                entry.attempt != index
+                or item.get("policy_sha256") != policy.sha256
+                or item.get("standard_version") != acceptance.version
+                or item.get("standard_sha256") != acceptance.sha256
+                or item.get("status") != "acceptance_failed"
+                or receipt.get("status") != "acceptance_failed"
+                or receipt.get("version") != acceptance.version
+                or receipt.get("declaration_sha256") != acceptance.sha256
+                or receipt.get("task_ref") != task_ref
+                or receipt.get("run_ref") != run_ref
+                or receipt.get("final_decision")
+                != {
+                    "decision_step_id": entry.candidate_decision_step_id,
+                    "content_digest": entry.candidate_digest,
+                }
+            ):
+                raise ValueError("continuation receipt binding does not match its trigger")
+            checks = receipt.get("checks")
+            if (
+                not isinstance(checks, list)
+                or not all(isinstance(check, dict) and check.get("status") in ("passed", "failed") for check in checks)
+                or not any(check.get("status") == "failed" for check in checks)
+            ):
+                raise ValueError("continuation receipt is not a verifiable failure")
+            expected = continuation_feedback_payload(receipt, attempt=index, max_continuations=policy.max_continuations)
+            if canonical_json(entry.feedback) != canonical_json(expected):
+                raise ValueError("continuation feedback does not match its acceptance receipt")
+            entries.append(entry)
+        return tuple(entries)
+
+
+@dataclass(frozen=True)
 class ControllerInputRevision:
     """One accepted human input with its causal turn boundary.
 
@@ -274,6 +480,18 @@ class ControllerRunSpec:
     # Host attestations affect observation eligibility only, never action
     # authorization, retry classification or caller-supplied policy data.
     readonly_observation_tools: tuple[str, ...] = ()
+    # Explicitly declared bounded-continuation policy (see
+    # :class:`ControllerContinuationPolicy`). Requires a declared acceptance
+    # standard; version and digest ride every decision's input_refs.
+    continuation_policy: ControllerContinuationPolicy | None = None
+    # Persisted acceptance-failure corrections (durable host facts, see
+    # :class:`ControllerContinuation`). Each entry's feedback is projected
+    # once at its causal boundary, after the candidate's committed answer;
+    # a final answer whose step id and digest match an entry continues the
+    # chain instead of exiting, so replays skip already-rejected
+    # candidates deterministically. Entries never alter turn budgets,
+    # deadlines or the accepted decisions themselves.
+    continuations: tuple[ControllerContinuation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -498,6 +716,48 @@ class AgentController:
             spec.no_progress.validate_observations(spec.readonly_observation_tools)
             if spec.readonly_observation_tools:
                 frozen["no_progress_readonly_tools"] = sorted(set(spec.readonly_observation_tools))
+        continuation_by_candidate: dict[str, ControllerContinuation] = {}
+        if spec.continuation_policy is not None:
+            # The continuation binding is identifiable per decision: version
+            # and content digest ride every input_refs, so a policy
+            # rewritten under the same version conflicts on replay. Without
+            # a declared acceptance standard there is no frozen standard to
+            # correct against — the combination is a validation error, not
+            # an unbounded revision channel.
+            if spec.acceptance is None:
+                raise DecisionValidationError("a continuation policy requires a declared acceptance standard")
+            frozen["continuation_version"] = spec.continuation_policy.version
+            frozen["continuation_digest"] = spec.continuation_policy.sha256
+        if spec.continuations:
+            if spec.continuation_policy is None:
+                raise DecisionValidationError("continuation entries require a declared policy")
+            if len(spec.continuations) > spec.continuation_policy.max_continuations:
+                raise DecisionValidationError("continuation entries exceed the declared bound")
+            # Entries must pair with the loop's deterministic step ids: the
+            # feedback enters exactly one turn after its candidate, and
+            # candidates never repeat. A mismatched entry is a spec/storage
+            # inconsistency, not a reordering opportunity.
+            seen_candidates: set[str] = set()
+            previous_boundary = 0
+            for index, entry in enumerate(spec.continuations, start=1):
+                if entry.attempt != index:
+                    raise DecisionValidationError("continuation attempts must be consecutive from one")
+                if decision_step_id_for_turn(spec.decision_prefix, entry.effective_turn - 1) != (
+                    entry.candidate_decision_step_id
+                ):
+                    raise DecisionValidationError(
+                        "continuation effective_turn must be exactly one turn after its candidate decision"
+                    )
+                if entry.candidate_decision_step_id in seen_candidates:
+                    raise DecisionValidationError("continuation entries must reference distinct candidates")
+                if entry.effective_turn <= previous_boundary:
+                    raise DecisionValidationError("continuation entries must be ordered by effective_turn")
+                seen_candidates.add(entry.candidate_decision_step_id)
+                previous_boundary = entry.effective_turn
+                continuation_by_candidate[entry.candidate_decision_step_id] = entry
+                await self._turn.validate_final_answer(
+                    spec.run_ref, entry.candidate_decision_step_id, entry.candidate_digest
+                )
         # Stable causal order: by effective boundary, then given (durable
         # seq) order inside one boundary. Ids are unique — two revisions
         # can share a boundary, never an identity.
@@ -550,6 +810,24 @@ class AgentController:
                 ]
             step_id = decision_step_id_for_turn(spec.decision_prefix, turn_index)
             input_refs = {**frozen, "controller": CONTROLLER_LOOP_MARKER, "turn": turn_index}
+            visible_continuations = [entry for entry in spec.continuations if entry.effective_turn <= turn_index]
+            if visible_continuations:
+                # Bind every consumed feedback payload to the next decision,
+                # without changing the rejected candidate's original refs.
+                input_refs["continuation_digests"] = [
+                    hashlib.sha256(
+                        canonical_json(
+                            {
+                                "attempt": entry.attempt,
+                                "candidate_decision_step_id": entry.candidate_decision_step_id,
+                                "candidate_digest": entry.candidate_digest,
+                                "effective_turn": entry.effective_turn,
+                                "feedback": entry.feedback,
+                            }
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    for entry in visible_continuations
+                ]
             visible_inputs = [item.revision_id for item in revisions if item.effective_turn <= turn_index]
             if visible_inputs:
                 # The revision binding is identifiable per decision: only
@@ -598,6 +876,40 @@ class AgentController:
                 return
             committed.append(step_id)
             if outcome.is_final_answer:
+                entry = continuation_by_candidate.get(step_id)
+                if entry is not None:
+                    # An explicitly persisted correction for this committed
+                    # candidate: project the delivered answer and the stored
+                    # feedback, then continue the same chain. The digest
+                    # must match the committed decision — a candidate
+                    # rewritten under the same step id is corruption, not a
+                    # revision. The candidate's accepted decision stays
+                    # immutable; the feedback is an internal control
+                    # message, never a human input revision.
+                    if entry.candidate_digest != outcome.record.content_digest:
+                        raise DecisionStoreUnavailableError(
+                            "continuation candidate digest does not match the committed decision"
+                        )
+                    candidate_text = text_or_none(outcome)
+                    messages = messages + [
+                        {"role": "assistant", "content": candidate_text if isinstance(candidate_text, str) else ""},
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {"continuation_feedback": json_copy(entry.feedback)}, ensure_ascii=False
+                            ),
+                        },
+                    ]
+                    # A failed candidate and internal feedback do not establish
+                    # progress. Carry the observation window across corrections.
+                    yield {
+                        "type": _CONTINUATION,
+                        "turn": turn_index,
+                        "attempt": entry.attempt,
+                        "candidate_decision_step_id": step_id,
+                    }
+                    turn_index += 1
+                    continue
                 final = AgentControllerOutcome(
                     state="final_answer",
                     reason=None,

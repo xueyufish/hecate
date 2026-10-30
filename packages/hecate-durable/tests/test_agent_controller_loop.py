@@ -413,3 +413,179 @@ async def test_same_version_standard_rewrite_conflicts_instead_of_reevaluating(d
     recovered = _run_probe(_acceptance_config(backend, owner, tampered), "acceptance-tampered", effect)
     assert recovered.returncode == 0, recovered.stderr
     assert json.loads(recovered.stdout) == {"conflict": True}
+
+
+# -- bounded-continuation trigger facts (durable consume-once boundary) ------
+
+
+def _continuation_attempt(
+    index: int = 1,
+    candidate: str = "agent-turn-000002",
+    digest: str = "a" * 64,
+) -> dict:
+    return {
+        "attempt": index,
+        "candidate_decision_step_id": candidate,
+        "candidate_digest": digest,
+        "effective_turn": 3,
+        "standard_version": 2,
+        "standard_sha256": "b" * 64,
+        "status": "acceptance_failed",
+        "policy_sha256": "c" * 64,
+        "feedback": {"attempt": index, "max_continuations": 2, "failed_checks": []},
+    }
+
+
+async def test_continuation_trigger_persists_once_with_event(database) -> None:
+    """The trigger lands with its event; a replayed candidate is a no-op."""
+    from hecate_durable.contracts.durable import TaskLifecycleState
+
+    backend, _clock, _url = database
+    prepare_decision_run(backend, RUN)
+    backend.apply_task_state(SQL_TASK, TaskLifecycleState.RUNNING)
+    before = backend.get_task_state(SQL_TASK)
+    assert before.lifecycle_state is TaskLifecycleState.RUNNING
+
+    record = backend.record_continuation_trigger(
+        SQL_TASK, _continuation_attempt(), policy_sha256="c" * 64, max_continuations=2
+    )
+    assert record.revision == before.revision + 1
+    block = record.extra["continuation"]
+    assert block["policy_sha256"] == "c" * 64 and block["max_continuations"] == 2
+    assert [item["attempt"] for item in block["attempts"]] == [1]
+    assert record.lifecycle_state is TaskLifecycleState.RUNNING  # never a state move
+    events = backend.read_events(SQL_RUN, limit=100).events
+    continuations = [event for event in events if event.payload.get("event_type") == "task_continuation"]
+    assert len(continuations) == 1
+    assert continuations[0].payload["candidate_decision_step_id"] == "agent-turn-000002"
+
+    # A dispatch that died before its next model call redelivers onto the
+    # same candidate: consume-once means the stored fact wins, no second
+    # attempt, no revision bump, no duplicate event.
+    replay = backend.record_continuation_trigger(
+        SQL_TASK, _continuation_attempt(), policy_sha256="c" * 64, max_continuations=2
+    )
+    assert replay.revision == record.revision
+    assert len(replay.extra["continuation"]["attempts"]) == 1
+    events = backend.read_events(SQL_RUN, limit=100).events
+    assert sum(event.payload.get("event_type") == "task_continuation" for event in events) == 1
+
+    # A second, distinct candidate consumes the next position normally.
+    second = backend.record_continuation_trigger(
+        SQL_TASK,
+        _continuation_attempt(index=2, candidate="agent-turn-000004", digest="d" * 64),
+        policy_sha256="c" * 64,
+        max_continuations=2,
+    )
+    assert [item["attempt"] for item in second.extra["continuation"]["attempts"]] == [1, 2]
+    replay_at_bound = backend.record_continuation_trigger(
+        SQL_TASK,
+        _continuation_attempt(index=2, candidate="agent-turn-000004", digest="d" * 64),
+        policy_sha256="c" * 64,
+        max_continuations=2,
+    )
+    assert replay_at_bound.revision == second.revision
+
+
+async def test_continuation_trigger_refuses_mismatched_facts(database) -> None:
+    """Corruption, reordering, a reached bound, moved tasks and stale CAS all refuse."""
+    from hecate_durable.contracts.durable import TaskLifecycleState
+
+    backend, _clock, _url = database
+    prepare_decision_run(backend, RUN)
+    backend.apply_task_state(SQL_TASK, TaskLifecycleState.RUNNING)
+    # A stale revision CAS refuses before anything is read.
+    with pytest.raises(ValueError, match="stale revision"):
+        backend.record_continuation_trigger(
+            SQL_TASK,
+            _continuation_attempt(),
+            policy_sha256="c" * 64,
+            max_continuations=2,
+            expected_revision=99,
+        )
+    backend.record_continuation_trigger(SQL_TASK, _continuation_attempt(), policy_sha256="c" * 64, max_continuations=2)
+
+    # Same candidate, different facts: corruption, not a revision.
+    with pytest.raises(ValueError, match="different facts"):
+        backend.record_continuation_trigger(
+            SQL_TASK,
+            _continuation_attempt(digest="e" * 64),
+            policy_sha256="c" * 64,
+            max_continuations=2,
+        )
+    # A skipped or reused position.
+    with pytest.raises(ValueError, match="next recorded position"):
+        backend.record_continuation_trigger(
+            SQL_TASK,
+            _continuation_attempt(index=3, candidate="agent-turn-000006", digest="f" * 64),
+            policy_sha256="c" * 64,
+            max_continuations=2,
+        )
+    # A policy rewritten under a new digest cannot extend the chain.
+    with pytest.raises(ValueError, match="policy changed"):
+        backend.record_continuation_trigger(
+            SQL_TASK,
+            _continuation_attempt(index=2, candidate="agent-turn-000004", digest="d" * 64),
+            policy_sha256="9" * 64,
+            max_continuations=2,
+        )
+    # The persisted bound is enforced store-side.
+    backend.record_continuation_trigger(
+        SQL_TASK,
+        _continuation_attempt(index=2, candidate="agent-turn-000004", digest="d" * 64),
+        policy_sha256="c" * 64,
+        max_continuations=2,
+    )
+    with pytest.raises(ValueError, match="bound is already reached"):
+        backend.record_continuation_trigger(
+            SQL_TASK,
+            _continuation_attempt(index=3, candidate="agent-turn-000006", digest="f" * 64),
+            policy_sha256="c" * 64,
+            max_continuations=2,
+        )
+    # A terminal task never reactivates for continuation.
+    backend.apply_task_state(SQL_TASK, TaskLifecycleState.FAILED)
+    with pytest.raises(ValueError, match="running task"):
+        backend.record_continuation_trigger(
+            SQL_TASK,
+            _continuation_attempt(),
+            policy_sha256="c" * 64,
+            max_continuations=2,
+        )
+
+
+@pytest.mark.parametrize(
+    "window,remaining_asks",
+    [
+        ("candidate", [3, 4]),
+        ("trigger", [3, 4]),
+        ("next-decision", [4]),
+        ("partial-action", [4]),
+    ],
+)
+async def test_continuation_recovers_in_new_interpreter(database, tmp_path, window, remaining_asks) -> None:
+    """Real process death preserves attempts, model decisions and completed effects."""
+    backend, _clock, _url = database
+    owner = prepare_decision_run(backend, RUN)
+    effect = tmp_path / "continuation-effects.txt"
+    probe = Path(__file__).with_name("_controller_continuation_process.py")
+    config = _config(backend, owner)
+
+    def run(mode):
+        return subprocess.run(  # noqa: S603 - fixed interpreter and local probe, no shell
+            [sys.executable, "-I", str(probe), config, mode, str(effect)],
+            capture_output=True,
+            text=True,
+            timeout=25,
+        )
+
+    crashed = run(window)
+    assert crashed.returncode == 9, crashed.stderr
+    recovered = run("recover")
+    assert recovered.returncode == 0, recovered.stderr
+    assert json.loads(recovered.stdout) == {"asks": remaining_asks, "text": "verified"}
+    assert _effects(effect) == ["before", "correction-a", "correction-b"]
+    state = backend.get_task_state(SQL_TASK)
+    assert len(state.extra["continuation"]["attempts"]) == 1
+    events = backend.read_events(SQL_RUN, limit=100).events
+    assert sum(event.payload.get("event_type") == "task_continuation" for event in events) == 1

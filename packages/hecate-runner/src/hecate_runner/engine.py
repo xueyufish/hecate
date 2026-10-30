@@ -20,7 +20,7 @@ import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import httpx
@@ -920,7 +920,7 @@ class ExecutionEngine:
         if not isinstance(raw, dict):
             raise ValueError("tool_arguments must be an object")
         if self._controller_loop:
-            from hecate_runtime.agent_controller import ControllerLimits, NoProgressPolicy
+            from hecate_runtime.agent_controller import ControllerContinuationPolicy, ControllerLimits, NoProgressPolicy
             from hecate_runtime.delivery_acceptance import validate_acceptance_declaration
 
             schema = run_input.get("output_schema")
@@ -957,6 +957,13 @@ class ExecutionEngine:
             progress_policy = NoProgressPolicy.from_declaration(controller.get("no_progress"))
             if progress_policy is not None:
                 progress_policy.validate_observations(self._controller_readonly_observations())
+            # A bounded continuation corrects a delivery against a FROZEN
+            # standard: without a declared acceptance block there is
+            # nothing to correct against, so the combination is refused at
+            # admission rather than becoming an unbounded revision channel.
+            continuation_policy = ControllerContinuationPolicy.from_declaration(controller.get("continuation"))
+            if continuation_policy is not None and acceptance is None:
+                raise ValueError("controller.continuation requires a declared acceptance block")
             return
         if run_input.get("harness") is not None:
             raise ValueError("harness composition requires the controller loop")
@@ -1617,6 +1624,19 @@ class ExecutionEngine:
             }
         ]
         controller_options = run_input.get("controller") or {}
+        # Bounded-continuation opt-in: validated fail-fast (shape, bound,
+        # acceptance co-requirement) like every other controller option.
+        try:
+            from hecate_runtime.accepted_decision import DecisionValidationError
+            from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+            continuation_policy = ControllerContinuationPolicy.from_declaration(controller_options.get("continuation"))
+            if continuation_policy is not None and run_input.get("acceptance") is None:
+                raise ValueError("controller.continuation requires a declared acceptance block")
+        except (DecisionValidationError, ValueError) as exc:
+            state.status = "failed"
+            state.error = f"invalid controller continuation config: {exc}"
+            return
         limits = ControllerLimits(
             max_turns=controller_options.get("max_turns", 16), deadline=controller_options.get("deadline")
         )
@@ -1663,15 +1683,41 @@ class ExecutionEngine:
             # An explicitly declared no-progress policy pins its version
             # and digest on every decision; absent keeps prior behavior.
             no_progress=no_progress,
+            continuation_policy=continuation_policy,
             readonly_observation_tools=self._controller_readonly_observations() if no_progress is not None else (),
         )
+        # Persisted trigger facts are the durable authority for the
+        # continuation position: rebuilt before the first pass so a
+        # redelivery replays committed turns, skips already-rejected
+        # candidates and projects their feedback deterministically.
+        continuations = self._persisted_continuation_entries(
+            state, continuation_policy, spec.acceptance, controller_run
+        )
+        if continuations is None:
+            return
+        if continuations:
+            spec = replace(spec, continuations=continuations)
+            entry = continuations[-1]
+            try:
+                candidate = await SqlAcceptedDecisionStore(self._durable.store).lookup(
+                    controller_run, entry.candidate_decision_step_id
+                )
+            except Exception as exc:  # noqa: BLE001 - unavailable history cannot resume
+                state.needs_reconciliation = True
+                state.status = "unknown"
+                state.error = f"continuation candidate is unavailable: {exc}"
+                return
+            if candidate is not None:
+                state.result = {
+                    "content": candidate.accepted_output.get("text", ""),
+                    "acceptance": entry.acceptance_record,
+                }
         initial_refs = {**source.frozen_refs(), "controller": "agent-loop/1", "turn": 1}
         first_responder = source.responder_for(base_messages, initial_refs)
         controller = AgentController(
             AgentTurn(SqlAcceptedDecisionStore(self._durable.store), first_responder, executor),
             source,
         )
-        driver = ControllerExecutionDriver(controller, spec, should_cancel=lambda: state.cancel_requested)
 
         def observe(event: dict) -> RuntimeEventDecision:
             # Renew the dispatch lease at every turn boundary so a long
@@ -1688,114 +1734,263 @@ class ExecutionEngine:
                 return RuntimeEventDecision.STOP_UNKNOWN
             return RuntimeEventDecision.CONTINUE
 
-        try:
-            result = await runtime_execution_service.execute(
-                RuntimeExecutionRequest(
-                    runtime=driver,
-                    session_id=_uuid.UUID(controller_session),
-                    initial_input={},
-                    observer=observe,
-                    should_cancel=lambda: state.cancel_requested,
+        while True:
+            driver = ControllerExecutionDriver(controller, spec, should_cancel=lambda: state.cancel_requested)
+            try:
+                result = await runtime_execution_service.execute(
+                    RuntimeExecutionRequest(
+                        runtime=driver,
+                        session_id=_uuid.UUID(controller_session),
+                        initial_input={},
+                        observer=observe,
+                        should_cancel=lambda: state.cancel_requested,
+                    )
                 )
-            )
-        except ApprovalWaitSignal as signal:
-            # A park-worthy dispatch outcome: record the wait on the
-            # run state; the shared park flow commits the durable wait
-            # and the caller's finally keeps the task non-terminal. The
-            # contract carries the accepted action's real arguments so
-            # the wake's one-shot grant matches them.
-            state.wait_request = {
-                "wake_kind": signal.context.get("wake_kind", "resume"),
-                "contract_ref": {
-                    "tool": signal.tool_name,
-                    "arguments_digest": tool_arguments_digest(signal.arguments),
-                    "arguments": dict(signal.arguments or {}),
-                    "invocation_id": signal.context.get("invocation_id"),
-                    "kind": signal.context.get("wait_kind", "approval"),
-                },
-            }
-            return
-        if state.wait_request is not None:
-            # The observer stopped the stream at the turn boundary after
-            # an input-required outcome was durably recorded; the shared
-            # park flow commits the wait and releases the worker.
-            return
-        if result.state.value == "failed":
-            state.needs_reconciliation = bool(result.detail.get("requires_reconciliation"))
-            state.status = "unknown" if state.needs_reconciliation else "failed"
-            state.error = result.error or "controller execution failed"
-            return
-        if result.state.value in ("unknown", "cancelled"):
-            state.status = "cancelled" if result.state.value == "cancelled" else "unknown"
-            state.error = f"controller execution {result.state.value}"
-            return
-        outcome = driver.outcome
-        if outcome is None:  # pragma: no cover - completed streams carry one
-            state.status = "unknown"
-            state.error = "controller stream ended without an outcome"
-            return
-        if outcome.is_final_answer:
-            from hecate_runtime.delivery_acceptance import evaluate_delivery, evaluation_declaration
-
-            text = outcome.final_text or ""
-            declaration = evaluation_declaration(run_input.get("acceptance"), run_input.get("output_schema"))
-            final_decision = (
-                {
-                    "decision_step_id": outcome.final_decision_step_id,
-                    "content_digest": outcome.final_decision_digest,
+            except ApprovalWaitSignal as signal:
+                # A park-worthy dispatch outcome: record the wait on the
+                # run state; the shared park flow commits the durable wait
+                # and the caller's finally keeps the task non-terminal. The
+                # contract carries the accepted action's real arguments so
+                # the wake's one-shot grant matches them.
+                state.wait_request = {
+                    "wake_kind": signal.context.get("wake_kind", "resume"),
+                    "contract_ref": {
+                        "tool": signal.tool_name,
+                        "arguments_digest": tool_arguments_digest(signal.arguments),
+                        "arguments": dict(signal.arguments or {}),
+                        "invocation_id": signal.context.get("invocation_id"),
+                        "kind": signal.context.get("wait_kind", "approval"),
+                    },
                 }
-                if outcome.final_decision_step_id is not None and outcome.final_decision_digest is not None
-                else None
-            )
-            record = evaluate_delivery(
-                text,
-                declaration,
-                final_decision=final_decision,
-                evaluator={"host": "runner", "principal": state.principal},
-                task_ref=(
-                    {"issuer": state.task_ref.issuer_domain, "id": state.task_ref.id}
-                    if state.task_ref is not None
-                    else None
-                ),
-                run_ref=(
-                    {"issuer": state.run_ref.issuer_domain, "id": state.run_ref.id}
-                    if state.run_ref is not None
-                    else None
-                ),
-            )
-            state.result = {"content": text, "acceptance": record}
-            if record["status"] not in ("passed", "not_declared"):
-                # The committed final-answer decision retains delivery;
-                # failed or unverified checks must not grant success and
-                # the confirmed actions are never redone.
-                problem = next(check["detail"] for check in record["checks"] if check["status"] != "passed")
-                state.status = "failed"
-                state.error = problem
-                state.result["error"] = problem
-                state.result["error_category"] = record["status"]
                 return
-            state.status = "succeeded"
-            state.result["status"] = "succeeded"
-            state.result_ref = f"runs/{run_id}/artifacts"
-            self.record_tool_result(state, "controller", {"status": "final_answer", "turns": outcome.turns})
-            return
-        if outcome.reason == "cancel_requested":
-            state.status = "cancelled"
-            return
-        if outcome.reason in {"needs_review", "reconciliation_required", "store_unavailable"}:
-            state.needs_reconciliation = True
-            state.status = "unknown"
+            if state.wait_request is not None:
+                # The observer stopped the stream at the turn boundary after
+                # an input-required outcome was durably recorded; the shared
+                # park flow commits the wait and releases the worker.
+                return
+            if result.state.value == "failed":
+                state.needs_reconciliation = bool(result.detail.get("requires_reconciliation"))
+                state.status = "unknown" if state.needs_reconciliation else "failed"
+                state.error = result.error or "controller execution failed"
+                if state.result is not None:
+                    state.result = {
+                        **state.result,
+                        "status": state.status,
+                        "error": state.error,
+                        "error_category": "decision_history_unavailable"
+                        if state.needs_reconciliation
+                        else "controller_execution_failed",
+                    }
+                return
+            if result.state.value in ("unknown", "cancelled"):
+                state.status = "cancelled" if result.state.value == "cancelled" else "unknown"
+                state.error = f"controller execution {result.state.value}"
+                return
+            outcome = driver.outcome
+            if outcome is None:  # pragma: no cover - completed streams carry one
+                state.status = "unknown"
+                state.error = "controller stream ended without an outcome"
+                return
+            if outcome.is_final_answer:
+                from hecate_runtime.delivery_acceptance import evaluate_delivery, evaluation_declaration
+
+                text = outcome.final_text or ""
+                declaration = evaluation_declaration(run_input.get("acceptance"), run_input.get("output_schema"))
+                final_decision = (
+                    {
+                        "decision_step_id": outcome.final_decision_step_id,
+                        "content_digest": outcome.final_decision_digest,
+                    }
+                    if outcome.final_decision_step_id is not None and outcome.final_decision_digest is not None
+                    else None
+                )
+                record = evaluate_delivery(
+                    text,
+                    declaration,
+                    final_decision=final_decision,
+                    evaluator={"host": "runner", "principal": state.principal},
+                    task_ref=(
+                        {"issuer": state.task_ref.issuer_domain, "id": state.task_ref.id}
+                        if state.task_ref is not None
+                        else None
+                    ),
+                    run_ref=(
+                        {"issuer": state.run_ref.issuer_domain, "id": state.run_ref.id}
+                        if state.run_ref is not None
+                        else None
+                    ),
+                )
+                state.result = {"content": text, "acceptance": record}
+                if record["status"] not in ("passed", "not_declared"):
+                    # The committed final-answer decision retains delivery;
+                    # failed or unverified checks must not grant success and
+                    # the confirmed actions are never redone.
+                    problem = next(check["detail"] for check in record["checks"] if check["status"] != "passed")
+                    state.result["error"] = problem
+                    state.result["error_category"] = record["status"]
+                    # A bounded continuation may still correct this
+                    # candidate: the run stays RUNNING until the bound, the
+                    # verdict or a cancellation decides it. Publishing a
+                    # terminal status here would let an observer finish the
+                    # run while the correction is still in flight.
+                    if continuation_policy is None:
+                        state.status = "failed"
+                        state.error = problem
+                        return
+                    from datetime import UTC, datetime
+
+                    deadline = datetime.fromisoformat(limits.deadline) if limits.deadline else None
+                    if outcome.turns >= limits.max_turns or (
+                        deadline is not None
+                        and datetime.now(UTC) >= (deadline if deadline.tzinfo else deadline.replace(tzinfo=UTC))
+                    ):
+                        state.status = "failed"
+                        state.error = problem
+                        return
+                    advanced = self._advance_runner_continuation(
+                        state,
+                        record,
+                        policy=continuation_policy,
+                        attempts=list(spec.continuations),
+                        durable_run=durable_run,
+                    )
+                    if advanced is None:
+                        state.status = "failed"
+                        state.error = problem
+                        return  # bound reached or ineligible: real classification stands
+                    if advanced == "cancelled":
+                        state.status = "cancelled"
+                        state.error = problem
+                        return
+                    spec = replace(spec, continuations=(*spec.continuations, advanced))
+                    continue
+                state.status = "succeeded"
+                state.result["status"] = "succeeded"
+                state.result_ref = f"runs/{run_id}/artifacts"
+                self.record_tool_result(state, "controller", {"status": "final_answer", "turns": outcome.turns})
+                return
+            if outcome.reason == "cancel_requested":
+                state.status = "cancelled"
+                return
+            if outcome.reason in {"needs_review", "reconciliation_required", "store_unavailable"}:
+                state.needs_reconciliation = True
+                state.status = "unknown"
+                state.error = f"controller loop stopped: {outcome.reason}"
+                return
+            state.status = "failed"
             state.error = f"controller loop stopped: {outcome.reason}"
-            return
-        state.status = "failed"
-        state.error = f"controller loop stopped: {outcome.reason}"
-        if outcome.no_progress is not None:
             state.result = {
+                **(state.result or {}),
                 "status": "failed",
                 "error_category": f"controller_{outcome.reason}",
                 "error": state.error,
-                "no_progress": outcome.no_progress,
+                **({"no_progress": outcome.no_progress} if outcome.no_progress is not None else {}),
             }
+            return
+
+    def _persisted_continuation_entries(
+        self,
+        state: RunState,
+        policy: Any,
+        acceptance: Any,
+        controller_run: Any,
+    ) -> tuple[Any, ...] | None:
+        """Restore the validated continuation trail, or stop for reconciliation."""
+        from hecate_runtime.agent_controller import ControllerContinuation
+
+        try:
+            record = self._durable.store.get_task_state(state.task_ref)
+            block = (record.extra or {}).get("continuation") if record else None
+            return ControllerContinuation.from_block(
+                block,
+                policy,
+                acceptance,
+                task_ref={"issuer": state.task_ref.issuer_domain, "id": state.task_ref.id},
+                run_ref={"issuer": controller_run.issuer_domain, "id": controller_run.run_id},
+            )
+        except Exception as exc:  # noqa: BLE001 - unreadable history requires reconciliation
+            state.needs_reconciliation = True
+            state.status = "unknown"
+            state.error = f"stored continuation history is unverifiable: {exc}"
+            return None
+
+    def _advance_runner_continuation(
+        self,
+        state: RunState,
+        record: dict[str, Any],
+        *,
+        policy: Any,
+        attempts: list[Any],
+        durable_run: Any,
+    ) -> Any | None:
+        """Persist the next trigger fact and return its loop entry.
+
+        Mirrors the platform's ``_advance_continuation``: only an
+        acceptance record whose checks are all verifiable with at least one
+        explicit failure consumes a trigger; the bound and the consume-once
+        guard live in the shared store method. A task that moved off
+        RUNNING yields the ``"cancelled"`` sentinel.
+        """
+
+        from hecate_durable.contracts.durable import TaskLifecycleState
+        from hecate_runtime.agent_controller import ControllerContinuation
+        from hecate_runtime.delivery_acceptance import continuation_feedback_payload
+
+        if record.get("status") != "acceptance_failed" or state.task_ref is None:
+            return None
+        checks = record.get("checks") or []
+        verifiable = all(check.get("status") in ("passed", "failed") for check in checks if isinstance(check, dict))
+        explicitly_failed = any(check.get("status") == "failed" for check in checks if isinstance(check, dict))
+        if not verifiable or not explicitly_failed:
+            return None
+        if len(attempts) >= policy.max_continuations:
+            return None
+        candidate = record.get("final_decision") or {}
+        candidate_id = candidate.get("decision_step_id")
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
+            return None
+        if any(entry.candidate_decision_step_id == candidate_id for entry in attempts):
+            state.needs_reconciliation = True
+            state.status = "unknown"
+            state.error = "continuation candidate already recorded but the loop re-proposed it"
+            return None
+        candidate_turn = int(candidate_id.rsplit("-", 1)[1])
+        attempt = {
+            "attempt": len(attempts) + 1,
+            "candidate_decision_step_id": candidate_id,
+            "candidate_digest": str(candidate.get("content_digest")),
+            "effective_turn": candidate_turn + 1,
+            "standard_version": record.get("version"),
+            "standard_sha256": record.get("declaration_sha256"),
+            "status": record.get("status"),
+            "policy_sha256": policy.sha256,
+            "acceptance_record": record,
+            "feedback": continuation_feedback_payload(
+                record, attempt=len(attempts) + 1, max_continuations=policy.max_continuations
+            ),
+        }
+        current = self._durable.store.get_task_state(state.task_ref)
+        if current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING:
+            return "cancelled"
+        try:
+            stored = self._durable.store.record_continuation_trigger(
+                state.task_ref,
+                attempt,
+                policy_sha256=policy.sha256,
+                max_continuations=policy.max_continuations,
+                expected_revision=current.revision,
+                lease=state.controller_lease,
+                **({"event_run_ref": durable_run} if durable_run is not None else {}),
+            )
+        except ValueError:
+            # A stored identical trigger (crash-replay race) is consumed
+            # already; anything else refuses the extension.
+            latest = self._durable.store.get_task_state(state.task_ref)
+            if latest is None or latest.lifecycle_state is not TaskLifecycleState.RUNNING:
+                return "cancelled"
+            raise
+        stored_block = (stored.extra or {}).get("continuation") or {}
+        return ControllerContinuation.from_record(stored_block["attempts"][-1])
 
     async def _controller_input_revisions(
         self, state: RunState, run_input: dict, durable_run: Any

@@ -1205,13 +1205,18 @@ async def test_worker_composition_preserves_all_wait_consumers(monkeypatch, fail
     monkeypatch.setattr(expiry, "ApprovalWaitExpirer", _Expirer)
     monkeypatch.setattr(decisions, "ApprovalResumeRecovery", _Recovery)
     monkeypatch.setattr(input_expiry, "InputWaitExpirer", _InputExpirer)
+    from hecate.channel.api import tasks as tasks_api
+
+    monkeypatch.setattr(tasks_api, "_worker_state", None)
     app = FastAPI()
     await start_durable_worker(app)
+    assert tasks_api._current_request_stack() is app.state
     try:
         assert await app.state.durable_worker.reconcile() == 7 - {"expiry": 1, "decision": 2, "input": 4}[failure]
         assert calls == ["expiry", "decision", "input"]
     finally:
         await stop_durable_worker(app)
+    assert tasks_api._current_request_stack() is not app.state
 
 
 async def test_untrusted_restarted_authority_clock_is_not_a_human_decision(harness):

@@ -22,6 +22,7 @@ from hecate_runtime.accepted_action_step import execution_id_for_action
 from hecate_runtime.accepted_decision import (
     AcceptedAction,
     DecisionConflictError,
+    DecisionStoreUnavailableError,
     DecisionValidationError,
 )
 from hecate_runtime.agent_controller import (
@@ -1247,3 +1248,381 @@ async def test_channel_backfill_cannot_replace_the_ledger_observation_digest(mon
     recovered = await _controller(store, LoopScriptedSource({}), fresh, ledger).run(spec)
     assert recovered.no_progress == first.no_progress
     assert fresh.calls == []
+
+
+# -- bounded continuation after acceptance failure ---------------------------
+
+
+class TurnKeyedSource(TurnResponderSource):
+    """Script the loop by durable turn index, not by projected position.
+
+    Continuation rounds reuse the same projected shape (no tool messages),
+    so the position key cannot tell the rejected candidate's turn from the
+    corrected turn; the durable turn index can.
+    """
+
+    def __init__(self, by_turn: dict[int, DecisionProposal], *, frozen: dict[str, Any] | None = None):
+        self.by_turn = by_turn
+        self._frozen = frozen or {"config": "v1"}
+        self.turns: list[list[dict[str, Any]]] = []
+        self.model_asks: list[str] = []
+
+    def frozen_refs(self) -> dict[str, Any]:
+        return dict(self._frozen)
+
+    def responder_for(self, messages: list[dict[str, Any]], input_refs: dict[str, Any]) -> DecisionResponder:
+        self.turns.append(json.loads(json.dumps(messages)))
+        turn = input_refs["turn"]
+        proposal = self.by_turn.get(turn)
+        source = self
+
+        class _OneShot(DecisionResponder):
+            async def respond(self, run_ref, decision_step_id, refs) -> DecisionProposal:
+                if proposal is None:
+                    raise AssertionError(f"scripted loop decided an unsolicited turn {turn}")
+                source.model_asks.append(decision_step_id)
+                return proposal
+
+        return _OneShot()
+
+
+def _continuation_spec(run_ref=None, **kwargs) -> ControllerRunSpec:
+    from hecate_runtime.delivery_acceptance import AcceptanceDeclaration
+
+    return _spec(
+        run_ref,
+        acceptance=AcceptanceDeclaration(version=2, required_checks=({"kind": "content_contains", "value": "ok"},)),
+        **kwargs,
+    )
+
+
+def _entry(turn: int, text_digest: str, *, attempt: int = 1, feedback: dict[str, Any] | None = None) -> Any:
+    from hecate_runtime.agent_controller import ControllerContinuation
+
+    return ControllerContinuation(
+        attempt=attempt,
+        candidate_decision_step_id=decision_step_id_for_turn("agent-turn", turn),
+        candidate_digest=text_digest,
+        effective_turn=turn + 1,
+        feedback=feedback or {"attempt": attempt, "instruction": "revise"},
+    )
+
+
+def test_continuation_policy_validation() -> None:
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    policy = ControllerContinuationPolicy.from_declaration({"max_continuations": 2})
+    assert policy is not None and policy.max_continuations == 2
+    assert ControllerContinuationPolicy.from_declaration(None) is None
+    for bad in (
+        {"max_continuations": True},
+        {"max_continuations": 0},
+        {"max_continuations": 1.5},
+        {"max_continuations": 2, "unknown": 1},
+        "bounded",
+        {"max_continuations": 2, "version": True},
+    ):
+        with pytest.raises(DecisionValidationError):
+            ControllerContinuationPolicy.from_declaration(bad)
+
+
+def test_continuation_entry_validation() -> None:
+    from hecate_runtime.agent_controller import ControllerContinuation
+
+    with pytest.raises(DecisionValidationError):
+        ControllerContinuation(
+            attempt=0, candidate_decision_step_id="t-000001", candidate_digest="a" * 64, effective_turn=2, feedback={}
+        )
+    with pytest.raises(DecisionValidationError):
+        ControllerContinuation(
+            attempt=1, candidate_decision_step_id="t-000001", candidate_digest="xyz", effective_turn=2, feedback={}
+        )
+    with pytest.raises(DecisionValidationError):
+        ControllerContinuation(
+            attempt=1, candidate_decision_step_id="t-000001", candidate_digest="a" * 64, effective_turn=1, feedback=[]
+        )
+    record = {
+        "attempt": 1,
+        "candidate_decision_step_id": "agent-turn-000004",
+        "candidate_digest": "b" * 64,
+        "effective_turn": 5,
+        "feedback": {"k": 1},
+    }
+    entry = ControllerContinuation.from_record(record)
+    assert entry.effective_turn == 5
+    for corrupt in (
+        {**record, "extra": 1},
+        {k: v for k, v in record.items() if k != "feedback"},
+        {**record, "feedback": "text"},
+    ):
+        with pytest.raises(DecisionValidationError):
+            ControllerContinuation.from_record(corrupt)
+
+
+async def test_continuation_policy_requires_declared_acceptance() -> None:
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    source = TurnKeyedSource({1: _final("bad")})
+    with pytest.raises(DecisionValidationError, match="acceptance"):
+        await _controller(store, source, port).run(
+            _spec(continuation_policy=ControllerContinuationPolicy(max_continuations=1))
+        )
+
+
+async def test_continuation_projects_feedback_and_continues_the_chain() -> None:
+    """A matched candidate is projected with its feedback; the chain continues."""
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    policy = ControllerContinuationPolicy(max_continuations=1)
+    first = await _controller(store, TurnKeyedSource({1: _final("bad draft")}), port, ledger).run(
+        _continuation_spec(run_ref, continuation_policy=policy)
+    )
+    assert first.is_final_answer and first.final_decision_step_id == decision_step_id_for_turn("agent-turn", 1)
+
+    source = TurnKeyedSource({2: _final("ok result")})
+    entry = _entry(
+        1,
+        first.final_decision_digest,
+        feedback={"attempt": 1, "max_continuations": 1, "failed_checks": [{"kind": "content_contains"}]},
+    )
+    events: list[dict[str, Any]] = []
+    outcome = await _controller(store, source, StubToolPort(), ledger).run(
+        _continuation_spec(run_ref, continuation_policy=policy, continuations=(entry,)),
+        emit=events.append,
+    )
+    assert outcome.is_final_answer and outcome.final_text == "ok result"
+    assert outcome.turns == 2
+    # Turn 1 replayed from storage; only the corrected turn was asked.
+    assert source.model_asks == [decision_step_id_for_turn("agent-turn", 2)]
+    # The corrected turn sees the rejected answer and the internal feedback
+    # — an explicit control message, never a human input revision.
+    feedback_messages = [
+        message
+        for message in source.turns[1]
+        if isinstance(message.get("content"), str) and "continuation_feedback" in message["content"]
+    ]
+    assert len(feedback_messages) == 1
+    assert json.loads(feedback_messages[0]["content"])["continuation_feedback"]["failed_checks"] == [
+        {"kind": "content_contains"}
+    ]
+    assert all("provided_input" not in str(message.get("content", "")) for message in source.turns[1])
+    assert any(event["type"] == "controller/continuation" and event["attempt"] == 1 for event in events)
+
+
+async def test_double_continuation_rounds_project_in_order() -> None:
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    policy = ControllerContinuationPolicy(max_continuations=2)
+    first = await _controller(store, TurnKeyedSource({1: _final("draft one")}), port, ledger).run(
+        _continuation_spec(run_ref, continuation_policy=policy)
+    )
+    second = await _controller(store, TurnKeyedSource({2: _final("draft two")}), port, ledger).run(
+        _continuation_spec(
+            run_ref,
+            continuation_policy=policy,
+            continuations=(_entry(1, first.final_decision_digest, feedback={"round": 1}),),
+        )
+    )
+    source = TurnKeyedSource({3: _final("ok result")})
+    outcome = await _controller(store, source, StubToolPort(), ledger).run(
+        _continuation_spec(
+            run_ref,
+            continuation_policy=ControllerContinuationPolicy(max_continuations=2),
+            continuations=(
+                _entry(1, first.final_decision_digest, attempt=1, feedback={"round": 1}),
+                _entry(2, second.final_decision_digest, attempt=2, feedback={"round": 2}),
+            ),
+        )
+    )
+    assert outcome.is_final_answer and outcome.turns == 3
+    assert source.model_asks == [decision_step_id_for_turn("agent-turn", 3)]
+    rounds = [
+        json.loads(message["content"])["continuation_feedback"]["round"]
+        for message in source.turns[2]
+        if isinstance(message.get("content"), str) and "continuation_feedback" in message["content"]
+    ]
+    assert rounds == [1, 2]
+
+
+async def test_candidate_digest_mismatch_is_corruption_not_revision() -> None:
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    await _controller(store, TurnKeyedSource({1: _final("bad draft")}), port, ledger).run(
+        _continuation_spec(run_ref, continuation_policy=ControllerContinuationPolicy(max_continuations=1))
+    )
+    source = TurnKeyedSource({2: _final("tampered")})
+    with pytest.raises(DecisionStoreUnavailableError):
+        await _controller(store, source, StubToolPort(), ledger).run(
+            _continuation_spec(
+                run_ref,
+                continuation_policy=ControllerContinuationPolicy(max_continuations=1),
+                continuations=(_entry(1, "f" * 64),),
+            )
+        )
+    assert source.model_asks == []
+
+
+async def test_continuation_policy_binding_conflicts_on_rewrite() -> None:
+    """A policy rewritten under the same version cannot reinterpret decisions."""
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    policy = ControllerContinuationPolicy(max_continuations=1)
+    first = await _controller(store, TurnKeyedSource({1: _final("bad draft")}), port, ledger).run(
+        _continuation_spec(run_ref, continuation_policy=policy)
+    )
+    spec = _continuation_spec(
+        run_ref,
+        continuation_policy=policy,
+        continuations=(_entry(1, first.final_decision_digest),),
+    )
+    await _controller(store, TurnKeyedSource({2: _final("fixed")}), StubToolPort(), ledger).run(spec)
+    rewritten = _continuation_spec(
+        run_ref,
+        continuation_policy=ControllerContinuationPolicy(max_continuations=3),
+        continuations=(_entry(1, first.final_decision_digest),),
+    )
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, TurnKeyedSource({}), StubToolPort(), ledger).run(rewritten)
+
+
+async def test_continuation_without_policy_pins_nothing_on_decisions() -> None:
+    """A chain committed without the policy replays byte-for-byte later."""
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    await _controller(store, TurnKeyedSource({1: _final("answer")}), port, ledger).run(_continuation_spec(run_ref))
+    # The same chain re-presented with a continuation policy cannot silently
+    # append the binding: every committed decision would need new refs.
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, TurnKeyedSource({}), StubToolPort(), ledger).run(
+            _continuation_spec(run_ref, continuation_policy=ControllerContinuationPolicy(max_continuations=1))
+        )
+
+
+async def test_continuation_feedback_preserves_no_progress_window() -> None:
+    """Internal feedback preserves the existing observation streak and budgets."""
+
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    policy = NoProgressPolicy(limit=2, observations=("web_search",))
+    continuation = ControllerContinuationPolicy(max_continuations=1)
+    store, ledger = InMemoryDecisionStore(), DigestLedger()
+    run_ref = _run_ref()
+    observed = _observed_turn("read", {"q": 1})
+    first = await _controller(
+        store, TurnKeyedSource({1: observed, 2: _final("bad draft")}), StubToolPort(), ledger
+    ).run(_continuation_spec(run_ref, no_progress=policy, continuation_policy=continuation))
+    assert first.is_final_answer and first.final_decision_step_id == decision_step_id_for_turn("agent-turn", 2)
+    source = TurnKeyedSource({3: observed, 4: observed})
+    outcome = await _controller(store, source, StubToolPort(), ledger).run(
+        _continuation_spec(
+            run_ref,
+            no_progress=policy,
+            continuation_policy=continuation,
+            continuations=(_entry(2, first.final_decision_digest),),
+        )
+    )
+    assert outcome.state == "stopped" and outcome.reason == "no_progress_limit"
+    assert outcome.no_progress is not None
+    assert outcome.no_progress["through_turn"] == 3
+    assert outcome.no_progress["consecutive_turns"] == 2
+    assert outcome.no_progress["last_decision_step_id"] == decision_step_id_for_turn("agent-turn", 3)
+
+
+async def test_continuation_turn_budget_is_shared_across_rounds() -> None:
+    """Correction turns count against the same durable max_turns."""
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    store, port, ledger = InMemoryDecisionStore(), StubToolPort(), StubLedger()
+    run_ref = _run_ref()
+    first = await _controller(store, TurnKeyedSource({1: _final("bad draft")}), port, ledger).run(
+        _continuation_spec(
+            run_ref,
+            limits=ControllerLimits(max_turns=2),
+            continuation_policy=ControllerContinuationPolicy(max_continuations=1),
+        )
+    )
+    assert first.is_final_answer
+    # max_turns=2: the candidate consumed turn 1; only turn 2 remains.
+    source = TurnKeyedSource({2: _final("ok result")})
+    outcome = await _controller(store, source, StubToolPort(), ledger).run(
+        _continuation_spec(
+            run_ref,
+            limits=ControllerLimits(max_turns=2),
+            continuation_policy=ControllerContinuationPolicy(max_continuations=1),
+            continuations=(_entry(1, first.final_decision_digest),),
+        )
+    )
+    assert outcome.is_final_answer and outcome.turns == 2
+
+    # One turn further out: the correction cannot fit the budget anymore.
+    run_ref2 = _run_ref()
+    store2, ledger2 = InMemoryDecisionStore(), StubLedger()
+    candidate = await _controller(store2, TurnKeyedSource({1: _final("bad draft")}), StubToolPort(), ledger2).run(
+        _continuation_spec(
+            run_ref2,
+            limits=ControllerLimits(max_turns=1),
+            continuation_policy=ControllerContinuationPolicy(max_continuations=1),
+        )
+    )
+    assert candidate.is_final_answer
+    outcome2 = await _controller(store2, TurnKeyedSource({}), StubToolPort(), ledger2).run(
+        _continuation_spec(
+            run_ref2,
+            limits=ControllerLimits(max_turns=1),
+            continuation_policy=ControllerContinuationPolicy(max_continuations=1),
+            continuations=(_entry(1, candidate.final_decision_digest),),
+        )
+    )
+    assert outcome2.state == "stopped" and outcome2.reason == "turn_limit"
+    assert outcome2.turns == 1
+
+
+async def test_consumed_continuation_feedback_cannot_be_rewritten() -> None:
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    store, ledger = InMemoryDecisionStore(), StubLedger()
+    run_ref = _run_ref()
+    policy = ControllerContinuationPolicy(max_continuations=1)
+    first = await _controller(store, TurnKeyedSource({1: _final("draft")}), StubToolPort(), ledger).run(
+        _continuation_spec(run_ref, continuation_policy=policy)
+    )
+    entry = _entry(1, first.final_decision_digest)
+    await _controller(store, TurnKeyedSource({2: _final("ok")}), StubToolPort(), ledger).run(
+        _continuation_spec(run_ref, continuation_policy=policy, continuations=(entry,))
+    )
+    source = TurnKeyedSource({})
+    with pytest.raises(DecisionConflictError):
+        await _controller(store, source, StubToolPort(), ledger).run(
+            _continuation_spec(
+                run_ref,
+                continuation_policy=policy,
+                continuations=(_entry(1, first.final_decision_digest, feedback={"instruction": "different"}),),
+            )
+        )
+    assert source.model_asks == []
+
+
+@pytest.mark.parametrize("missing_policy,attempt", [(True, 1), (False, 2)])
+async def test_invalid_continuation_authority_stops_before_model(missing_policy, attempt) -> None:
+    from hecate_runtime.agent_controller import ControllerContinuationPolicy
+
+    source = TurnKeyedSource({1: _final("draft")})
+    with pytest.raises(DecisionValidationError):
+        await _controller(InMemoryDecisionStore(), source, StubToolPort()).run(
+            _continuation_spec(
+                continuation_policy=None if missing_policy else ControllerContinuationPolicy(max_continuations=1),
+                continuations=(_entry(1, "a" * 64, attempt=attempt),),
+            )
+        )
+    assert source.model_asks == []
