@@ -63,12 +63,14 @@ export default function TaskDetailPage() {
         const detail = await taskApi.get(taskId);
         if (!active) return;
         setResponse({ taskId, state: { kind: "ready", detail } });
+        const referencedRun = new URLSearchParams(window.location.search).get("run_id");
         // The API orders attempts by attempt number. Refresh preserves the
         // user's selection if it still belongs to the current Task.
         setSelectedRunId((current) =>
           current && detail.runs.some((run) => run.run_id === current)
             ? current
-            : (detail.runs[detail.runs.length - 1]?.run_id ?? null),
+            : (detail.runs.find((run) => run.run_id === referencedRun)?.run_id
+              ?? detail.runs[detail.runs.length - 1]?.run_id ?? null),
         );
       } catch (err) {
         if (!active) return;

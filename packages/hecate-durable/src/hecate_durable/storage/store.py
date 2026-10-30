@@ -1457,6 +1457,87 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 )
         return actions
 
+    def get_run_action(self, run_ref: BackendRef, action_key: str) -> dict[str, Any] | None:
+        """Read-only: one run action's recorded intent, outcome and result.
+
+        The evidence receipt re-reads what the ledger already persisted; it
+        must not touch the claim slot, the outcome or the recovery state.
+        The claim token and the engine session stay inside the store: a
+        receipt needs the recorded facts and the recorded result, never the
+        arbitration internals. ``None`` means the run has no such action —
+        a foreign action is indistinguishable from an absent one.
+        """
+
+        if not action_key:
+            return None
+        with self._session() as session:
+            row = session.execute(
+                select(ActionIntentRow).where(
+                    ActionIntentRow.action_key == action_key,
+                    ActionIntentRow.run_issuer == run_ref.issuer_domain,
+                    ActionIntentRow.run_id == run_ref.id,
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            outcome = session.get(ActionOutcomeRow, row.action_key)
+            recovery = self._recovery_of_rows(row.action_key, row, outcome)
+            return {
+                **recovery.to_dict(),
+                "task_issuer": row.task_issuer,
+                "task_id": row.task_id,
+                "run_issuer": row.run_issuer,
+                "run_id": row.run_id,
+                "execution_id": row.execution_id,
+                "tool_call_id": row.tool_call_id,
+                "result_payload": outcome.result_payload if outcome is not None else None,
+                "result_ref": outcome.result_ref if outcome is not None else None,
+                "outcome_recorded_at": outcome.recorded_at if outcome is not None else None,
+            }
+
+    def list_accepted_actions(self, run_ref: BackendRef) -> list[dict[str, Any]]:
+        """Read-only: the run's accepted decisions with their action identities.
+
+        Each entry carries the decision step id, the accepted content digest
+        and every action's key, tool and recorded arguments. The evidence
+        receipt re-derives the dispatched identity from these facts and
+        re-hashes the arguments; the recorded parameters themselves never
+        leave the platform layer.
+        """
+
+        from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+
+        from .models import AcceptedDecisionRow
+
+        require_kind(run_ref, RefKind.RUN)
+        with self._session() as session:
+            rows = (
+                session.execute(
+                    select(AcceptedDecisionRow)
+                    .where(
+                        AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                        AcceptedDecisionRow.run_id == run_ref.id,
+                    )
+                    .order_by(AcceptedDecisionRow.accepted_at, AcceptedDecisionRow.decision_step_id)
+                )
+                .scalars()
+                .all()
+            )
+            decisions: list[dict[str, Any]] = []
+            for row in rows:
+                # The same schema and full-record digest check used by replay
+                # must succeed before a query calls this an accepted decision.
+                record = SqlAcceptedDecisionStore._row_to_record(row)
+                decisions.append(
+                    {
+                        "decision_step_id": record.decision_step_id,
+                        "content_digest": record.content_digest,
+                        "accepted_at": record.accepted_at,
+                        "actions": [action.to_dict() for action in record.actions],
+                    }
+                )
+        return decisions
+
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
         return self.events.read(run_ref, cursor=cursor, limit=limit)
 

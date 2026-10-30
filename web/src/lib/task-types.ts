@@ -94,6 +94,57 @@ export interface RunActionsResponse {
   supported: boolean;
 }
 
+/**
+ * Verdict of re-checking one recorded digest. `verified` means only that
+ * the stored content still hashes to the recorded value — never that the
+ * business goal passed.
+ */
+export type DigestVerificationStatus = "verified" | "mismatch" | "unverifiable" | "unsupported";
+
+export interface DigestVerification {
+  status: DigestVerificationStatus;
+  algorithm: string;
+  subject: string;
+  recorded_digest: string | null;
+  computed_digest: string | null;
+}
+
+export interface DecisionReference {
+  status: "linked" | "not_recorded";
+  decision_step_id: string | null;
+  content_digest: string | null;
+}
+
+export interface ActionEvidenceReceipt {
+  task_id: string;
+  run_id: string;
+  action_key: string;
+  execution_id: string | null;
+  tool_call_id: string | null;
+  tool_name: string | null;
+  side_effect_class: string | null;
+  arguments_digest: string | null;
+  recovery_state: string | null;
+  outcome: string | null;
+  result_digest: string | null;
+  pending_reconciliation: boolean;
+  outcome_recorded_at: string | null;
+  result_state: "recorded" | "missing" | "unknown";
+  arguments_verification: DigestVerification;
+  result_verification: DigestVerification;
+  decision_ref: DecisionReference;
+  read_at: string;
+  ledger_source: string;
+}
+
+export interface RunActionEvidenceResponse {
+  run_id: string;
+  task_id: string;
+  supported: boolean;
+  ledger_source: string;
+  receipt?: ActionEvidenceReceipt;
+}
+
 export const TASK_LIST_PAGE_SIZE = 20;
 
 export const taskApi = {
@@ -107,6 +158,15 @@ export const taskApi = {
   },
   getActions(runId: string) {
     return api.get<RunActionsResponse>(`/api/runs/${runId}/actions`);
+  },
+  /**
+   * One action's evidence receipt. The action key is a caller-defined
+   * ledger key, so it travels as an encoded query parameter rather than
+   * a path segment.
+   */
+  getActionEvidence(runId: string, actionKey: string) {
+    const params = new URLSearchParams({ action_key: actionKey });
+    return api.get<RunActionEvidenceResponse>(`/api/runs/${runId}/action-evidence?${params.toString()}`);
   },
 };
 

@@ -32,6 +32,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
+from hecate_runtime.accepted_decision import RunRef
 from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -686,6 +687,56 @@ class TaskControlService:
             "actions": actions,
             "ledger_source": self._ledger_source,
             "supported": True,
+        }
+
+    async def get_run_action_evidence(
+        self, workspace_id: uuid.UUID, run_id: uuid.UUID, action_key: str
+    ) -> dict[str, Any]:
+        """Read one action's evidence receipt without changing any state.
+
+        The Run and its parent Task must remain visible in the workspace,
+        and the action must belong to exactly that Run and Task. The
+        receipt is a projection of recorded facts: no ledger row, event,
+        model call or tool call is written, claimed or re-executed by a
+        read. An unsupported store is labeled; a query failure never
+        becomes an empty successful response.
+        """
+        from hecate.execution.action_evidence import read_action_evidence
+
+        run = await self.assert_run_observable(workspace_id=workspace_id, run_id=run_id)
+        task = await self._get_task(workspace_id, run.task_id)
+        if not action_key or len(action_key) > 512:
+            raise TaskControlValidationError("action_key must be a nonblank string of at most 512 characters")
+        query = getattr(self._store, "get_run_action", None)
+        if not callable(query):
+            return {
+                "run_id": str(run.id),
+                "task_id": str(run.task_id),
+                "supported": False,
+                "ledger_source": self._ledger_source,
+            }
+        try:
+            receipt = await read_action_evidence(
+                store=self._store,
+                run_ref=run_row_ref(run),
+                runtime_run_ref=RunRef(issuer_domain=run.issuer_domain, run_id=str(run.id)),
+                task_ref=BackendRef(RefKind.TASK, task.issuer_domain, str(task.id)),
+                action_key=action_key,
+                ledger_source=self._ledger_source,
+            )
+        except Exception as exc:
+            # Driver exceptions may contain URLs, SQL parameters or result
+            # payloads; log only safe attribution and never publish the text.
+            logger.error("Action evidence query failed for run %s (%s)", run_id, type(exc).__name__)
+            raise TaskControlError(f"action evidence query failed for run {run_id}") from exc
+        if receipt is None:
+            raise TaskControlNotFoundError(f"action {action_key!r} not found in run {run_id}")
+        return {
+            "run_id": str(run.id),
+            "task_id": str(run.task_id),
+            "supported": True,
+            "ledger_source": self._ledger_source,
+            "receipt": receipt.to_dict(),
         }
 
     @staticmethod
