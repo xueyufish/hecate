@@ -48,6 +48,12 @@ from hecate.execution.entry_events import RunEventMapper
 from hecate.execution.governance_events import PlatformEventService
 from hecate.execution.task_input import human_input_contract, input_wait_timeout, plain_human_input_wait
 from hecate.execution.task_run_registry import TaskRunRegistry, TaskRunRegistryError
+from hecate.execution.timer_wait import (
+    TIMER_WAIT_CONTRACT_KIND,
+    timer_deadline_for,
+    timer_wait_declaration,
+    timer_wait_policy,
+)
 from hecate.execution.workflow_child import WorkflowChildTaskAdapter, WorkflowPlan
 from hecate.models.agent import AgentModel
 from hecate.models.run import RunModel
@@ -116,6 +122,20 @@ class TaskWaitingSignalError(Exception):
         self.expires_in_seconds = expires_in_seconds
 
 
+class TimerWaitSignalError(Exception):
+    """Raised at a controller turn boundary to park a durable timer wait.
+
+    The contract names the settled readonly action that declared the wait
+    (tool, execution id, arguments digest), the honored versioned
+    declaration and the declared duration; the park derives the absolute
+    deadline from that action's durable receipt anchor.
+    """
+
+    def __init__(self, contract_ref: dict[str, Any]) -> None:
+        super().__init__(f"task declares a timer wait: {contract_ref}")
+        self.contract_ref = dict(contract_ref)
+
+
 class _ControllerInputWait:
     """Observe governed outcomes, including replay, by durable action identity."""
 
@@ -144,12 +164,71 @@ class _ControllerInputWait:
         return "input_wait_requested" if self.requested is not None else None
 
 
+class _ControllerTimerWait:
+    """Observe versioned timer wait declarations on settled readonly actions.
+
+    A candidate only becomes a request when the task opted in (the watch is
+    constructed at all), the envelope matches the declared version, the
+    action is not an already-acknowledged settled wait, the task's wait
+    bound is not exhausted, and the host confirms via the durable ledger
+    that the declaring action is readonly. Model text, undeclared tools and
+    write actions can never park a timer wait — their envelopes stay inert
+    data the loop reads like any other result.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_waits: int,
+        acknowledged: list[str],
+        readonly_lookup: Any,
+        base_count: int,
+    ) -> None:
+        self.requested: dict[str, Any] | None = None
+        self._max_waits = max_waits
+        self._acknowledged = frozenset(acknowledged)
+        self._readonly_lookup = readonly_lookup
+        # The honored-wait count seeds from the durable per-task facts so a
+        # wake's fresh dispatch neither resets nor double-counts the bound.
+        self._count = base_count
+
+    async def observe_result(self, execution_id: str, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
+        """Record a verified declaration after its outcome settled."""
+
+        if self.requested is not None or execution_id in self._acknowledged:
+            return
+        if self._count >= self._max_waits:
+            return
+        declaration = timer_wait_declaration(result)
+        if declaration is None:
+            return
+        confirmed = await self._readonly_lookup(execution_id)
+        if not confirmed:
+            return
+        self._count += 1
+        self.requested = {
+            "execution_id": execution_id,
+            "tool": tool_name,
+            "arguments_digest": tool_arguments_digest(arguments),
+            "wake_seconds": declaration["wake_seconds"],
+            "declaration": declaration["declaration"],
+        }
+
+    def stop_reason(self) -> str | None:
+        """Stop remaining actions before they acquire a claim."""
+
+        return "timer_wait_requested" if self.requested is not None else None
+
+
 class _InputRequestExecutor(ToolCallExecutor):
     """Observe only confirmed, governed results of fresh and recovered actions."""
 
-    def __init__(self, *, watch: _ControllerInputWait, **kwargs: Any) -> None:
+    def __init__(
+        self, *, watch: _ControllerInputWait, timer_watch: _ControllerTimerWait | None = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._watch = watch
+        self._timer_watch = timer_watch
 
     async def execute_accepted_call(
         self,
@@ -178,6 +257,10 @@ class _InputRequestExecutor(ToolCallExecutor):
                 result = None
             function = tool_call["function"]
             self._watch.observe_result(context["invocation_id"], function["name"], function["arguments"], result)
+            if self._timer_watch is not None:
+                await self._timer_watch.observe_result(
+                    context["invocation_id"], function["name"], function["arguments"], result
+                )
         return outcome
 
 
@@ -212,6 +295,10 @@ class _DispatchContext:
     controller_deadline: str | None = None
     controller_no_progress: dict[str, Any] | None = None
     controller_input_wait_timeout_seconds: float | None = None
+    # Persistent timer waits: the validated opt-in declaration
+    # (``controller.timer_wait``). Absent keeps original semantics — wait
+    # declarations stay inert data.
+    controller_timer_wait: dict[str, int] | None = None
     # Explicit opt-in: freeze a governed skill catalog for this task
     # before its first model call (absent keeps original semantics).
     skill_catalog: bool = False
@@ -453,6 +540,12 @@ class PlatformTaskDispatcher:
             await db.commit()
             await self._park(
                 db, task_ref, wait, context, run_ref=r_ref, expected_revision=live_revision["value"], lease=lease
+            )
+            return
+        except TimerWaitSignalError as signal:
+            await db.commit()
+            await self._park_timer(
+                db, task_ref, signal, context, run_ref=r_ref, expected_revision=live_revision["value"], lease=lease
             )
             return
         except ApprovalWaitSignal as signal:
@@ -789,6 +882,7 @@ class PlatformTaskDispatcher:
             controller_deadline=controller.get("deadline") if isinstance(controller.get("deadline"), str) else None,
             controller_no_progress=controller.get("no_progress"),
             controller_input_wait_timeout_seconds=input_wait_timeout(controller.get("input_wait_timeout_seconds")),
+            controller_timer_wait=timer_wait_policy(controller.get("timer_wait")),
             controller_continuation=controller_continuation,
             output_schema=payload.get("output_schema") if isinstance(payload.get("output_schema"), dict) else None,
             platform_run_id=payload.get("platform_run_id") if isinstance(payload.get("platform_run_id"), str) else None,
@@ -1281,6 +1375,7 @@ class PlatformTaskDispatcher:
             # re-presented chain under a different standard conflicts.
             "goal": context.goal,
             "acceptance_version": (context.acceptance or {}).get("version"),
+            **({"timer_wait_policy": dict(context.controller_timer_wait)} if context.controller_timer_wait else {}),
             **(
                 {"skill_catalog_version": 1, "skill_catalog_sha256": skill_catalog_row.content_sha256}
                 if skill_catalog_row is not None
@@ -1293,8 +1388,27 @@ class PlatformTaskDispatcher:
         # fresh action with the same tool and arguments.
         persisted_payload = await asyncio.to_thread(self._store.get_task_input, task_ref) or {}
         input_watch = _ControllerInputWait(persisted_payload.get("_input_wait_acknowledgements", []))
+        timer_watch: _ControllerTimerWait | None = None
+        if (
+            context.controller_timer_wait is not None
+            and hasattr(self._store, "get_run_action")
+            and hasattr(self._store, "action_receipt_time")
+        ):
+            # Opt-in timer waits need the durable ledger reads (readonly
+            # confirmation, receipt anchoring); without them the declaration
+            # stays inert instead of parking a wait nothing can wake.
+            state = await asyncio.to_thread(self._store.get_task_state, task_ref)
+            timer_watch = _ControllerTimerWait(
+                max_waits=context.controller_timer_wait["max_waits"],
+                acknowledged=persisted_payload.get("_input_wait_acknowledgements", []),
+                readonly_lookup=self._readonly_confirmation(run_ref),
+                base_count=int((state.extra or {}).get("timer_waits") or 0) if state else 0,
+            )
+        elif context.controller_timer_wait is not None:
+            raise ValueError("controller.timer_wait requires the platform SQL action ledger")
         executor = _InputRequestExecutor(
             watch=input_watch,
+            timer_watch=timer_watch,
             port=port,
             event_store=event_store,
             access_policy=bundle.access_policy if bundle else None,
@@ -1424,10 +1538,15 @@ class PlatformTaskDispatcher:
             # digest on every decision; absent keeps the loop's prior
             # behavior (no observation, no stop).
             no_progress=no_progress,
-            # A recorded input request stops the turn's remaining actions
-            # BEFORE their ledger claim — the request rides as the real
-            # outcome of the action that produced it.
-            stop_check=input_watch.stop_reason,
+            # A recorded input request or a verified timer declaration stops
+            # the turn's remaining actions BEFORE their ledger claim — the
+            # request rides as the real outcome of the action that produced
+            # it.
+            stop_check=(
+                input_watch.stop_reason
+                if timer_watch is None
+                else (lambda: input_watch.stop_reason() or timer_watch.stop_reason())
+            ),
             continuation_policy=continuation_policy,
         )
         # Persisted trigger facts are the durable authority for the
@@ -1455,9 +1574,12 @@ class PlatformTaskDispatcher:
             return current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING
 
         def observe(event: dict[str, Any]) -> Any:
-            # A recorded input request parks at the turn boundary instead of
-            # deciding the next turn without the human input.
+            # A recorded input request or a verified timer declaration parks
+            # at the turn boundary instead of deciding the next turn without
+            # the awaited fact.
             if input_watch.stop_reason() is not None:
+                return RuntimeEventDecision.STOP_UNKNOWN
+            if timer_watch is not None and timer_watch.stop_reason() is not None:
                 return RuntimeEventDecision.STOP_UNKNOWN
             return RuntimeEventDecision.CONTINUE
 
@@ -1501,6 +1623,23 @@ class PlatformTaskDispatcher:
                         "arguments_digest": request["arguments_digest"],
                         "kind": "input",
                         "contract": request["contract"],
+                        **({"run_id": str(run.id)} if run is not None else {}),
+                        "engine_session_id": str(engine_session),
+                    },
+                )
+            if timer_watch is not None and timer_watch.requested is not None:
+                # The declaration was verified against the durable ledger at
+                # observation time; the park anchors the deadline on the
+                # declaring action's receipt, so this raise carries no clock.
+                request = timer_watch.requested
+                raise TimerWaitSignalError(
+                    {
+                        "kind": TIMER_WAIT_CONTRACT_KIND,
+                        "tool": request["tool"],
+                        "execution_id": request["execution_id"],
+                        "arguments_digest": request["arguments_digest"],
+                        "wake_seconds": request["wake_seconds"],
+                        "declaration": request["declaration"],
                         **({"run_id": str(run.id)} if run is not None else {}),
                         "engine_session_id": str(engine_session),
                     },
@@ -1886,6 +2025,108 @@ class PlatformTaskDispatcher:
         logger.info("task %s parked in %s (token issued)", task_ref.id, target.value)
         if context.workflow_plan is not None:
             await self._wake_finished_child(db, task_ref, context, wait, token)
+
+    def _readonly_confirmation(self, run_ref: BackendRef) -> Any:
+        """The host's readonly confirmation: the action's durable ledger intent.
+
+        The declaring action must have been recorded readonly by the shared
+        ledger at claim time — the same arbitration record recovery reads.
+        Constructed only for stores with the ledger query (the watch gate).
+        """
+
+        async def _confirmed(execution_id: str) -> bool:
+            row = await asyncio.to_thread(self._store.get_run_action, run_ref, execution_id)
+            return bool(row) and (row.get("intent") or {}).get("side_effect_class") == "readonly"
+
+        return _confirmed
+
+    async def _park_timer(
+        self,
+        db: AsyncSession,
+        task_ref: BackendRef,
+        wait: TimerWaitSignalError,
+        context: _DispatchContext,
+        *,
+        run_ref: BackendRef,
+        expected_revision: int,
+        lease: Any,
+    ) -> None:
+        """Persist the durable timer wait: receipt-anchored absolute deadline.
+
+        The anchor is mandatory and must be verifiable: the declaring
+        action's first durable receipt time. An unverifiable anchor parks
+        the task for reconciliation instead of inventing a deadline — a
+        recovered park (crash between the receipt and this commit) re-derives
+        the same absolute ``wait_expires_at``, never a restarted clock.
+        """
+
+        contract = wait.contract_ref
+        record = await asyncio.to_thread(self._store.get_task_state, task_ref)
+        if record is None or record.lifecycle_state is not TaskLifecycleState.RUNNING:
+            return  # cancelled or otherwise moved while the execution ran
+        try:
+            anchor_raw = await asyncio.to_thread(
+                self._store.action_receipt_time,
+                contract["execution_id"],
+                task_ref=task_ref,
+                run_ref=run_ref,
+                action_name=contract["tool"],
+                arguments_digest=contract["arguments_digest"],
+            )
+            anchor = datetime.fromisoformat(anchor_raw) if anchor_raw else None
+            if anchor is not None and anchor.tzinfo is None:
+                anchor = anchor.replace(tzinfo=UTC)
+            if anchor is None:
+                raise ValueError("timer wait request receipt is unavailable")
+            now = await asyncio.to_thread(self._store.wait_now)
+            if anchor > now + timedelta(seconds=1):
+                raise ValueError("timer wait request receipt is in the future")
+            task_deadline = None
+            if context.controller_deadline:
+                task_deadline = datetime.fromisoformat(context.controller_deadline)
+                if task_deadline.tzinfo is None:
+                    task_deadline = task_deadline.replace(tzinfo=UTC)
+            expires_at = timer_deadline_for(anchor, float(contract["wake_seconds"]), task_deadline)
+        except (OverflowError, TypeError, ValueError) as exc:
+            await asyncio.to_thread(
+                self._store.apply_task_state,
+                task_ref,
+                TaskLifecycleState.RECONCILIATION_REQUIRED,
+                expected_revision=expected_revision,
+                **({"lease": lease} if lease is not None else {}),
+                extra_update={
+                    "reconciliation_reason": f"timer wait anchor is unverifiable: {exc}",
+                    "result": {
+                        "status": "awaiting_reconciliation",
+                        "content": "",
+                        "error": "timer wait deadline anchor is unverifiable",
+                        "error_category": "timer_wait_unverifiable",
+                    },
+                },
+            )
+            logger.warning("task %s timer wait parked for reconciliation: %s", task_ref.id, exc)
+            return
+        await asyncio.to_thread(
+            self._store.apply_task_state,
+            task_ref,
+            TaskLifecycleState.WAITING_INPUT,
+            expected_revision=expected_revision,
+            **({"event_run_ref": run_ref} if hasattr(self._store, "engine") else {}),
+            **({"lease": lease} if lease is not None else {}),
+            extra_update={
+                "wait": {
+                    "wake_kind": "timer",
+                    "contract_ref": contract,
+                    "wait_token": uuid.uuid4().hex,
+                    "wait_expires_at": expires_at,
+                    "consumed": False,
+                },
+                # The honored-wait count persists so a wake's fresh dispatch
+                # continues the task's declared bound, not a fresh one.
+                "timer_waits": int((record.extra or {}).get("timer_waits") or 0) + 1,
+            },
+        )
+        logger.info("task %s parked in waiting_input (timer wait anchored)", task_ref.id)
 
     async def _park_approval(
         self,

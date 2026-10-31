@@ -296,6 +296,17 @@ class TaskControlService:
                 if progress_policy is not None:
                     progress_policy.validate_observations()
                 input_wait_timeout(options.get("input_wait_timeout_seconds"))
+                from hecate.execution.timer_wait import timer_wait_policy
+
+                timer_policy = timer_wait_policy(options.get("timer_wait"))
+                if timer_policy is not None:
+                    if input.get("workflow") is not None:
+                        raise ValueError("controller.timer_wait is unsupported for Workflow tasks")
+                    if not hasattr(self._store, "engine") or not all(
+                        callable(getattr(self._store, method, None))
+                        for method in ("get_run_action", "action_receipt_time", "wait_now")
+                    ):
+                        raise ValueError("controller.timer_wait requires the platform SQL action ledger")
                 continuation_policy = ControllerContinuationPolicy.from_declaration(options.get("continuation"))
                 if continuation_policy is not None and not isinstance(input.get("acceptance"), dict):
                     raise ValueError("controller.continuation requires a declared acceptance block")
@@ -313,6 +324,8 @@ class TaskControlService:
                 )
             except ValueError as exc:
                 raise TaskControlValidationError(str(exc)) from exc
+        elif isinstance(input.get("controller"), dict) and "timer_wait" in input["controller"]:
+            raise TaskControlValidationError("controller.timer_wait requires controller_loop")
         elif isinstance(input.get("controller"), dict) and "skill_catalog" in input["controller"]:
             raise TaskControlValidationError("controller.skill_catalog requires controller_loop")
         elif input.get("harness") is not None:
@@ -1234,6 +1247,11 @@ class TaskControlService:
         if wait.get("consumed"):
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "wake token already consumed; rejected"
+        if wait.get("wake_kind") == "timer":
+            # A timer wait wakes only through its own expiry convergence; no
+            # caller command may consume the token or shortcut the clock.
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return "timer waits reject manual wake; expiry is the only wake"
         if _expired(wait.get("wait_expires_at")):
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "wake token expired; rejected"

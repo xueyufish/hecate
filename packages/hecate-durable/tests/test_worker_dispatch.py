@@ -257,6 +257,44 @@ async def test_relay_projects_events_once(tmp_path) -> None:
     assert status["lag"] == 0 and status["skipped_event_ids"] == []
 
 
+async def test_relay_keeps_the_event_loop_available_to_release_a_sqlite_writer(tmp_path) -> None:
+    """A projection may leave background work that must commit before the next outbox write."""
+    from sqlalchemy import event, text
+
+    store = make_store("sqlite", tmp_path, name="relay-async-writer.db")
+    store.create_schema()
+    _submit_with_stream(store, "writer-contention")
+
+    @event.listens_for(store.engine, "checkout")
+    def short_busy_timeout(connection, _record, _proxy):
+        connection.execute("PRAGMA busy_timeout=100")
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    writer = None
+
+    async def hold_writer():
+        with store.session_factory() as db, db.begin():
+            db.execute(text("SELECT 1"))  # BEGIN IMMEDIATE holds the SQLite write slot.
+            entered.set()
+            await release.wait()
+
+    async def project(_envelope):
+        nonlocal writer
+        writer = asyncio.create_task(hold_writer())
+        await entered.wait()
+        asyncio.get_running_loop().call_later(0.01, release.set)
+
+    try:
+        relay = OutboxRelay(store.session_factory, project)
+        assert await relay.pump_once() == 1
+        assert relay.status()["lag"] == 0
+    finally:
+        release.set()
+        if writer is not None:
+            await writer
+        store.dispose()
+
+
 async def test_relay_retries_transient_failures(tmp_path) -> None:
     store = make_store("sqlite", tmp_path, name="relay-retry.db")
     store.create_schema()

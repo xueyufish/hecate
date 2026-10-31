@@ -32,6 +32,16 @@ async function confirmInput() {
 beforeEach(() => { apiMock.post.mockReset(); });
 
 describe("TaskInputPanel operation boundaries", () => {
+  it("explains a timer wait without offering a human input command", () => {
+    render(<TaskInputPanel taskId="task-1" detail={{ ...detail(), wait: {
+      wake_kind: "timer", consumed: false, wait_token: "timer-token", wait_expires_at: "2099-01-01T00:00:00Z",
+      contract_ref: { kind: "timer", tool: "query" },
+    } }} />);
+    expect(screen.getByTestId("task-input-read-only")).toHaveTextContent("计时等待");
+    expect(screen.queryByTestId("task-input-textarea")).not.toBeInTheDocument();
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
   it("retries the complete frozen body after the task enters a different wait", async () => {
     apiMock.post.mockRejectedValueOnce(new Error("network lost")).mockResolvedValueOnce(receipt);
     const onIssued = vi.fn();

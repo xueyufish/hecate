@@ -187,6 +187,22 @@ async def test_loop_selects_tools_from_model_answer_and_finishes(tmp_path, loop_
         await model.stop()
 
 
+async def test_platform_timer_wait_is_rejected_before_runner_submission(loop_profile) -> None:
+    """Unsupported waits must never silently execute without their requested timing."""
+    api = _BusinessApi()
+    harness = _Harness(loop_profile, api)
+    try:
+        with pytest.raises(ValueError, match="timer_wait.*unsupported"):
+            await harness.engine.submit(
+                "app-reader", {"input": {"prompt": "poll later"}, "controller": {"timer_wait": {}}}, ("domain_a",)
+            )
+        assert harness.durable.store.list_tasks() == []
+        assert api.calls == []
+    finally:
+        await harness.engine.close()
+        harness.durable.store.dispose()
+
+
 @pytest.mark.parametrize("tool_turns", [1, 2])
 async def test_approval_park_withholds_effect_and_wake_continues_chain(tmp_path, tool_turns) -> None:
     """A policy-required approval parks durably; the wake replays the chain."""

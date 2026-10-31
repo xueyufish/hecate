@@ -162,6 +162,7 @@ function TaskInputContent({
     if (waitingInput && wait !== null) {
       if (wait.isWorkflowChildWait)
         return "这是工作流子任务结果等待，只能由平台核验回调推进，人工输入表单不生效。";
+      if (wait.wakeKind === "timer") return "这是计时等待，将由平台在到期后继续；无需补充输入。";
       if (wait.wakeKind !== "provide_input") return `这是${wait.wakeKind === "resume" ? "审批" : "其他"}等待，不是人工输入等待。`;
       if (wait.consumed) return "等待已被消费：补充的输入已记录，任务正在继续执行。";
       if (wait.token.trim() === "") return "等待记录缺少有效令牌，无法在本页面提交。";
