@@ -396,7 +396,7 @@ def standalone_expirer(*, store: Any | None = None) -> WaitReconciler:
 
 
 def standalone_wait_reconcilers(*, store: Any | None = None) -> WaitReconciler:
-    """Composite ``--wait-reconciler`` factory: approval AND input waits.
+    """Composite ``--wait-reconciler`` factory: approval, input AND timer waits.
 
     The dedicated worker process must run against the same platform
     database as the app process (enforced against the bound engine URL);
@@ -407,15 +407,22 @@ def standalone_wait_reconcilers(*, store: Any | None = None) -> WaitReconciler:
     from hecate.core.database import async_session_factory
     from hecate.execution.approval_decision import ApprovalResumeRecovery
     from hecate.execution.input_wait_expiration import InputWaitExpirer
+    from hecate.execution.timer_wait_wake import TimerWaitWaker
 
     store = store if store is not None else get_durable_suite().store
     approval = standalone_expirer(store=store)
     input_expiry = InputWaitExpirer(store, async_session_factory).expire_once
+    timer_wake = TimerWaitWaker(store, async_session_factory).wake_once
     # A non-None worker suppresses inline dispatch in the control service.
     # Resumes only requeue here; the dedicated worker acquires the normal
     # dispatch lease in its next cycle, after this callback returns.
     resume = ApprovalResumeRecovery(store, async_session_factory, worker=_QueuedResumeWorker()).resume_once
-    reconcilers = (("approval expiry", approval), ("approval resume", resume), ("input expiry", input_expiry))
+    reconcilers = (
+        ("approval expiry", approval),
+        ("approval resume", resume),
+        ("input expiry", input_expiry),
+        ("timer wake", timer_wake),
+    )
 
     async def reconcile() -> int:
         processed = 0

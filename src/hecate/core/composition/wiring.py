@@ -450,17 +450,21 @@ async def start_durable_worker(app: FastAPI) -> None:
     from hecate.execution.event_relay import PlatformOutboxProjector
     from hecate.execution.input_wait_expiration import InputWaitExpirer
     from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+    from hecate.execution.timer_wait_wake import TimerWaitWaker
 
     store = suite.store
     dispatcher = PlatformTaskDispatcher(store, async_session_factory)
 
     # The platform's named wait reconcilers, composed: the approval-wait
     # expirer converges expired waits, the decision-resume recovery
-    # completes approval decisions whose resume phase never committed, and
-    # the input-wait expirer converges expired declared human-input waits.
-    # All run each cycle; any one failing never blocks the others.
+    # completes approval decisions whose resume phase never committed, the
+    # input-wait expirer converges expired declared human-input waits, and
+    # the timer-wait waker requeues controller tasks whose declared timed
+    # wait reached its receipt-anchored deadline. All run each cycle; any
+    # one failing never blocks the others.
     expirer = ApprovalWaitExpirer(store, async_session_factory)
     input_expirer = InputWaitExpirer(store, async_session_factory)
+    timer_waker = TimerWaitWaker(store, async_session_factory)
 
     async def _platform_wait_reconcilers() -> int:
         processed = 0
@@ -468,6 +472,7 @@ async def start_durable_worker(app: FastAPI) -> None:
             ("approval expiry", expirer.expire_once),
             ("approval decision", decision_recovery.resume_once),
             ("input expiry", input_expirer.expire_once),
+            ("timer wake", timer_waker.wake_once),
         ):
             try:
                 processed += await reconcile()

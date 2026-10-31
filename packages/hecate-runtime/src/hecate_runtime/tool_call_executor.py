@@ -152,6 +152,13 @@ def _merge_resolutions(
     return event if _SEVERITY[event.state] >= _SEVERITY[ledger.state] else ledger
 
 
+# Host wait envelopes: structured tool-to-host control facts that must
+# survive the JSON round trip used by durable ledger backfill. The input
+# request and the versioned timer declaration are the same protocol
+# family; everything else stays opaque text.
+_HOST_WAIT_ENVELOPE_STATUSES = ("input_required", "timer_wait_required")
+
+
 def _input_request_value(result: Any) -> Any:
     # The explicit business envelope uses the same typed value during
     # first-run and ledger-replay governance. Ordinary tool text is opaque.
@@ -160,15 +167,16 @@ def _input_request_value(result: Any) -> Any:
             value = json.loads(result)
         except ValueError:
             return result
-        if isinstance(value, dict) and value.get("status") == "input_required":
+        if isinstance(value, dict) and value.get("status") in _HOST_WAIT_ENVELOPE_STATUSES:
             return value
     return result
 
 
 def _tool_result_content(result: Any) -> str:
-    # Explicit input envelopes must survive the same JSON round trip used
-    # by durable ledger backfill, after post-tool governance on both paths.
-    if isinstance(result, dict) and result.get("status") == "input_required":
+    # Explicit host wait envelopes must survive the same JSON round trip
+    # used by durable ledger backfill, after post-tool governance on both
+    # paths.
+    if isinstance(result, dict) and result.get("status") in _HOST_WAIT_ENVELOPE_STATUSES:
         return json.dumps(result, ensure_ascii=False)
     return str(result)
 

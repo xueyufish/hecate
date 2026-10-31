@@ -30,6 +30,24 @@ from hecate_runtime.tool_call_executor import ToolCallExecutor
 from hecate_runtime.workers.tool_worker import ToolWorker
 
 
+@pytest.mark.parametrize("status", [{"state": "done"}, ["done"]])
+async def test_structured_business_status_remains_ordinary_tool_data(status) -> None:
+    """Host wait recognition must not break arbitrary structured business results."""
+
+    class StatusPort(StubRuntimePort):
+        """Return ordinary business data with a structured status."""
+
+        async def tool_execute(self, name, args, context=None):
+            """Return the data without interpreting its status field."""
+            return {"status": status, "value": 7}
+
+    result = await ToolCallExecutor(port=StatusPort()).execute_call(
+        {"id": "call-status", "function": {"name": "web_search", "arguments": {}}}, {}
+    )
+    assert not result.get("is_error")
+    assert "7" in result["content"]
+
+
 class StubToolPort(StubRuntimePort):
     """Record dispatches, contexts and simulated business outcomes."""
 

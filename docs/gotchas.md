@@ -294,3 +294,55 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   session cannot flush frozen content back to the live row even when
   the live row is still present.
 
+## Platform controller timer waits
+
+- **Timer wait declarations are readonly-tool envelopes, never model output**
+  — a task opts in via `controller.timer_wait`; only a settled, ledger-recorded
+  readonly action may return `{"status": "timer_wait_required", "wait": {version, wake_in_seconds}}`.
+  Model text and non-readonly tools keep the envelope inert (the loop just
+  continues); the kernel JSON-round-trips the envelope in
+  `_tool_result_content` exactly like `input_required`, so ledger replay
+  stays parseable.
+- **The parked deadline is receipt-anchored, and the waker re-derives it**
+  — `_park_timer` anchors `wait_expires_at` on the declaring action's first
+  durable receipt (plus the optional task-deadline clamp). A crash before
+  the park commit re-parks with the identical deadline; `TimerWaitWaker`
+  re-derives and parks for reconciliation on any mismatch instead of
+  guessing a wake.
+- **Timer wakes requeue, they do not terminate** — expiry consumes the
+  token under the shared `expected_wait` commit gate (exactly one of
+  {timer wake, cancel, manual command} lands), sets QUEUED, and the worker
+  re-dispatches the SAME run; the accepted-decision chain replays the
+  parked position. No input revision is recorded, so no-progress
+  protection, turn budget and deadline keep their accumulated values.
+- **Manual wakes cannot consume a timer wait** — `provide_input` on a
+  timer wait is rejected ("expiry is the only wake"); the input/approval
+  expirers ignore `wake_kind: "timer"` by construction.
+- **Admission rejects unsupported timing rather than ignoring it** — invalid
+  `controller.timer_wait` declarations fail before task creation. The opt-in
+  requires a platform Controller task and the SQL action ledger; Runner and
+  Workflow tasks reject it. A normal result without the opt-in remains data.
+  Each accepted Controller decision binds the normalized timer policy.
+- **The receipt remains authoritative** — wake verifies local platform ownership
+  before any write, then checks the settled readonly action, its result digest,
+  the original tool declaration and the receipt-anchored deadline. Missing
+  tokens and inconsistent declarations require reconciliation. A copied or
+  rewritten wait cannot replace its action receipt.
+- **A wait needs an active reconciler** — the in-app durable worker includes
+  `TimerWaitWaker`. Dedicated workers must use
+  `hecate.execution.approval_wait_expiration:standalone_wait_reconcilers` as
+  their `--wait-reconciler` factory. The durable state uses `waiting_input`
+  with `wait.wake_kind: "timer"`; it does not request human input. Reading
+  task details does not wake it. Restart recovery is tested in a fresh
+  interpreter; this is not PostgreSQL concurrency certification.
+
+For example, submit `controller_loop: true` with
+`controller: {"max_turns": 8, "timer_wait": {"max_waits": 2}}`. A host-confirmed
+readonly polling tool may return
+`{"status": "timer_wait_required", "wait": {"version": 1, "wake_in_seconds": 30}}`.
+The task can honor at most the declared number of waits across restarts. Once
+the bound is exhausted, later envelopes stay ordinary tool data; the existing
+turn, deadline, authorization and no-progress limits still apply. Timer expiry
+only makes the task eligible for its next dispatch; it does not promise that
+the business job completed or permit a new action after cancellation or expiry
+of the task's own deadline.

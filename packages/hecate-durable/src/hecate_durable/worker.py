@@ -420,30 +420,32 @@ class OutboxRelay:
     async def pump_once(self) -> int:
         """Project one bounded batch; returns the number of events projected."""
 
-        handle = self._leases.acquire(f"outbox:{self._relay_key}", uuid.uuid4().hex, 60.0)
+        handle = await asyncio.to_thread(self._leases.acquire, f"outbox:{self._relay_key}", uuid.uuid4().hex, 60.0)
         if handle is None:
             return 0
         try:
             return await self._pump(handle)
         finally:
-            self._leases.release(handle.lease_key, handle.holder, fencing_token=handle.fencing_token)
+            await asyncio.to_thread(
+                self._leases.release, handle.lease_key, handle.holder, fencing_token=handle.fencing_token
+            )
 
     async def _pump(self, handle: LeaseHandle) -> int:
-        with self._session_factory() as session:
-            cursor = self._cursor(session)
-            last_id = cursor.last_event_row_id
-            failing_id = cursor.failing_event_id
-            failure_count = cursor.failure_count
-            skipped: list[str] = list(cursor.skipped_event_ids or [])
-        rows = self._fetch(last_id)
+        # A projector may start async work that holds a database lock. Waiting
+        # for that lock synchronously would prevent its owner from committing.
+        last_id, failing_id, failure_count, skipped = await asyncio.to_thread(self._position)
+        rows = await asyncio.to_thread(self._fetch, last_id)
         if not rows:
             return 0
         projected = 0
         advanced = last_id
         for row in rows:
-            if self._leases.renew(handle.lease_key, handle.holder, 60.0, fencing_token=handle.fencing_token) is None:
+            renewed = await asyncio.to_thread(
+                self._leases.renew, handle.lease_key, handle.holder, 60.0, fencing_token=handle.fencing_token
+            )
+            if renewed is None:
                 break
-            failure_count = self._failure_count(row.event_id)
+            failure_count = await asyncio.to_thread(self._failure_count, row.event_id)
             try:
                 await self._project(row.envelope)
             except Exception:  # noqa: BLE001 — projection failure is the relay's concern
@@ -456,21 +458,31 @@ class OutboxRelay:
                         exc_info=True,
                     )
                     skipped.append(row.event_id)
-                    self._receipt(row.event_id, "skipped", failure_count, handle)
+                    await asyncio.to_thread(self._receipt, row.event_id, "skipped", failure_count, handle)
                     failing_id, failure_count = None, 0
                     advanced = max(advanced, row.id)
-                    self._advance(advanced, skipped, failing_id, failure_count)
+                    await asyncio.to_thread(self._advance, advanced, skipped, failing_id, failure_count)
                     continue
-                self._receipt(row.event_id, "retry", failure_count, handle)
-                self._advance(advanced, skipped, failing_id, failure_count)
+                await asyncio.to_thread(self._receipt, row.event_id, "retry", failure_count, handle)
+                await asyncio.to_thread(self._advance, advanced, skipped, failing_id, failure_count)
                 break  # transient: retry the same cursor next pump
             else:
                 failing_id, failure_count = None, 0
-                self._receipt(row.event_id, "projected", 0, handle)
+                await asyncio.to_thread(self._receipt, row.event_id, "projected", 0, handle)
                 advanced = max(advanced, row.id)
                 projected += 1
-        self._advance(advanced, skipped, failing_id, failure_count)
+        await asyncio.to_thread(self._advance, advanced, skipped, failing_id, failure_count)
         return projected
+
+    def _position(self) -> tuple[int, str | None, int, list[str]]:
+        with self._session_factory() as session:
+            cursor = self._cursor(session)
+            return (
+                cursor.last_event_row_id,
+                cursor.failing_event_id,
+                cursor.failure_count,
+                list(cursor.skipped_event_ids or []),
+            )
 
     async def run_forever(self) -> None:
         while not self._stopping:
