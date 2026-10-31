@@ -1,0 +1,1812 @@
+{
+  "_meta": {
+    "kind": "controller_host_baseline",
+    "status": "recorded",
+    "gate": false,
+    "business_value": "unverified",
+    "recorded_at": "2026-10-31T13:46:23.005570+00:00",
+    "rubric_version": "controller-host-rubric-1",
+    "source": "deterministic_injection",
+    "sampling": {
+      "temperature": 0,
+      "max_tokens": 2048,
+      "timeout_seconds": 120,
+      "num_retries": 0
+    },
+    "model": "deterministic-injection",
+    "model_version": "unverified",
+    "tool_versions": {
+      "query_inventory": "synthetic-1",
+      "submit_inventory_update": "synthetic-1"
+    },
+    "dataset_digest": "8c989123ed8f1cc0c0155350324b1c20625634d5a50a348df93def0d3c9644cc",
+    "prompt_digest": "96e30ca25f570328ccfa9758f943b3206d90e7186c7107558303f6f23ef8a026",
+    "tool_digest": "311232f51e92d4d96f5d48259a76739a4dc2258cc57bd36f4532c3f1035f1eba",
+    "thresholds": {
+      "latency_ms": 120000.0,
+      "tokens": 40000,
+      "cost_usd": 1.0
+    },
+    "cost_threshold_conclusion": "unverified",
+    "hosts": [
+      "platform",
+      "runner"
+    ],
+    "unverified": [
+      "provider price and final billing",
+      "model quality below (deterministic-injection runs measure the harness, not the model)",
+      "cross-process and PostgreSQL recovery (this record rebuilds hosts in-process over sqlite)",
+      "managed deployment certification",
+      "business value"
+    ],
+    "collection": {
+      "collector": {
+        "cases_attempted": 10,
+        "cases_recorded": 10,
+        "cases_with_collection_error": 0
+      },
+      "real_model": {
+        "enabled": false,
+        "quality_conclusion": "not_available"
+      },
+      "deterministic_injection": {
+        "cases": 10,
+        "stop_compliance_passed": 10,
+        "note": "harness and stop-classification evidence; never a real-model quality result"
+      },
+      "model": "deterministic-injection"
+    }
+  },
+  "runs": [
+    {
+      "host": "platform",
+      "case": "normal",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite (WAL) durable store; in-process host reassembly — not a PostgreSQL or cross-process recovery certification"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "e6e73b5c-0c9e-57e9-bd0b-c848d79e1f1f",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}",
+              "role": "tool",
+              "tool_call_id": "e6e73b5c-0c9e-57e9-bd0b-c848d79e1f1f"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "e6e73b5c-0c9e-57e9-bd0b-c848d79e1f1f",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}",
+              "role": "tool",
+              "tool_call_id": "e6e73b5c-0c9e-57e9-bd0b-c848d79e1f1f"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "aa92b475-9a46-5273-ae75-7d5c4b7d451e",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-BASELINE'}",
+              "role": "tool",
+              "tool_call_id": "aa92b475-9a46-5273-ae75-7d5c4b7d451e"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-BASELINE"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "delivery_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 7188.000000000102,
+      "model_calls": 3,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "platform",
+      "case": "approval_resume",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real guardrail policy row (ASK) + ApprovalWaitSignal park + ApprovalDecisionService resume after host reassembly",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite (WAL) durable store; in-process host reassembly — not a PostgreSQL or cross-process recovery certification"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "f11cbc0d-a598-527c-9140-3d734d912876",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}",
+              "role": "tool",
+              "tool_call_id": "f11cbc0d-a598-527c-9140-3d734d912876"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "post_rebuild",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "f11cbc0d-a598-527c-9140-3d734d912876",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"quantity\": 3, \"reorder\": true, \"status\": \"ok\", \"stock\": \"confirmed\", \"update_body\": \"SKU-A1 confirmed by warehouse-A\"}",
+              "role": "tool",
+              "tool_call_id": "f11cbc0d-a598-527c-9140-3d734d912876"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "b2dec39b-99dc-5dfb-a114-f69dcb961e64",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-BASELINE'}",
+              "role": "tool",
+              "tool_call_id": "b2dec39b-99dc-5dfb-a114-f69dcb961e64"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-BASELINE"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": {
+        "parked": true,
+        "wait_token": "e517fb403e6543e1bf856fb0f93f3cf3",
+        "approval_ref": "task:ca5372a0-0c5a-44d4-8abb-df9eb0a1005e:63e76382-4745-40cb-9c47-da91b4022484",
+        "engine_session_id": "2068aa6d-63a1-443c-9550-9c6ac75a92ea",
+        "write_attempts_before_park": 0,
+        "decisions": [
+          {
+            "approved": true,
+            "result": {
+              "decision": {
+                "operation_id": "3d549fc0-baba-4d8d-9551-70ecf32785a2",
+                "decision": "approve",
+                "reason": "baseline approval",
+                "decided_by": "00000000-0000-0000-0000-0000000000b4",
+                "created_at": "2026-10-31T13:46:31",
+                "resume_command_id": "approval-resume-0941bbe840c0a1b1fe3ee8914d7f8515053238d268cd319233789f463522b140"
+              },
+              "resume": {
+                "command_id": "approval-resume-0941bbe840c0a1b1fe3ee8914d7f8515053238d268cd319233789f463522b140",
+                "kind": "resume",
+                "state": "applied",
+                "issued_at": "2026-10-31T13:46:31.787669+00:00",
+                "issuer": "approval-decision:00000000-0000-0000-0000-0000000000b4",
+                "task_ref": {
+                  "kind": "task",
+                  "issuer_domain": "hecate",
+                  "id": "ca5372a0-0c5a-44d4-8abb-df9eb0a1005e"
+                },
+                "run_ref": {
+                  "kind": "run",
+                  "issuer_domain": "hecate",
+                  "id": "216e0b59-0494-47ba-a0eb-af4e1d51a303"
+                },
+                "expires_at": null,
+                "expected_revision": 2
+              }
+            }
+          }
+        ]
+      },
+      "rebuild": {
+        "performed": true,
+        "scope": "in-process host reassembly over the persisted sqlite state",
+        "same_run": true,
+        "run_id": "216e0b59-0494-47ba-a0eb-af4e1d51a303"
+      },
+      "post_resume_model_input_has_receipt": true,
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "approval_resume_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 1593.9999999991414,
+      "model_calls": 3,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "platform",
+      "case": "cancelled",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite (WAL) durable store; in-process host reassembly — not a PostgreSQL or cross-process recovery certification",
+        "cancel": "real CANCEL command applied at the approval park (the platform has no cooperative abort for a running loop)"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "003b18a6-d026-56cc-ba5a-ef672c1fda1e",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}",
+              "role": "tool",
+              "tool_call_id": "003b18a6-d026-56cc-ba5a-ef672c1fda1e"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": null,
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": {
+        "parked": true,
+        "wait_token": "b1ef7ea3f26f41d49f03b2246906ee4b",
+        "approval_ref": "task:12e5c1e8-2b01-4e65-903c-16b8a099089e:1782d983-04c4-4cbd-aa05-20443873d269",
+        "engine_session_id": "2ddc6062-c131-4226-a840-ce257920c63a",
+        "write_attempts_before_park": 0,
+        "decisions": [],
+        "cancel_receipt": "cancel applied before dispatch (receipt applied)"
+      },
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "cancelled",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "cancel_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 1343.0000000007567,
+      "model_calls": 2,
+      "write_attempts": 0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "platform",
+      "case": "budget_exhausted",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite (WAL) durable store; in-process host reassembly — not a PostgreSQL or cross-process recovery certification",
+        "budget": "declared harness context exceeds the pinned token budget (context-chain stop before any model call)"
+      },
+      "rounds": [],
+      "final_content": "",
+      "tool_receipts": [],
+      "tool_calls": [],
+      "ledger_actions": [],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "failed",
+        "error_category": "controller_token_capped",
+        "error": "controller loop stopped: token_capped",
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": false,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "budget_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 765.9999999996217,
+      "model_calls": 0,
+      "write_attempts": 0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "platform",
+      "case": "unknown_outcome",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite (WAL) durable store; in-process host reassembly — not a PostgreSQL or cross-process recovery certification",
+        "unknown": "synthetic lost tool receipt surfaces the host's real outcome-unknown path"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": null,
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "outcome_unknown",
+          "content": null
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": true,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "reconciliation_required",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": "action outcome is not established"
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "unknown_stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 875.0,
+      "model_calls": 1,
+      "write_attempts": 0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "runner",
+      "case": "normal",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite durable store; engine/store reassembly — not a PostgreSQL or cross-process recovery certification"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "9e697c81-2c25-52a6-9e3d-d70caebb54ef",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'result': {'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}}",
+              "role": "tool",
+              "tool_call_id": "9e697c81-2c25-52a6-9e3d-d70caebb54ef"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "9e697c81-2c25-52a6-9e3d-d70caebb54ef",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'result': {'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}}",
+              "role": "tool",
+              "tool_call_id": "9e697c81-2c25-52a6-9e3d-d70caebb54ef"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "161627a7-e174-5027-b7ee-ec3fa65c4539",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'result': {'status': 'ok', 'update_id': 'UPD-BASELINE'}}",
+              "role": "tool",
+              "tool_call_id": "161627a7-e174-5027-b7ee-ec3fa65c4539"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-BASELINE"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "principal": "app-reader"
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "principal": "app-reader"
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "delivery_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 968.0000000007567,
+      "model_calls": 3,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "runner",
+      "case": "approval_resume",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real guardrail policy row (ASK) + ApprovalWaitSignal park + apply_wake grant + engine.resume after host rebuild",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite durable store; engine/store reassembly — not a PostgreSQL or cross-process recovery certification"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "311d27bb-6765-56e6-b1f7-59504d3240d2",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'result': {'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}}",
+              "role": "tool",
+              "tool_call_id": "311d27bb-6765-56e6-b1f7-59504d3240d2"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "post_rebuild",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "311d27bb-6765-56e6-b1f7-59504d3240d2",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"result\": {\"quantity\": 3, \"reorder\": true, \"status\": \"ok\", \"stock\": \"confirmed\", \"update_body\": \"SKU-A1 confirmed by warehouse-A\"}, \"status\": \"ok\"}",
+              "role": "tool",
+              "tool_call_id": "311d27bb-6765-56e6-b1f7-59504d3240d2"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "f3246bf3-c6c6-591c-832e-9ce2a9b8a50b",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'result': {'status': 'ok', 'update_id': 'UPD-BASELINE'}}",
+              "role": "tool",
+              "tool_call_id": "f3246bf3-c6c6-591c-832e-9ce2a9b8a50b"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Stock confirmed for SKU-A1 in domain_a; reorder update UPD-BASELINE submitted with quantity 3.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-BASELINE"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "principal": "app-reader"
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "principal": "app-reader"
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": {
+        "parked": true,
+        "wait_token": "fb1ab7d45b004a41afc491250c5c4abc",
+        "approval_ref": "approval-controller-host-baseline-1",
+        "write_attempts_before_park": 0,
+        "decisions": [
+          {
+            "approved": true,
+            "result": "wake grant applied"
+          }
+        ]
+      },
+      "rebuild": {
+        "performed": true,
+        "scope": "engine + durable store reassembled over the persisted profile sqlite state",
+        "same_run": true,
+        "run_id": "run-17d4cd96-b9f6-40cd-a4ef-c7dcc9fd3207"
+      },
+      "post_resume_model_input_has_receipt": true,
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "approval_resume_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 1109.0000000003783,
+      "model_calls": 3,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "runner",
+      "case": "cancelled",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite durable store; engine/store reassembly — not a PostgreSQL or cross-process recovery certification",
+        "cancel": "real cooperative request_cancel mid-loop"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": null,
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "principal": "app-reader"
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "cancelled",
+        "error_category": null,
+        "error": "controller execution cancelled",
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "cancel_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 843.9999999991414,
+      "model_calls": 1,
+      "write_attempts": 0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "runner",
+      "case": "budget_exhausted",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite durable store; engine/store reassembly — not a PostgreSQL or cross-process recovery certification",
+        "budget": "durable model-call budget ledger refuses the reservation before any model call"
+      },
+      "rounds": [],
+      "final_content": null,
+      "tool_receipts": [],
+      "tool_calls": [],
+      "ledger_actions": [],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "failed",
+        "error_category": null,
+        "error": "metered model call refused by local budget",
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "tool_selection_correct": false,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "budget_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 375.0,
+      "model_calls": 0,
+      "write_attempts": 0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    },
+    {
+      "host": "runner",
+      "case": "unknown_outcome",
+      "source": "deterministic_injection",
+      "mechanisms": {
+        "approval": "real policy path; no approval needed",
+        "tools": "local synthetic business data behind the host's real governance path",
+        "storage": "sqlite durable store; engine/store reassembly — not a PostgreSQL or cross-process recovery certification",
+        "unknown": "synthetic lost tool receipt surfaces the host's real outcome-unknown path"
+      },
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update using the returned quantity. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "tool_calls": [
+            {
+              "id": "call-deterministic",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": null,
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "outcome_unknown",
+          "content": null
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "principal": "app-reader"
+        }
+      ],
+      "ledger_actions": [
+        {
+          "side_effect_class": "unknown",
+          "pending_reconciliation": true,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "post_resume_model_input_has_receipt": null,
+      "collection_error": null,
+      "stop": {
+        "task_status": "reconciliation_required",
+        "error_category": null,
+        "error": "controller execution unknown",
+        "reconciliation_reason": "action outcome is not established"
+      },
+      "summary": {
+        "tool_selection_correct": true,
+        "feedback_params_exact": null,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "zero_duplicate_side_effects": true,
+        "stop_compliance": true,
+        "unknown_stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 656.9999999992433,
+      "model_calls": 1,
+      "write_attempts": 0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      }
+    }
+  ]
+}
