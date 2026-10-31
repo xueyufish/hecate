@@ -33,6 +33,14 @@ from hecate_runtime.manifest import ArtifactManifest, ManifestError, sha256_hex,
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
+from .artifact_signing import (
+    ArtifactAdmissionError,
+    ArtifactTrustPolicy,
+    VerifiedArtifact,
+    read_artifact_json,
+    verify_artifact_admission,
+)
+
 PREVIEW_ROLE = "read_only"
 # Without the durable profile only read tools may execute; the durable
 # profile additionally admits manifest-declared ``write`` tools (the
@@ -400,16 +408,22 @@ def resolve_secret_ref(ref: str, profile_dir: Path) -> str:
     raise ProfileError(f"secret reference must start with 'env:' or 'file:': {ref!r}")
 
 
-def _load_json(path: Path, label: str) -> dict:
-    if not path.is_file():
-        raise ProfileError(f"missing profile file: {label} ({path.name})")
+def _load_json_content(content: bytes, label: str) -> dict:
+    """Parse one JSON document from already-verified bytes."""
+
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(content)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ProfileError(f"unreadable {label}: {exc}") from exc
     if not isinstance(data, dict):
         raise ProfileError(f"{label} must be a JSON object")
     return data
+
+
+def _load_json(path: Path, label: str) -> dict:
+    if not path.is_file():
+        raise ProfileError(f"missing profile file: {label} ({path.name})")
+    return _load_json_content(path.read_bytes(), label)
 
 
 def _check_local_schema_refs(value: object) -> None:
@@ -425,26 +439,58 @@ def _check_local_schema_refs(value: object) -> None:
             _check_local_schema_refs(item)
 
 
-def _load_manifest(profile_dir: Path) -> ArtifactManifest:
-    raw = _load_json(profile_dir / "agent-manifest.json", "agent manifest")
+@dataclass(frozen=True)
+class _LoadedManifest:
+    """Manifest plus the exact verified bytes every listed file resolved to."""
+
+    manifest: ArtifactManifest
+    raw: dict
+    verified: dict[str, bytes]
+
+
+def _load_manifest(profile_dir: Path) -> _LoadedManifest:
     try:
+        raw = read_artifact_json(profile_dir / "agent-manifest.json", "agent manifest")
         manifest = validate_manifest_dict(raw)
-    except ManifestError as exc:
+    except (ManifestError, ArtifactAdmissionError) as exc:
         raise ProfileError(f"invalid agent manifest: {exc}") from exc
 
+    verified: dict[str, bytes] = {}
     for entry in manifest.files:
         content_path = profile_dir / "files" / entry.path
         if not content_path.resolve().is_relative_to((profile_dir / "files").resolve()):
             raise ProfileError(f"manifest file escapes files directory: {entry.path!r}")
         if content_path.is_file():
-            content = content_path.read_bytes()
+            # One read per file: the bytes that pass the digest check are the
+            # bytes the rest of startup consumes, so a swap after admission
+            # cannot change what the runner executes.
+            try:
+                content = content_path.read_bytes()
+            except OSError as exc:
+                raise ProfileError(f"cannot read manifest file: {entry.path!r}") from exc
             if sha256_hex(content) != entry.sha256:
                 raise ProfileError(f"manifest digest mismatch for {entry.path!r}")
             if len(content) != entry.size:
                 raise ProfileError(f"manifest size mismatch for {entry.path!r}")
+            verified[entry.path] = content
         else:
             raise ProfileError(f"manifest file missing from profile: files/{entry.path}")
-    return manifest
+    return _LoadedManifest(manifest=manifest, raw=raw, verified=verified)
+
+
+def verify_profile_artifact(profile_dir: Path, policy: ArtifactTrustPolicy) -> VerifiedArtifact:
+    """Preflight the same file integrity and publisher checks used at startup.
+
+    This only reads artifact files; host credentials, execution resources and
+    model or tool adapters are not needed for an artifact-only preflight.
+    """
+
+    profile_dir = profile_dir.resolve()
+    loaded = _load_manifest(profile_dir)
+    try:
+        return verify_artifact_admission(loaded.raw, profile_dir, policy)
+    except ArtifactAdmissionError as exc:
+        raise ProfileError(f"artifact admission refused: {exc}") from exc
 
 
 def _load_config(profile_dir: Path) -> RunnerConfig:
@@ -659,6 +705,11 @@ class Profile:
     tool_schemas: dict[str, dict]
     tool_output_schemas: dict[str, dict] = field(default_factory=dict)
     governance: GovernanceLocalConfig = field(default_factory=GovernanceLocalConfig)
+    # Set only under strict artifact admission (--artifact-trust): the
+    # verified publisher/key facts of the signed manifest. Absent means
+    # admission was not enabled — never that a digest pass authenticated a
+    # publisher.
+    artifact_admission: VerifiedArtifact | None = None
 
     def execution_definition_digest(self, dispatch_binding: str | None = None) -> str:
         """Fingerprint the fixed graph inputs and its business dispatch binding."""
@@ -716,19 +767,25 @@ class Profile:
         return summary
 
 
-def load_profile(profile_dir: Path) -> Profile:
+def load_profile(profile_dir: Path, *, artifact_trust: ArtifactTrustPolicy | None = None) -> Profile:
     """Load and validate a profile; raise :class:`ProfileError` on any violation.
 
     The preview gate runs after structural validation: a manifest declaring
     ``write`` or ``approval_required`` tools fails startup naming the tool,
     and the tool allowlist must be a subset of the manifest's ``read`` tools.
+
+    With ``artifact_trust`` supplied, strict publisher admission runs after
+    the digest checks: an unsigned artifact, an untrusted or revoked
+    publisher/key, an unsupported signature version/algorithm or a broken
+    signature refuses startup — there is no fallback to digest-only mode.
     """
 
     profile_dir = profile_dir.resolve()
     if not profile_dir.is_dir():
         raise ProfileError(f"profile directory does not exist: {profile_dir}")
 
-    manifest = _load_manifest(profile_dir)
+    loaded = _load_manifest(profile_dir)
+    manifest = loaded.manifest
     if manifest.backend_type != "pregel" or manifest.backend_compat_version != "0.1":
         raise ProfileError("preview supports only backend_type='pregel' with backend_compat_version='0.1'")
     if manifest.contract_version != "0.1":
@@ -736,6 +793,14 @@ def load_profile(profile_dir: Path) -> Profile:
     supported = {"submit", "read_events_cursor", "cancel", "local_evidence"}
     if set(manifest.required_capabilities) - supported:
         raise ProfileError("manifest requires unsupported capabilities")
+
+    artifact_admission: VerifiedArtifact | None = None
+    if artifact_trust is not None:
+        try:
+            artifact_admission = verify_artifact_admission(loaded.raw, profile_dir, artifact_trust)
+        except ArtifactAdmissionError as exc:
+            raise ProfileError(f"artifact admission refused: {exc}") from exc
+
     config = _load_config(profile_dir)
     identities = _load_identities(profile_dir)
 
@@ -772,7 +837,9 @@ def load_profile(profile_dir: Path) -> Profile:
             continue
         if tool.schema_ref not in verified_files:
             raise ProfileError(f"tool schema must be a digest-verified manifest file: {tool.schema_ref!r}")
-        schema = _load_json(profile_dir / "files" / tool.schema_ref, f"tool schema {tool.name}")
+        # Consume the digest-verified bytes, not a fresh disk read: what was
+        # admitted is what the engine registers, even if the file changes now.
+        schema = _load_json_content(loaded.verified[tool.schema_ref], f"tool schema {tool.name}")
         _check_local_schema_refs(schema)
         try:
             Draft202012Validator.check_schema(schema)
@@ -780,9 +847,8 @@ def load_profile(profile_dir: Path) -> Profile:
             raise ProfileError(f"invalid tool schema for {tool.name}") from exc
         schemas[tool.name] = schema
 
-    entry_path = profile_dir / "files" / manifest.entry
-    entry_content = entry_path.read_bytes()
-    entry = _load_json(entry_path, "preview entry")
+    entry_content = loaded.verified[manifest.entry]
+    entry = _load_json_content(entry_content, "preview entry")
     if entry.get("kind") != "entry" or entry.get("tools") != list(config.tool_allowlist):
         raise ProfileError("preview entry must declare kind='entry' and the configured tools in order")
 
@@ -800,6 +866,7 @@ def load_profile(profile_dir: Path) -> Profile:
         tool_schemas=schemas,
         tool_output_schemas=getattr(config, "tool_output_schemas", {}),
         governance=_load_governance(_raw_config_for_governance(profile_dir)),
+        artifact_admission=artifact_admission,
     )
 
 

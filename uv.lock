@@ -2645,6 +2645,7 @@ name = "hecate-runner"
 version = "0.1.0"
 source = { editable = "packages/hecate-runner" }
 dependencies = [
+    { name = "cryptography" },
     { name = "hecate-durable" },
     { name = "hecate-governance" },
     { name = "hecate-runtime" },
@@ -2653,6 +2654,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=42.0.0" },
     { name = "hecate-durable", editable = "packages/hecate-durable" },
     { name = "hecate-governance", editable = "packages/hecate-governance" },
     { name = "hecate-runtime", editable = "packages/hecate-runtime" },

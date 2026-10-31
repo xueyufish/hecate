@@ -17,10 +17,12 @@ dependencies = [
     "hecate-durable",
     "hecate-governance",
     "jsonschema>=4.23,<5",
+    "cryptography>=42.0.0",
 ]
 
 [project.scripts]
 hecate-runner = "hecate_runner.__main__:main"
+hecate-runner-sign = "hecate_runner.sign:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hecate_runner"]

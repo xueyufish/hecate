@@ -23,6 +23,7 @@ import os
 import sys
 from pathlib import Path
 
+from .artifact_signing import ArtifactAdmissionError, ArtifactTrustPolicy, load_trust_policy
 from .durable import DurableRuntime
 from .engine import EvidenceUnavailableError, ExecutionEngine
 from .evidence import EvidenceStore
@@ -45,14 +46,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hecate-runner", description="Standalone Hecate execution host (preview)")
     parser.add_argument("--profile", required=True, type=Path, help="profile directory (manifest, config, identity)")
     parser.add_argument(
+        "--artifact-trust",
+        type=Path,
+        default=None,
+        help="operator-provided trust policy JSON; enables strict artifact admission "
+        "(unsigned or untrusted-publisher artifacts refuse to start)",
+    )
+    parser.add_argument(
         "--business-api",
         default=None,
         help="base URL of the business App's HTTP API (default: value from runner.json 'business_api_base')",
     )
     args = parser.parse_args(argv)
 
+    # The trust policy is operator-provided host configuration, parsed before
+    # anything else so a malformed policy can never half-start the runner.
+    artifact_trust: ArtifactTrustPolicy | None = None
+    if args.artifact_trust is not None:
+        try:
+            artifact_trust = load_trust_policy(args.artifact_trust)
+        except ArtifactAdmissionError as exc:
+            print(f"hecate-runner: artifact trust policy error: {exc}", file=sys.stderr)
+            return 2
+
     try:
-        profile: Profile = load_profile(args.profile)
+        profile: Profile = load_profile(args.profile, artifact_trust=artifact_trust)
     except ProfileError as exc:
         print(f"hecate-runner: profile error: {exc}", file=sys.stderr)
         return 2
@@ -272,6 +290,13 @@ def main(argv: list[str] | None = None) -> int:
 
     httpd = server.serve()
     actual_port = httpd.server_address[1]
+    # Admission labeling is honest by mode: a strict verdict names the
+    # verified publisher and key; without the flag this is digest-only and
+    # must never read as publisher authentication.
+    admission = profile.artifact_admission
+    admission_label = (
+        f"strict publisher={admission.publisher_ref} key={admission.key_id}" if admission else "digest-only"
+    )
     # Optional port disclosure for harnesses that start the runner with an
     # OS-assigned port (profile port 0); written after bind succeeds. The
     # temp+rename publication is atomic, so a poller that sees the file
@@ -286,7 +311,7 @@ def main(argv: list[str] | None = None) -> int:
         f"hecate-runner: serving on {profile.config.host}:{actual_port} "
         f"(backend={profile.manifest.backend_type}, model={profile.config.model_backend}, "
         f"tools={list(profile.config.tool_allowlist)}, durable={durable is not None}, "
-        f"managed={managed is not None})",
+        f"managed={managed is not None}, artifact-admission={admission_label})",
         flush=True,
     )
     try:
