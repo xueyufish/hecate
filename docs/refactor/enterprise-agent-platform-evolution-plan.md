@@ -244,7 +244,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | step8 | 继续撤销，不恢复外部 Runtime 接入任务 |
 | step9 | 内置 Knowledge 接入、检索基础与页面链路已修复；沿用 Memory/Knowledge 分段替换，已有 provider/向量 adapter 不等于完整绑定、ACL、迁移和删除认证 |
 | step10 | 复用版本匹配、证据覆盖门禁与报告页面查询状态；评估、标注、人工/自动回灌、calibration、Prompt 优化/管理/分析与 trace REST 读取已有权限切片。后端替换与完整证据生命周期仍开放；本次 Task 的共享交付验收由 step5e/6 消费，仍不等于业务效果验收 |
-| step11 | 补记最小平台发布门禁、历史凭据/UI 与版本生命周期权限；本地升级、完整 manifest/生命周期仍待交付 |
+| step11 | 补记最小平台发布门禁、历史凭据/UI 与版本生命周期权限；Runner 制品签名与受信发布者启动准入已交付（Ed25519 离线签名、`--artifact-trust` 严格准入、负例回归），本地升级、热升级与完整 manifest/生命周期仍待交付 |
 | step12 | 企业 Team/Membership 治理仍待交付；现有协作模式不计作企业团队 |
 | step13 | 团队委派/交接/验收仍待交付；单决策动作集合的串行恢复不计作团队 Batch |
 | step14 | Task/Run、动作、事件和命令回执观察页面及 Task 取消已交付；REST 命令/Task 提交与 workflow callback 已有角色门，Run SSE 已支持动态撤权，等待提交结果已刷新 Run 投影。平台本地补充输入及 ADMIN 审批决定页面已交付，任务详情页受控续跑观察面板已交付（任务级触发历史与各 Run 最终验收分别呈现），完整团队工作台仍待交付 |
