@@ -394,3 +394,14 @@ recorded_tracks:
     status: skipped
     reason: OPENAI_API_KEY unavailable; deterministic S12 does not certify real-model quality
     ci_gate: false
+  - id: controller_host_baseline
+    tier: 2
+    runner: tests/scenarios/baseline/run_controller_host_baseline.py
+    record: tests/scenarios/baselines/controller_host_baseline_controller-host-rubric-2_20261031T141743683567Z.json
+    status: skipped
+    reason: >-
+      committed record is the deterministic-injection matrix (harness and
+      stop classifications only, source deterministic_injection); real-model
+      collection requires HECATE_RUN_CONTROLLER_HOST_BASELINE=1 with provider
+      credentials and is not certified by that record
+    ci_gate: false
