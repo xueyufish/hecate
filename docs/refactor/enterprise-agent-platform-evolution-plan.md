@@ -247,7 +247,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | step11 | 补记最小平台发布门禁、历史凭据/UI 与版本生命周期权限；本地升级、完整 manifest/生命周期仍待交付 |
 | step12 | 企业 Team/Membership 治理仍待交付；现有协作模式不计作企业团队 |
 | step13 | 团队委派/交接/验收仍待交付；单决策动作集合的串行恢复不计作团队 Batch |
-| step14 | Task/Run、动作、事件和命令回执观察页面及 Task 取消已交付；REST 命令/Task 提交与 workflow callback 已有角色门，Run SSE 已支持动态撤权，等待提交结果已刷新 Run 投影。平台本地补充输入及 ADMIN 审批决定页面已交付，完整团队工作台仍待交付 |
+| step14 | Task/Run、动作、事件和命令回执观察页面及 Task 取消已交付；REST 命令/Task 提交与 workflow callback 已有角色门，Run SSE 已支持动态撤权，等待提交结果已刷新 Run 投影。平台本地补充输入及 ADMIN 审批决定页面已交付，任务详情页受控续跑观察面板已交付（任务级触发历史与各 Run 最终验收分别呈现），完整团队工作台仍待交付 |
 | step15 | 保留条件性启动；既有自进化/策略能力不计作有界自治理闭环 |
 | step16 | 复用已有 SQLite/PostgreSQL 组件及进程矩阵；继续按实际 profile 收口生产符合性，不整体勾选 |
 | step17 | 保留需求条件；现有 A2A 入口不等于跨组织信任与联邦认证 |

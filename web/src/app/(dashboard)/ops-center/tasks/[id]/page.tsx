@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { TaskApprovalPanel } from "@/components/tasks/task-approval-panel";
+import { TaskContinuationPanel } from "@/components/tasks/task-continuation-panel";
 import { RunActionsPanel } from "@/components/tasks/run-actions-panel";
 import { RunDeliveryPanel } from "@/components/tasks/run-delivery-panel";
 import { RunEventsPanel } from "@/components/tasks/run-events-panel";
@@ -164,6 +165,14 @@ export default function TaskDetailPage() {
           revision={detail.revision}
           onIssued={refreshAfterCommand}
         />
+      </div>
+
+      {/* Task-scoped read-only trail: rendered outside the Run switcher so a
+          run change can never present the trail as the selected run's own
+          history. The run's final verdict stays in the delivery panel. */}
+      <div className="space-y-2" data-testid="task-continuation-section">
+        <h2 className="font-medium">受控续跑（任务级）</h2>
+        <TaskContinuationPanel continuation={detail.continuation} />
       </div>
 
       <div className="space-y-2" data-testid="run-switcher">

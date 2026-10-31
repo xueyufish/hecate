@@ -98,6 +98,35 @@ evaluates a check, never continues a chain and never moves a task state.
 Each consumed attempt also emits a `task_continuation` governance event on
 the run's event stream, next to the task's other lifecycle events.
 
+### Reading it on the Task detail page
+
+The Task detail page renders this summary in a dedicated read-only
+continuation panel: the recorded bound, the recorded trigger count, and per
+attempt the trigger index, the rejected candidate's decision identity and
+digest, the verdict status, the standard version, the effective turn and the
+failed checks (kind and status only, excluding internal diagnostics). The
+panel offers no actions — it never issues a continuation, a resume or a
+re-acceptance.
+
+Read the panel with these boundaries:
+
+- The trail is task-level. It does not change when you select a different
+  run; the selected run's final delivery/acceptance verdict stays in the
+  delivery panel, separate from the historical candidate failures.
+- No summary means "no recorded continuation information" — it does not
+  imply that the policy is off.
+- The trigger count comes from recorded trigger entries. It is not the turn
+  count, the cost or the remaining budget, and a recorded trigger does not
+  prove that the follow-up model call completed.
+- Reaching the recorded bound means no further correction will trigger. It
+  is not a task failure. The task's lifecycle state is shown at the top of
+  the page; the selected run's delivery/acceptance verdict is a separate fact.
+- Missing or unknown values are shown as recorded-unknown, never inferred
+  as success. A missing trigger list does not mean zero triggers, and an
+  invalid bound cannot establish that the limit was reached.
+  The panel shows the projected verdict facts of the failed
+  checks, not the internal feedback message itself.
+
 ## What this does not do
 
 - It does not re-ask an accepted decision or re-execute a confirmed action.
