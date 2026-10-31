@@ -744,6 +744,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 **状态：平台最小观察、命令回执及 Task 取消页面已交付，Task/Run、命令回执/对账读取和 REST 命令/Task 提交、workflow callback 写入已有角色边界；Run SSE 已支持连接中的动态撤权，等待提交结果已刷新 Run 投影。平台本地补充输入及 ADMIN 审批决定页面已交付，完整团队工作台仍待交付。**
 
 - [x] `GET /api/runs/{run_id}/actions` 提供归属校验后的账本白名单视图，恢复状态与已记录 outcome 分列，不支持与无结果分开；查询不派发、不修复动作。
+- [x] `GET /api/runs/{run_id}/action-evidence` 在完整 Task/Run 归属与 VIEWER 门槛下提供单个动作的证据回执：已记录事实、摘要算法与校验对象、本次核验结论（一致／不匹配／无法复核／不支持）以及经完整性与派发身份校验的决策引用，分别呈现缺结果、结果未知、不支持查询与查询失败；摘要一致只证明保存内容相同，不表示业务目标通过，intent/claim 不单独证明动作已执行。回执不携带原始参数、结果正文、session、claim token 或存储地址；账本 outcome 是最新记录，回执标明本次读取版本。动作页支持选择、刷新与复制含 Task/Run/Action 的稳定定位链接，切换 Run/动作时丢弃迟到响应，不串用旧数据。验证范围与未认证项见[操作说明](../how-to/inspect-action-evidence.md)。
 - [x] `/ops-center/tasks` 及详情页消费 Task/Run/动作查询，支持分页、Run 切换与手动刷新；事件时间线消费持久游标分页，显式显示 gap，分页耗尽不推断 Run 完成。观察区维持查询语义；详情页另有取消操作，审批及实时订阅页面仍待交付。
 - [x] `GET /api/tasks/{task_id}/commands` 已支持完整 Task issuer 引用、归属校验、分页和命令回执白名单；列表读取不触发懒过期，不把 requested 改成 expired/applied。Task 详情已有 `TaskCommandsPanel`，按 Task 分页/刷新，展示真实状态、完整引用和可选字段；切换 Run 保留 Task 命令视图，切换 Task 隔离分页及迟到响应，不轮询、不发出写命令。
 - [x] Task 列表/详情/Run 列表、Run 详情/动作/事件/SSE 在业务查询、账本/事件读取或建流前校验 active workspace、资源可见性及 VIEWER 门槛；跨域、缺失或软删除资源不可区分。REST commands/cancel 写入先校验 Task 可见性及 EDITOR，再访问命令存储或处理幂等回放；降权后不能借旧命令绕过，不以 wake token 代替审批。

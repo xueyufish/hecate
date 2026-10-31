@@ -9,6 +9,10 @@ Task lifecycle surface over :class:`TaskControlService`:
 - ``GET /api/tasks`` / ``GET /api/tasks/{id}`` — workspace-scoped queries
   with the lifecycle projection.
 - ``GET /api/runs/{run_id}/actions`` — scoped action-ledger summaries.
+- ``GET /api/runs/{run_id}/action-evidence`` — one action's evidence
+  receipt: the recorded facts, the digest that was checked and what the
+  re-check found. Read-only; a matching digest proves content equality
+  only, never that the business goal passed.
 - ``GET /api/runs/{run_id}/events`` — cursor-paginated event reads;
   ``GET /api/runs/{run_id}/events/stream`` — the SSE subscribe view on
   the same stream (resume by cursor after a disconnect). An established
@@ -592,6 +596,28 @@ async def list_run_actions(run_id: uuid.UUID, service: ServiceDep, ctx: AuthDep)
     workspace_id = await _run_read_gate(ctx, service, run_id)
     try:
         return await service.list_run_actions(workspace_id, run_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+
+
+@runs_router.get("/{run_id}/action-evidence")
+async def get_run_action_evidence(
+    run_id: uuid.UUID,
+    service: ServiceDep,
+    ctx: AuthDep,
+    action_key: Annotated[str, Query(min_length=1, max_length=512)],
+) -> dict[str, Any]:
+    """One action's evidence receipt (read-only).
+
+    The action key travels as a query parameter: it is a caller-defined
+    ledger key that may contain characters a path segment cannot carry.
+    The receipt reports recorded facts and what can be re-verified now; a
+    matching digest proves content equality only, never that the business
+    goal passed.
+    """
+    workspace_id = await _run_read_gate(ctx, service, run_id)
+    try:
+        return await service.get_run_action_evidence(workspace_id, run_id, action_key)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
 

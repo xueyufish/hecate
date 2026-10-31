@@ -60,6 +60,7 @@ function emptyCommands() {
 }
 
 beforeEach(() => {
+  window.history.replaceState({}, "", "/");
   apiMock.get.mockReset();
   route.id = "task-1";
 });
@@ -113,6 +114,30 @@ describe("task list page", () => {
 });
 
 describe("task detail page", () => {
+  it("opens a saved action reference in its historical Run and clears it on a Run switch", async () => {
+    const key = "act/键 & ?#%";
+    window.history.replaceState({}, "", `/ops-center/tasks/task-1?${
+      new URLSearchParams({ run_id: "run-1", action_key: key })
+    }`);
+    apiMock.get.mockImplementation((path: string) => {
+      if (path === "/api/tasks/task-1") return Promise.resolve(detail());
+      if (path.endsWith("/actions")) return Promise.resolve(actions(path.includes("run-1") ? "run-1" : "run-2"));
+      if (path.endsWith("/events")) return Promise.resolve(emptyEvents());
+      if (path.includes("/commands")) return Promise.resolve(emptyCommands());
+      if (path.includes("/action-evidence?")) return Promise.resolve({ run_id: "run-1", task_id: "task-1", supported: false });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    render(<TaskDetailPage />);
+    await screen.findByTestId("evidence-unsupported");
+    expect(screen.getByRole("button", { name: "Run #1" })).toHaveAttribute("aria-pressed", "true");
+    expect(apiMock.get).toHaveBeenCalledWith(`/api/runs/run-1/action-evidence?${new URLSearchParams({ action_key: key })}`);
+    await userEvent.click(screen.getByRole("button", { name: "Run #2" }));
+    await waitFor(() => expect(screen.queryByTestId("evidence-panel")).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Run #1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run #1" })).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.queryByTestId("evidence-panel")).not.toBeInTheDocument();
+  });
+
   it("selects the latest attempt, switches Run and refreshes the task", async () => {
     apiMock.get.mockImplementation((path: string) => {
       if (path === "/api/tasks/task-1") return Promise.resolve(detail());
