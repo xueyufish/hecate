@@ -60,6 +60,35 @@ export interface DeliveryAcceptanceView {
   recorded_status?: string;
 }
 
+export interface ContinuationFailedCheck {
+  kind: string | null;
+  status: string | null;
+  detail?: string;
+}
+
+export interface ContinuationAttemptSummary {
+  /** 1-based trigger index recorded with the trigger fact. */
+  attempt?: number | null;
+  candidate_decision_step_id?: string | null;
+  candidate_digest?: string | null;
+  /** The acceptance verdict that triggered the correction. */
+  status?: string | null;
+  standard_version?: number | null;
+  effective_turn?: number | null;
+  failed_checks?: ContinuationFailedCheck[] | null;
+}
+
+/**
+ * Task-level controlled-continuation trail projected by the read-only task
+ * detail GET. Absence of the whole summary means "no recorded continuation
+ * information" — never that the policy is off — and a recorded trigger says
+ * nothing about whether the follow-up model call completed.
+ */
+export interface TaskContinuationSummary {
+  max_continuations?: number | null;
+  attempts?: ContinuationAttemptSummary[];
+}
+
 export interface TaskDetail {
   task_id: string;
   goal: string;
@@ -71,6 +100,8 @@ export interface TaskDetail {
   created_at: string | null;
   runs: RunSummary[];
   wait?: Record<string, unknown>;
+  /** Task-level continuation trail; absent = no recorded continuation info. */
+  continuation?: TaskContinuationSummary;
 }
 
 export interface RunActionItem {
