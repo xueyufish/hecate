@@ -347,10 +347,15 @@ class DurableWorker:
         if (
             record is None
             or record.lifecycle_state is not TaskLifecycleState.RUNNING
-            or record.revision != expected_revision
             or self._leases.current_token(handle.lease_key) != handle.fencing_token
         ):
             return  # the dispatcher already drove a terminal/waiting state
+        # The CAS baseline is the freshly read revision, not the caller's
+        # claim-era value: a dispatch that died after its own mid-run writes
+        # (e.g. a persisted continuation trigger) has legitimately moved the
+        # revision, and the live lease token plus the RUNNING check already
+        # fence every other mover.
+        expected_revision = record.revision
         attempts = int(record.extra.get("dispatch_attempts", 0)) + 1
         failure_note = {"dispatch_attempts": attempts, "last_error": str(error)[:512]}
         try:

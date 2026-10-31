@@ -36,6 +36,7 @@ from hecate.execution.governance_events import (
     COMMAND_RECORDED,
     COMMAND_TRANSITIONED,
     RUN_TERMINAL,
+    TASK_CONTINUATION,
     TASK_STATE_CHANGED,
     TASK_SUBMITTED,
     PlatformEventService,
@@ -50,6 +51,7 @@ DURABLE_EVENT_SCHEMA_MAP = {
     "command_recorded": COMMAND_RECORDED,
     "command_state": COMMAND_TRANSITIONED,
     "run_terminal": RUN_TERMINAL,
+    "task_continuation": TASK_CONTINUATION,
 }
 
 

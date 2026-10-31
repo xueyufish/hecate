@@ -290,12 +290,15 @@ class TaskControlService:
                 if "skill_catalog" in options and type(options["skill_catalog"]) is not bool:
                     raise ValueError("controller.skill_catalog must be a boolean")
                 ControllerLimits(max_turns=options.get("max_turns", 16), deadline=options.get("deadline"))
-                from hecate_runtime.agent_controller import NoProgressPolicy
+                from hecate_runtime.agent_controller import ControllerContinuationPolicy, NoProgressPolicy
 
                 progress_policy = NoProgressPolicy.from_declaration(options.get("no_progress"))
                 if progress_policy is not None:
                     progress_policy.validate_observations()
                 input_wait_timeout(options.get("input_wait_timeout_seconds"))
+                continuation_policy = ControllerContinuationPolicy.from_declaration(options.get("continuation"))
+                if continuation_policy is not None and not isinstance(input.get("acceptance"), dict):
+                    raise ValueError("controller.continuation requires a declared acceptance block")
                 schema = input.get("output_schema")
                 if schema is not None:
                     if not isinstance(schema, dict):
@@ -592,6 +595,31 @@ class TaskControlService:
         wait = (record.extra or {}).get("wait") if record else None
         if wait:
             detail["wait"] = wait
+        continuation = (record.extra or {}).get("continuation") if record else None
+        if isinstance(continuation, dict) and isinstance(continuation.get("attempts"), list):
+            # Minimal read-only continuation summary: trigger reason,
+            # per-attempt candidate identity, verdict facts and position.
+            # A GET never evaluates checks, continues a chain or moves state.
+            detail["continuation"] = {
+                "max_continuations": continuation.get("max_continuations"),
+                "attempts": [
+                    {
+                        "attempt": item.get("attempt"),
+                        "candidate_decision_step_id": item.get("candidate_decision_step_id"),
+                        "candidate_digest": item.get("candidate_digest"),
+                        "status": item.get("status"),
+                        "standard_version": item.get("standard_version"),
+                        "effective_turn": item.get("effective_turn"),
+                        "failed_checks": (
+                            item.get("feedback", {}).get("failed_checks")
+                            if isinstance(item.get("feedback"), dict)
+                            else None
+                        ),
+                    }
+                    for item in continuation["attempts"]
+                    if isinstance(item, dict)
+                ],
+            }
         return detail
 
     async def list_tasks(

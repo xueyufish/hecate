@@ -64,6 +64,7 @@ COMMAND_RECORDED = "hecate.platform.command_recorded/0"
 COMMAND_TRANSITIONED = "hecate.platform.command_transitioned/0"
 TASK_RECONCILIATION = "hecate.platform.task_reconciliation/0"
 RUN_TERMINAL = "hecate.platform.run_terminal/0"
+TASK_CONTINUATION = "hecate.platform.task_continuation/0"
 
 
 def _utc_now() -> str:

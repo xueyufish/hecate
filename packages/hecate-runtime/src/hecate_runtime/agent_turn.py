@@ -27,8 +27,10 @@ from hecate_runtime.accepted_decision import (
     AcceptedDecisionRecord,
     AcceptedDecisionStore,
     DecisionOwnership,
+    DecisionStoreUnavailableError,
     DecisionValidationError,
     RunRef,
+    canonical_decision_digest,
 )
 from hecate_runtime.decision_step import DecisionResponder, DecisionStep
 from hecate_runtime.tool_call_executor import ToolCallExecutor
@@ -82,6 +84,20 @@ class AgentTurn:
         self._store = store
         self._decision_step = DecisionStep(store, responder)
         self._action_batch = AcceptedActionBatch(AcceptedActionStep(store, executor), store)
+
+    async def validate_final_answer(self, run_ref: RunRef, decision_step_id: str, content_digest: str) -> None:
+        """Require an already committed candidate before replaying host feedback."""
+        record = await self._store.lookup(run_ref, decision_step_id)
+        if (
+            record is None
+            or record.run_ref != run_ref
+            or record.decision_step_id != decision_step_id
+            or record.schema_version != FINAL_ANSWER_SCHEMA_VERSION
+            or not record.accepted_at
+            or record.content_digest != content_digest
+            or canonical_decision_digest(record) != content_digest
+        ):
+            raise DecisionStoreUnavailableError("continuation candidate is missing or corrupt")
 
     async def run(
         self,
