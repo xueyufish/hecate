@@ -74,6 +74,26 @@ published snapshot drifts.
 }
 ```
 
+## Artifact signing and trusted-publisher admission
+
+The manifest may declare a `publisher_ref` and a `signature_ref` naming a
+signature envelope inside the profile directory. Signing is an offline
+operator step (`hecate-runner-sign`); the envelope is a versioned Ed25519
+signature over the canonical manifest bytes, so it binds the complete
+manifest — file digests, tool permissions, entry and publisher. The public
+keys live in an operator-provided trust policy, never in the artifact:
+starting with `hecate-runner --profile <dir> --artifact-trust <policy.json>`
+enables strict admission, which refuses any unsigned, untrusted or revoked
+publisher or key, any unsupported signature version or algorithm, and any
+manifest or file tampering — before binding the service or touching a model
+or tool. Without the flag the loader performs digest verification only, and
+neither a digest pass nor a present `signature_ref` is publisher
+authentication. The signature covers the manifest and its listed files;
+`runner.json`, `identity.json` and the trust policy remain operator-owned
+host configuration. See
+[Sign runner artifacts](../../docs/how-to/sign-runner-artifacts.md) for the
+full workflow, rotation and revocation semantics.
+
 ## Durable profile
 
 Add an explicit host-owned database and deployment/data domain:
