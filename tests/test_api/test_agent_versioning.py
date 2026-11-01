@@ -15,11 +15,15 @@ Covers:
 
 from __future__ import annotations
 
+import copy
 import uuid
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.models.agent import AgentModel
+from hecate.models.tool import ToolModel
 from hecate.studio.agents.versioning import AgentVersionService
 
 VALID_DSL = {
@@ -311,3 +315,372 @@ async def test_rename_version_metadata_only(client: AsyncClient) -> None:
     assert renamed["change_summary"] == "initial release"
     # Snapshot content is untouched by metadata edits.
     assert renamed["config_snapshot"]["persona"] == "You are helpful"
+
+
+# ---------------------------------------------------------------------------
+# Tool-contract snapshots and drift diagnostics
+# ---------------------------------------------------------------------------
+
+
+async def _tool_row(
+    db_session: AsyncSession,
+    workspace_id: uuid.UUID,
+    name: str,
+    *,
+    description: str = "workspace tool",
+    parameters: dict | None = None,
+) -> ToolModel:
+
+    from hecate.models.tool import ToolModel
+
+    row = ToolModel(
+        workspace_id=workspace_id,
+        name=name,
+        description=description,
+        source="custom",
+        parameters=parameters or {"type": "object", "properties": {"sku": {"type": "string"}}},
+    )
+    db_session.add(row)
+    await db_session.flush()
+    return row
+
+
+async def _drift_agent(db_session: AsyncSession, tools: list[str]) -> AgentModel:
+    from hecate.models.agent import AgentModel
+
+    agent = AgentModel(
+        workspace_id=uuid.UUID(int=0),
+        name="Tool Contract Agent",
+        model_config_db={"model": "gpt-4o"},
+        mode="chat",
+        tools=tools,
+    )
+    db_session.add(agent)
+    await db_session.flush()
+    return agent
+
+
+def _tool_entry(manifest: list[dict], name: str) -> dict:
+    return next(entry for entry in manifest if entry["resource_type"] == "tool" and entry["resource_id"] == name)
+
+
+async def test_tool_contract_snapshot_records_resolved_definitions(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["web_search", "stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup", description="look up stock")
+
+    service = AgentVersionService(db_session)
+    committed = await service.commit_version(agent.id)
+
+    builtin = _tool_entry(committed["ref_manifest"], "web_search")["tool_contract"]
+    assert builtin["snapshot_version"] == 1
+    assert builtin["digest_scope"] == ["name", "description", "parameters"]
+    assert builtin["resolution"]["source"] == "builtin"
+    assert builtin["resolution"]["resource_id"] == "builtin:web_search"
+    assert builtin["contract"]["name"] == "web_search"
+    assert "Search the web" in builtin["contract"]["description"]
+    assert builtin["contract_hash"]
+
+    workspace = _tool_entry(committed["ref_manifest"], "stock_lookup")["tool_contract"]
+    assert workspace["resolution"]["source"] == "workspace_tool"
+    assert workspace["resolution"]["resource_id"] == str(row.id)
+    assert workspace["resolution"]["tool_source"] == "custom"
+    assert workspace["contract"]["description"] == "look up stock"
+    assert workspace["contract"]["parameters"]["properties"]["sku"] == {"type": "string"}
+    assert workspace["contract_hash"]
+
+
+async def test_unresolvable_tool_commits_unverified_and_never_blocks(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["ghost_tool"])
+    service = AgentVersionService(db_session)
+
+    committed = await service.commit_version(agent.id)
+    snapshot = _tool_entry(committed["ref_manifest"], "ghost_tool")["tool_contract"]
+    assert snapshot["contract"] is None and snapshot["contract_hash"] is None
+    assert snapshot["resolution_note"].startswith("unresolved at commit")
+
+    report = await service.version_drift(agent.id, 1)
+    diagnostic = report["tool_contracts"]["tools"][0]
+    assert diagnostic["status"] == "unverified"
+    assert report["tool_contracts"]["summary"]["unverified"] == 1
+
+
+async def test_drift_detects_tool_parameter_change(db_session: AsyncSession) -> None:
+    from datetime import UTC, datetime
+
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+
+    row.parameters = {"type": "object", "properties": {"sku": {"type": "string"}, "region": {"type": "string"}}}
+    row.updated_at = datetime.now(UTC)
+    await db_session.flush()
+
+    report = await service.version_drift(agent.id, 1)
+    diagnostic = report["tool_contracts"]["tools"][0]
+    assert diagnostic["status"] == "changed"
+    assert diagnostic["committed_contract_hash"] != diagnostic["live_contract_hash"]
+    assert report["tool_contracts"]["summary"]["changed"] == 1
+    # The name did not move, so the legacy reference list stays clean.
+    assert report["drifted"] == []
+
+
+async def test_drift_flags_same_name_rebuild_as_binding_change(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+
+    row.deleted = True
+    rebuilt = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+
+    report = await service.version_drift(agent.id, 1)
+    diagnostic = report["tool_contracts"]["tools"][0]
+    assert diagnostic["status"] == "consistent"
+    assert diagnostic["binding_changed"] is True
+    assert "different database row" in diagnostic["detail"]
+    assert diagnostic["live_resolution"]["resource_id"] == str(rebuilt.id)
+
+
+async def test_drift_reports_missing_after_soft_delete(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+
+    row.deleted = True
+    await db_session.flush()
+
+    report = await service.version_drift(agent.id, 1)
+    diagnostic = report["tool_contracts"]["tools"][0]
+    assert diagnostic["status"] == "missing"
+    assert diagnostic["committed_contract_hash"]
+
+
+async def test_drift_contract_hash_ignores_json_key_order(db_session: AsyncSession) -> None:
+    from datetime import UTC, datetime
+
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(
+        db_session,
+        agent.workspace_id,
+        "stock_lookup",
+        parameters={"type": "object", "required": ["sku"], "properties": {"sku": {"type": "string"}}},
+    )
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+
+    row.parameters = {"properties": {"sku": {"type": "string"}}, "required": ["sku"], "type": "object"}
+    row.updated_at = datetime.now(UTC)
+    await db_session.flush()
+
+    report = await service.version_drift(agent.id, 1)
+    assert report["tool_contracts"]["tools"][0]["status"] == "consistent"
+
+
+async def test_drift_baseline_ignores_draft_tool_edits(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+
+    # The draft drops the tool; the checked version's frozen list stays the
+    # comparison object and its name still resolves in the registry.
+    agent.tools = []
+    await db_session.flush()
+
+    report = await service.version_drift(agent.id, 1)
+    assert report["tool_contracts"]["tools"][0]["status"] == "consistent"
+    assert report["tool_contracts"]["summary"]["consistent"] == 1
+    # The legacy name-level reference list keeps reporting the draft change.
+    assert any(
+        entry["resource_type"] == "tool" and entry["resource_id"] == "stock_lookup" and entry["missing"]
+        for entry in report["drifted"]
+    )
+
+
+async def test_legacy_snapshot_without_contract_is_unverified_and_never_backfilled(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+
+    # Simulate a version committed before tool contracts existed: strip the
+    # contract evidence from the stored manifest, never touching the rest.
+    current = (await service.get_version(agent.id, 1, include_snapshot=True))["ref_manifest"]
+    stripped = [{key: value for key, value in entry.items() if key != "tool_contract"} for entry in current]
+
+    from sqlalchemy import update
+
+    from hecate.models.agent_version import AgentVersionModel
+
+    await db_session.execute(
+        update(AgentVersionModel).where(AgentVersionModel.agent_id == agent.id).values(ref_manifest=stripped)
+    )
+    await db_session.flush()
+
+    report = await service.version_drift(agent.id, 1)
+    diagnostic = report["tool_contracts"]["tools"][0]
+    assert diagnostic["status"] == "unverified"
+    assert "snapshot predates tool contract capture" in diagnostic["detail"]
+
+    # History is never rewritten: the stored manifest keeps its legacy shape.
+    stored = (await service.get_version(agent.id, 1, include_snapshot=True))["ref_manifest"]
+    assert all("tool_contract" not in entry for entry in stored)
+
+
+async def test_same_name_in_other_workspace_does_not_resolve(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    await _tool_row(db_session, uuid.UUID(int=1234), "stock_lookup")
+    service = AgentVersionService(db_session)
+
+    committed = await service.commit_version(agent.id)
+    assert _tool_entry(committed["ref_manifest"], "stock_lookup")["tool_contract"]["resolution"] is None
+
+    report = await service.version_drift(agent.id, 1)
+    assert report["tool_contracts"]["tools"][0]["status"] == "unverified"
+
+
+async def test_tool_contract_snapshot_is_immutable_across_versions(db_session: AsyncSession) -> None:
+    from datetime import UTC, datetime
+
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+    v1_manifest = (await service.get_version(agent.id, 1, include_snapshot=True))["ref_manifest"]
+    v1_hash = _tool_entry(v1_manifest, "stock_lookup")["tool_contract"]["contract_hash"]
+
+    row.parameters = {"type": "object", "properties": {"region": {"type": "string"}}}
+    row.updated_at = datetime.now(UTC)
+    await db_session.flush()
+    await service.commit_version(agent.id)
+
+    v1_entry = _tool_entry(
+        (await service.get_version(agent.id, 1, include_snapshot=True))["ref_manifest"], "stock_lookup"
+    )["tool_contract"]
+    v2_entry = _tool_entry(
+        (await service.get_version(agent.id, 2, include_snapshot=True))["ref_manifest"], "stock_lookup"
+    )["tool_contract"]
+    assert v1_entry["contract_hash"] == v1_hash
+    assert v2_entry["contract_hash"] != v1_hash
+
+
+async def test_drift_endpoint_returns_tool_contract_diagnostics(db_session: AsyncSession, client: AsyncClient) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+
+    resp = await client.get(f"/api/agents/{agent.id}/versions/1/drift")
+    assert resp.status_code == 200
+    report = resp.json()
+    assert report["tool_contracts"]["summary"]["consistent"] == 1
+    assert report["tool_contracts"]["digest_scope"] == ["name", "description", "parameters"]
+
+
+@pytest.mark.parametrize("damage", ["format", "scope", "digest", "shape", "missing_entry"])
+async def test_unusable_tool_snapshot_never_verifies_consistent(db_session: AsyncSession, damage: str) -> None:
+    from sqlalchemy import update
+
+    from hecate.models.agent_version import AgentVersionModel
+
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    committed = await service.commit_version(agent.id)
+    manifest = copy.deepcopy(committed["ref_manifest"])
+    snapshot = manifest[0]["tool_contract"]
+    if damage == "format":
+        snapshot["snapshot_version"] = 99
+    elif damage == "scope":
+        snapshot["digest_scope"] = ["name"]
+    elif damage == "digest":
+        snapshot["contract"]["description"] = "corrupted snapshot"
+    elif damage == "shape":
+        manifest[0]["tool_contract"] = "corrupted snapshot"
+    else:
+        manifest = []
+    await db_session.execute(
+        update(AgentVersionModel).where(AgentVersionModel.agent_id == agent.id).values(ref_manifest=manifest)
+    )
+    report = await service.version_drift(agent.id, 1)
+    assert report["tool_contracts"]["summary"]["consistent"] == 0
+    assert report["tool_contracts"]["summary"]["unverified"] == 1
+
+
+async def test_builtin_snapshot_matches_the_exact_model_definition(db_session: AsyncSession, monkeypatch) -> None:
+    from hecate.core.composition.entry_assembly import load_agent_tools
+    from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
+
+    monkeypatch.setitem(BUILTIN_TOOL_DEFINITIONS, "empty_schema", {"description": "test", "parameters": {}})
+    agent = await _drift_agent(db_session, ["empty_schema"])
+    service = AgentVersionService(db_session)
+    committed = await service.commit_version(agent.id)
+    expected = await load_agent_tools(db_session, agent.tools, workspace_id=agent.workspace_id)
+    assert committed["ref_manifest"][0]["tool_contract"]["contract"] == expected[0]["function"]
+
+
+async def test_same_name_rebuild_with_changed_schema_does_not_claim_equal_hashes(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+    row.deleted = True
+    await _tool_row(db_session, agent.workspace_id, "stock_lookup", description="new contract")
+    report = await service.version_drift(agent.id, 1)
+    tool = report["tool_contracts"]["tools"][0]
+    assert tool["status"] == "changed" and tool["binding_changed"] is True
+    assert "hashes are equal" not in tool["detail"]
+
+
+async def test_public_drift_schema_accepts_the_report(db_session: AsyncSession) -> None:
+    from hecate.models.agent_version import AgentVersionDriftSchema
+
+    agent = await _drift_agent(db_session, ["web_search"])
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+    report = await service.version_drift(agent.id, 1)
+    parsed = AgentVersionDriftSchema.model_validate(report)
+    assert parsed.model_dump()["tool_contracts"]["summary"]["consistent"] == 1
+
+
+async def test_tool_contract_and_binding_use_one_database_lookup(db_session: AsyncSession, monkeypatch) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    real_execute = db_session.execute
+    tool_reads = []
+
+    async def execute(statement, *args, **kwargs):
+        if any(item.get("entity") is ToolModel for item in getattr(statement, "column_descriptions", [])):
+            tool_reads.append(statement)
+        return await real_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", execute)
+    result = await AgentVersionService(db_session)._resolve_tool_contracts(agent, agent.tools)
+    assert len(tool_reads) == 1
+    assert result["stock_lookup"]["resolution"]["resource_id"] == str(row.id)
+    assert result["stock_lookup"]["contract"]["parameters"] == row.parameters
+
+
+async def test_declared_source_change_is_reported_as_a_binding_change(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["stock_lookup"])
+    row = await _tool_row(db_session, agent.workspace_id, "stock_lookup")
+    service = AgentVersionService(db_session)
+    await service.commit_version(agent.id)
+    row.source = "mcp"
+    await db_session.flush()
+    report = await service.version_drift(agent.id, 1)
+    diagnostic = report["tool_contracts"]["tools"][0]
+    assert diagnostic["status"] == "consistent"
+    assert diagnostic["binding_changed"] is True
+    assert diagnostic["live_resolution"]["tool_source"] == "mcp"
+
+
+async def test_tool_contract_capture_keeps_builtin_precedence(db_session: AsyncSession) -> None:
+    agent = await _drift_agent(db_session, ["web_search"])
+    await _tool_row(db_session, agent.workspace_id, "web_search", description="shadow definition")
+    committed = await AgentVersionService(db_session).commit_version(agent.id)
+    snapshot = committed["ref_manifest"][0]["tool_contract"]
+    assert snapshot["resolution"]["source"] == "builtin"
+    assert snapshot["contract"]["description"] != "shadow definition"

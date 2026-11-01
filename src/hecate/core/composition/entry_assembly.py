@@ -16,6 +16,7 @@ helpers — that rule is enforced by ``tests/test_layering_entry_imports.py``.
 
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
 from typing import Any
@@ -116,27 +117,37 @@ def get_shared_session_state_store() -> Any:
 async def load_agent_tools(
     db: AsyncSession, tool_names: list[str], *, workspace_id: uuid.UUID = _DEFAULT_WORKSPACE
 ) -> list[dict[str, Any]]:
-    """Resolve an agent's configured tools into OpenAI-format definitions.
+    """Resolve model-visible tool definitions using the shared precedence rules."""
+    definitions, _ = await load_agent_tools_with_sources(db, tool_names, workspace_id=workspace_id)
+    return definitions
 
-    Builtin tool names resolve from the in-memory ``BUILTIN_TOOL_DEFINITIONS``;
-    any other names are looked up in the ``ToolModel`` table.
 
-    Args:
-        db: The async database session.
-        tool_names: Tool names configured on the agent.
+async def load_agent_tools_with_sources(
+    db: AsyncSession, tool_names: list[str], *, workspace_id: uuid.UUID = _DEFAULT_WORKSPACE
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Resolve definitions and their source identities from the same lookup.
 
-    Returns:
-        Tool definitions formatted for LLM function calling.
+    The execution loader and AgentVersion contract capture consume this one
+    precedence/formatting path. Source metadata describes the exact rows used
+    for those definitions; a second query must not attach a replacement row's
+    identity to the first query's content. No external tool service is called.
     """
     if not tool_names:
-        return []
+        return [], {}
     from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
 
     definitions: list[dict[str, Any]] = []
+    sources: dict[str, dict[str, Any]] = {}
     db_names: list[str] = []
     for name in tool_names:
         if name in BUILTIN_TOOL_DEFINITIONS:
             definitions.append({"name": name, **BUILTIN_TOOL_DEFINITIONS[name]})
+            sources[name] = {
+                "source": "builtin",
+                "resource_id": f"builtin:{name}",
+                "updated_at": None,
+                "tool_source": "builtin",
+            }
         else:
             db_names.append(name)
     if db_names:
@@ -146,6 +157,12 @@ async def load_agent_tools(
             )
         )
         for tool in result.scalars().all():
+            sources[tool.name] = {
+                "source": "workspace_tool",
+                "resource_id": str(tool.id),
+                "updated_at": tool.updated_at.isoformat() if tool.updated_at else None,
+                "tool_source": tool.source,
+            }
             definitions.append(
                 {
                     "name": tool.name,
@@ -155,7 +172,7 @@ async def load_agent_tools(
             )
     from hecate_llm.tool_calling import format_tools_for_llm
 
-    return format_tools_for_llm(definitions)
+    return copy.deepcopy(format_tools_for_llm(definitions)), sources
 
 
 def build_tool_registry(

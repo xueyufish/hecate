@@ -48,6 +48,16 @@ logger = logging.getLogger(__name__)
 #: Bump when the snapshot shape changes; resolvers ignore unknown fields.
 SNAPSHOT_SCHEMA_VERSION = 1
 
+#: Bump when the per-tool contract snapshot shape changes; readers ignore
+#: unknown fields and treat missing snapshots as unverified, never as
+#: consistent.
+TOOL_CONTRACT_SNAPSHOT_VERSION = 1
+
+#: The model-visible surface a tool-contract snapshot digests. The legacy
+#: manifest ``content_hash`` on tool entries keeps its name-identity meaning;
+#: it is NOT a tool-content digest and the diagnostics never present it as one.
+TOOL_CONTRACT_DIGEST_SCOPE: tuple[str, ...] = ("name", "description", "parameters")
+
 #: Own-config fields captured in every snapshot (alias keys, matching the
 #: API's ``model_config`` spelling for the LLM config dict).
 OWN_CONFIG_FIELDS: tuple[str, ...] = (
@@ -65,6 +75,42 @@ OWN_CONFIG_FIELDS: tuple[str, ...] = (
     "enable_suggestions",
     "guardrail_config",
 )
+
+
+def _tool_contract_snapshot_error(name: str, snapshot: Any) -> str | None:
+    if snapshot is None:
+        return "snapshot predates tool contract capture or its entry is missing; no contract baseline"
+    if not isinstance(snapshot, dict):
+        return "stored tool contract snapshot is malformed"
+    version = snapshot.get("snapshot_version")
+    if type(version) is not int or version != TOOL_CONTRACT_SNAPSHOT_VERSION:
+        return "stored tool contract snapshot version is unsupported"
+    if snapshot.get("digest_scope") != list(TOOL_CONTRACT_DIGEST_SCOPE):
+        return "stored tool contract digest scope is unsupported"
+    contract = snapshot.get("contract")
+    if contract is None and snapshot.get("contract_hash") is None:
+        return "tool contract was not resolvable at commit; no baseline to verify against"
+    if (
+        not isinstance(contract, dict)
+        or set(contract) != set(TOOL_CONTRACT_DIGEST_SCOPE)
+        or contract.get("name") != name
+    ):
+        return "stored tool contract content is malformed"
+    try:
+        if canonical_hash(contract) != snapshot.get("contract_hash"):
+            return "stored tool contract digest does not match its content"
+    except (TypeError, ValueError):
+        return "stored tool contract content cannot be hashed"
+    source = snapshot.get("resolution")
+    if (
+        not isinstance(source, dict)
+        or source.get("source") not in ("builtin", "workspace_tool")
+        or not isinstance(source.get("resource_id"), str)
+        or not source["resource_id"]
+        or not isinstance(source.get("tool_source"), str)
+    ):
+        return "stored tool contract resolution identity is incomplete"
+    return None
 
 
 class AgentPublishEvaluationGateBlockedError(Exception):
@@ -273,15 +319,24 @@ class AgentVersionService:
                 # in the API layer.
                 raise
 
+        tool_names = [tool for tool in agent.tools or [] if isinstance(tool, str)]
+        tool_contracts = await self._resolve_tool_contracts(agent, tool_names)
         for tool in agent.tools or []:
-            manifest.append(
-                {
-                    "resource_type": "tool",
-                    "resource_id": tool if isinstance(tool, str) else canonical_hash(tool)[:16],
-                    "version": None,
-                    "content_hash": canonical_hash(tool),
-                }
-            )
+            entry: dict[str, Any] = {
+                "resource_type": "tool",
+                "resource_id": tool if isinstance(tool, str) else canonical_hash(tool)[:16],
+                "version": None,
+                "content_hash": canonical_hash(tool),
+            }
+            if isinstance(tool, str):
+                # Versioned tool-contract evidence: what the model actually
+                # sees for this name at commit time. The legacy content_hash
+                # above keeps its name-identity meaning and is never presented
+                # as a tool-content digest. An unresolvable name commits with
+                # an explicit unresolved snapshot — this diagnostic introduces
+                # no new commit or publish blocking.
+                entry["tool_contract"] = tool_contracts.get(tool)
+            manifest.append(entry)
 
         for kb_id in agent.knowledge_base_ids or []:
             manifest.append(
@@ -294,6 +349,140 @@ class AgentVersionService:
             )
 
         return manifest
+
+    async def _resolve_tool_contracts(self, agent: AgentModel, tool_names: list[str]) -> dict[str, dict[str, Any]]:
+        """Resolve tool names exactly the way execution assembly resolves them.
+
+        ``load_agent_tools`` stays the single precedence rule (builtin wins,
+        then the workspace's non-deleted ``ToolModel`` rows) and the single
+        formatting pipeline, so the snapshot records the definition the model
+        actually sees. Database rows are annotated with their verifiable
+        identity (row id, ``updated_at``, declared source) so a same-name
+        rebuild is never mistaken for the original binding. Nothing here
+        calls an external MCP/REST service: the recorded contract is the
+        registered definition, never a live fetch, and no credential,
+        implementation code or connector configuration is copied.
+        """
+        names = [name for name in tool_names if isinstance(name, str)]
+        resolved: dict[str, dict[str, Any]] = {}
+        if not names:
+            return resolved
+        from hecate.core.composition.entry_assembly import load_agent_tools_with_sources
+
+        definitions, sources = await load_agent_tools_with_sources(self.db, names, workspace_id=agent.workspace_id)
+        formatted = {definition["function"]["name"]: definition["function"] for definition in definitions}
+        for name in names:
+            fn = formatted.get(name)
+            source = sources.get(name)
+            contract = copy.deepcopy(fn) if fn is not None else None
+            resolved[name] = {
+                "snapshot_version": TOOL_CONTRACT_SNAPSHOT_VERSION,
+                "digest_scope": list(TOOL_CONTRACT_DIGEST_SCOPE),
+                "resolution": copy.deepcopy(source),
+                "contract": contract,
+                "contract_hash": canonical_hash(contract) if contract is not None else None,
+            }
+            if contract is None:
+                resolved[name]["resolution_note"] = (
+                    "unresolved at commit: no builtin definition and no live workspace row"
+                )
+        return resolved
+
+    async def _tool_contract_diagnostics(self, record: dict[str, Any], agent: AgentModel) -> dict[str, Any]:
+        """Per-tool contract drift against the version's frozen tool list.
+
+        The frozen names are the baseline: each is resolved against the
+        CURRENT registry exactly the way the commit resolved it, so renaming
+        or removing tools on the live draft cannot swap the comparison
+        object. Four statuses stay distinct — consistent, changed, missing
+        (the frozen name no longer resolves), unverified (no usable snapshot
+        or nothing was resolvable at commit) — and an empty changed set
+        never claims the unverified ones are consistent. A same-name
+        database rebuild surfaces as a binding change even when the
+        recorded contract hashes are equal. Historical snapshots without
+        contract evidence keep their recorded data untouched and report
+        unverified instead of a fabricated baseline.
+        """
+        manifest = [entry for entry in record.get("ref_manifest") or [] if isinstance(entry, dict)]
+        names = (record.get("config_snapshot") or {}).get("tools")
+        if not isinstance(names, list):
+            names = [entry.get("resource_id") for entry in manifest if entry.get("resource_type") == "tool"]
+        frozen = []
+        for name in dict.fromkeys(name for name in names if isinstance(name, str)):
+            entries = [
+                entry for entry in manifest if entry.get("resource_type") == "tool" and entry.get("resource_id") == name
+            ]
+            # Missing/ambiguous evidence must not erase a declared tool from
+            # the report and let the remaining tools imply complete coverage.
+            snapshot = entries[0].get("tool_contract") if len(entries) == 1 else None
+            frozen.append((name, snapshot))
+        resolutions = await self._resolve_tool_contracts(agent, [name for name, _ in frozen])
+
+        tools: list[dict[str, Any]] = []
+        for name, snapshot in frozen:
+            live = resolutions.get(name)
+            item: dict[str, Any] = {
+                "name": name,
+                "committed_contract_hash": None,
+                "live_contract_hash": None,
+                "live_resolution": None,
+                "binding_changed": None,
+                "detail": None,
+            }
+            reason = _tool_contract_snapshot_error(name, snapshot)
+            if reason is not None or not isinstance(snapshot, dict):
+                item.update(
+                    {
+                        "status": "unverified",
+                        "detail": reason or "stored tool contract snapshot is malformed",
+                        "live_contract_hash": (live or {}).get("contract_hash"),
+                        "live_resolution": (live or {}).get("resolution"),
+                    }
+                )
+            elif live is None or not live.get("contract_hash"):
+                item.update(
+                    {
+                        "status": "missing",
+                        "detail": "the frozen tool name no longer resolves (removed or soft-deleted)",
+                        "committed_contract_hash": snapshot.get("contract_hash"),
+                    }
+                )
+            else:
+                committed = snapshot.get("contract_hash")
+                live_hash = live["contract_hash"]
+                item.update(
+                    {
+                        "status": "consistent" if live_hash == committed else "changed",
+                        "committed_contract_hash": committed,
+                        "live_contract_hash": live_hash,
+                        "live_resolution": live.get("resolution"),
+                    }
+                )
+                frozen_source = snapshot["resolution"]
+                live_source = live.get("resolution") or {}
+                if any(
+                    frozen_source.get(key) != live_source.get(key) for key in ("source", "resource_id", "tool_source")
+                ):
+                    item["binding_changed"] = True
+                    item["detail"] = "resolved to a different database row or source than the committed binding; " + (
+                        "the recorded contract hashes are equal"
+                        if committed == live_hash
+                        else "the recorded contract hashes differ"
+                    )
+            tools.append(item)
+
+        return {
+            "format_version": TOOL_CONTRACT_SNAPSHOT_VERSION,
+            "digest_scope": list(TOOL_CONTRACT_DIGEST_SCOPE),
+            "tools": tools,
+            "summary": {
+                "total": len(tools),
+                "consistent": sum(1 for tool in tools if tool["status"] == "consistent"),
+                "changed": sum(1 for tool in tools if tool["status"] == "changed"),
+                "missing": sum(1 for tool in tools if tool["status"] == "missing"),
+                "unverified": sum(1 for tool in tools if tool["status"] == "unverified"),
+            },
+        }
 
     async def _skill_manifest_entries(self, agent: AgentModel, skill_names: list[str]) -> list[dict[str, Any]]:
         """Build the skill entries of the reference manifest (5.9d).
@@ -921,6 +1110,8 @@ class AgentVersionService:
         live_manifest = await self._build_ref_manifest(agent)
         live_by_key = {(entry["resource_type"], str(entry["resource_id"])): entry for entry in live_manifest}
         for entry in record["ref_manifest"]:
+            if not isinstance(entry, dict):
+                continue
             if entry.get("content_hash") is None:
                 continue
             if entry.get("version") is not None:
@@ -937,7 +1128,15 @@ class AgentVersionService:
                         "missing": live is None,
                     }
                 )
-        return {"agent_id": uuid.UUID(str(record["agent_id"])), "version": version, "drifted": drifted}
+        return {
+            "agent_id": uuid.UUID(str(record["agent_id"])),
+            "version": version,
+            "drifted": drifted,
+            # Tool-contract diagnostics compare each frozen tool name against
+            # the CURRENT registry, not the live draft; see
+            # `_tool_contract_diagnostics` for the four-status vocabulary.
+            "tool_contracts": await self._tool_contract_diagnostics(record, agent),
+        }
 
     # --- internals -----------------------------------------------------------
 

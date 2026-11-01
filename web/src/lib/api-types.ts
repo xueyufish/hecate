@@ -84,6 +84,44 @@ export interface AgentVersionDrift {
     live_hash: string | null;
     missing: boolean;
   }[];
+  /**
+   * Per-tool contract diagnostics against the checked version's frozen
+   * tool list. Absent means the backend predates the feature — which is
+   * "unverified", never "all consistent".
+   */
+  tool_contracts?: AgentToolContractDiagnostics;
+}
+
+export interface AgentToolContractResolution {
+  source: string;
+  resource_id: string | null;
+  updated_at?: string | null;
+  tool_source?: string | null;
+}
+
+export type AgentToolContractStatus = "consistent" | "changed" | "missing" | "unverified";
+
+export interface AgentToolContractDiagnostic {
+  name: string;
+  status: AgentToolContractStatus;
+  detail?: string | null;
+  committed_contract_hash?: string | null;
+  live_contract_hash?: string | null;
+  binding_changed?: boolean | null;
+  live_resolution?: AgentToolContractResolution | null;
+}
+
+export interface AgentToolContractDiagnostics {
+  format_version: number;
+  digest_scope: string[];
+  tools: AgentToolContractDiagnostic[];
+  summary: {
+    total: number;
+    consistent: number;
+    changed: number;
+    missing: number;
+    unverified: number;
+  };
 }
 
 export interface VersionDiff {

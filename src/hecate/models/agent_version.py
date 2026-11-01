@@ -158,8 +158,9 @@ class AgentVersionDriftSchema(PydanticBase):
 
     ``drifted`` lists manifest entries whose live content hash no longer
     matches the hash recorded at commit time (or whose resource has
-    disappeared). An empty list means the snapshot's references are
-    content-identical to what is live right now.
+    disappeared). Tool entries retain their legacy name-hash semantics.
+    ``tool_contracts`` reports their separate content and binding checks;
+    an empty ``drifted`` list alone does not establish tool consistency.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -167,6 +168,7 @@ class AgentVersionDriftSchema(PydanticBase):
     agent_id: uuid.UUID
     version: int
     drifted: list[dict[str, Any]]
+    tool_contracts: dict[str, Any] | None = None
 
 
 class AgentPublicationModel(BaseModel):
