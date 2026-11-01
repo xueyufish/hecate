@@ -23,6 +23,7 @@ dependencies = [
 [project.scripts]
 hecate-runner = "hecate_runner.__main__:main"
 hecate-runner-sign = "hecate_runner.sign:main"
+hecate-runner-release = "hecate_runner.release:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hecate_runner"]
