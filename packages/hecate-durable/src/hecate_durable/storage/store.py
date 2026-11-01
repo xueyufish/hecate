@@ -191,11 +191,25 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         self._clock = clock or _default_clock
         self.engine = self._build_engine(url)
         self._session_factory = sessionmaker(self.engine, expire_on_commit=False, future=True)
+        # Read-only lookups run on an autocommit engine WITHOUT the
+        # BEGIN IMMEDIATE hook. Every store transaction currently takes the
+        # WAL writer lock up front; reads that queue behind a long-held
+        # writer (a dispatch loop's commit window) turn the single writer
+        # slot into a convoy that exceeds the busy timeout under parallel
+        # load. Reads never need that lock, so they take none at all.
+        # In-memory databases share one StaticPool connection, so they must
+        # keep using the write engine.
+        if url.startswith("sqlite") and url not in _SQLITE_MEMORY_URLS:
+            self._read_engine = self._build_engine(url, begin_immediate=False)
+            self._read_session_factory = sessionmaker(self._read_engine, expire_on_commit=False, future=True)
+        else:
+            self._read_engine = self.engine
+            self._read_session_factory = self._session_factory
         self.events = SqlEventLog(self._session_factory, source=source, actor_id=actor_id, clock=self._clock)
         self.leases = LeaseManager(self._session_factory, clock=lease_clock)
 
     @staticmethod
-    def _build_engine(url: str):
+    def _build_engine(url: str, *, begin_immediate: bool = True):
         if url in _SQLITE_MEMORY_URLS:
             engine = create_engine(
                 url,
@@ -223,6 +237,9 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         def _sqlite_autocommit(dbapi_connection, _record):  # noqa: ANN001
             dbapi_connection.isolation_level = None
 
+        if not begin_immediate:
+            return engine
+
         @event.listens_for(engine, "begin")
         def _sqlite_begin_immediate(connection):  # noqa: ANN001
             connection.exec_driver_sql("BEGIN IMMEDIATE")
@@ -238,9 +255,16 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def dispose(self) -> None:
         self.engine.dispose()
+        if self._read_engine is not self.engine:
+            self._read_engine.dispose()
 
     def _session(self) -> Session:
         return self._session_factory()
+
+    def _read_session(self) -> Session:
+        """A session on the autocommit engine: reads take no writer lock."""
+
+        return self._read_session_factory()
 
     @property
     def session_factory(self) -> sessionmaker[Session]:
@@ -935,7 +959,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
             )
 
     def get_task_state(self, task_ref: BackendRef) -> TaskStateRecord | None:
-        with self._session() as session:
+        with self._read_session() as session:
             row = session.get(TaskStateRow, (task_ref.issuer_domain, task_ref.id))
             return None if row is None else _task_record_of(row)
 
@@ -955,14 +979,14 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def get_task_input(self, task_ref: BackendRef) -> dict[str, Any] | None:
         """Host-written replay input for one task (or ``None``)."""
 
-        with self._session() as session:
+        with self._read_session() as session:
             row = session.get(TaskStateRow, (task_ref.issuer_domain, task_ref.id))
             return None if row is None else row.input_payload
 
     def list_tasks(self, states: set[TaskLifecycleState] | None = None) -> list[TaskStateRecord]:
         """All task records, optionally filtered by lifecycle state."""
 
-        with self._session() as session:
+        with self._read_session() as session:
             rows = session.execute(select(TaskStateRow).order_by(TaskStateRow.created_at)).scalars().all()
         records = [_task_record_of(row) for row in rows]
         if states is None:
@@ -984,7 +1008,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         if after is not None:
             query = query.where(position > tuple_(*after))
         query = query.order_by(TaskStateRow.created_at, TaskStateRow.task_issuer, TaskStateRow.task_id).limit(limit)
-        with self._session() as session:
+        with self._read_session() as session:
             rows = session.execute(query).scalars().all()
         cursor = (rows[-1].created_at, rows[-1].task_issuer, rows[-1].task_id) if len(rows) == limit else None
         return [_task_record_of(row) for row in rows], cursor

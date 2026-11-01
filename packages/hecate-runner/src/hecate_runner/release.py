@@ -405,6 +405,29 @@ def install_release(host_dir: Path, artifact_source: Path, policy: ArtifactTrust
             shutil.rmtree(checked, ignore_errors=True)
 
 
+def install_bundle(host_dir: Path, bundle_path: Path, policy: ArtifactTrustPolicy) -> str:
+    """Install one signed artifact from its standard bundle archive.
+
+    The bundle is read with hard bounds into the host's isolated staging
+    area and then runs through the exact directory-install gates and
+    publish path; nothing is written outside staging before verification.
+    """
+
+    from .bundle import extract_bundle
+
+    host_dir = require_initialized_host(host_dir)
+    extracted = _plain_child(host_dir, f"{STAGING_DIR}/bundle-{uuid.uuid4().hex}")
+    extracted.parent.mkdir(parents=True, exist_ok=True)
+    extracted.mkdir()
+    try:
+        extract_bundle(bundle_path, extracted)
+        return install_release(host_dir, extracted, policy)
+    finally:
+        with contextlib.suppress(ReleaseError):
+            checked = _plain_child(host_dir, f"{STAGING_DIR}/{extracted.name}")
+            shutil.rmtree(checked, ignore_errors=True)
+
+
 def list_releases(host_dir: Path) -> list[ReleaseInfo]:
     """Recorded facts about installed releases and the committed selection."""
 
@@ -612,11 +635,19 @@ def main(argv: list[str] | None = None) -> int:
 
     install = sub.add_parser("install", help="verify and install a signed artifact into the host")
     add_host(install)
-    install.add_argument(
-        "--artifact", required=True, type=Path, help="artifact directory (manifest, signature, files/)"
+    install_source = install.add_mutually_exclusive_group(required=True)
+    install_source.add_argument("--artifact", type=Path, help="artifact directory (manifest, signature, files/)")
+    install_source.add_argument(
+        "--bundle", type=Path, help="standard bundle archive (deterministic tar.gz from 'pack')"
     )
     install.add_argument("--trust-policy", required=True, type=Path, dest="trust_policy")
     install.set_defaults(func=_cmd_install)
+
+    pack = sub.add_parser("pack", help="write the deterministic bundle archive of one verified artifact")
+    pack.add_argument("--artifact", required=True, type=Path, help="artifact directory (manifest, signature, files/)")
+    pack.add_argument("--out", required=True, type=Path, help="bundle output path (must not exist)")
+    pack.add_argument("--trust-policy", required=True, type=Path, dest="trust_policy")
+    pack.set_defaults(func=_cmd_pack)
 
     for name in ("list", "status"):
         list_cmd = sub.add_parser(name, help="list installed releases and the committed selection")
@@ -655,8 +686,25 @@ def _cmd_install(args: argparse.Namespace) -> int:
     except ArtifactAdmissionError as exc:
         print(f"hecate-runner-release: artifact trust policy error: {exc}", file=sys.stderr)
         return 2
-    manifest_sha256 = install_release(host_dir, Path(args.artifact), policy)
+    if args.bundle is not None:
+        manifest_sha256 = install_bundle(host_dir, Path(args.bundle), policy)
+    else:
+        manifest_sha256 = install_release(host_dir, Path(args.artifact), policy)
     print(f"hecate-runner-release: installed release {manifest_sha256}")
+    return 0
+
+
+def _cmd_pack(args: argparse.Namespace) -> int:
+    from .artifact_signing import load_trust_policy
+    from .bundle import pack_bundle
+
+    try:
+        policy = load_trust_policy(Path(args.trust_policy))
+    except ArtifactAdmissionError as exc:
+        print(f"hecate-runner-release: artifact trust policy error: {exc}", file=sys.stderr)
+        return 2
+    manifest_sha256 = pack_bundle(Path(args.artifact), Path(args.out), policy)
+    print(f"hecate-runner-release: packed release {manifest_sha256} into {args.out}")
     return 0
 
 
@@ -702,4 +750,8 @@ def _cmd_rollback(args: argparse.Namespace) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Bundle imports this module's helpers and error type. Dispatch through
+    # its canonical import so -m does not create incompatible exception types.
+    from .release import main as release_main
+
+    raise SystemExit(release_main())

@@ -46,6 +46,43 @@ A crash leaves at worst an unusable staging directory — never a selectable
 release. Re-installing the identical artifact is idempotent; content that
 claims an existing release id but differs is refused.
 
+## Pack a bundle and install from it
+
+Artifacts can travel as a standard bundle archive instead of a directory:
+
+```bash
+hecate-runner-release pack --artifact <artifact-dir> --out release.tar.gz --trust-policy artifact-trust.json
+hecate-runner-release install --host <host> --bundle release.tar.gz --trust-policy artifact-trust.json
+```
+
+`pack` verifies the artifact under the current policy first and writes a
+deterministic tar.gz carrying exactly the signed layout — the manifest, its
+signature envelope and the manifest-listed files. Member order and metadata
+are fixed, so the same artifact always produces the same bytes; the output
+is published atomically after a full round-trip verification, never
+overwrites an existing file, and never lands inside the artifact directory.
+Source copies and archive writing are bounded and streamed. Publication uses
+a same-filesystem hard link so a concurrent output is preserved; filesystems
+without that operation refuse packing safely.
+
+`install --bundle` reads the archive with hard bounds (member count,
+per-member and total extracted size) into the host's isolated staging area
+and then runs the exact directory-install gates: portable member names
+only — no traversal, absolute paths, Windows alias suffixes or reserved
+device names, no links, devices or sparse members, no duplicate,
+undeclared, case-colliding or missing members, and corrupt or truncated
+archives are refused. Nothing is written outside staging before
+verification, and the bundle never carries host configuration, identity
+material, secrets or run data; no install script runs and no dependency is
+downloaded — the serving environment still needs the required wheels
+pre-installed.
+
+Bounds apply before parsing all members or extension records, including
+separate limits for JSON and metadata. Bounded GNU long-name and PAX records
+are accepted; global, sparse and size-overriding extensions are unsupported.
+The complete gzip stream must pass its checksum and trailer checks, and
+nonzero data or excessive padding after the tar end markers is refused.
+
 ## List, activate, roll back
 
 ```bash

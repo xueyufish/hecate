@@ -109,7 +109,14 @@ a host whose local SQLite ledger still carries non-terminal tasks refuses to
 switch. Version selection requires the generation read from status, and the
 recorded database binding cannot be removed or redirected during a switch.
 Cold start only: no hot upgrade, no live-run migration, no remote
-activation, and no shared-database multi-host switching. See
+activation, and no shared-database multi-host switching. Artifacts can
+also travel as standard bundles: `hecate-runner-release pack` verifies the
+artifact and writes a deterministic tar.gz of exactly the signed layout,
+and `install --bundle` re-reads it with hard bounds (member count,
+per-member and total size; portable names only — no traversal, links,
+devices, sparse, duplicate, undeclared or case-colliding members) into
+isolated staging before the usual gates. The bundle is transport only: no
+host configuration, no install scripts, no dependency downloads. See
 [Install, switch and roll back runner releases](../../docs/how-to/install-runner-releases.md).
 
 ## Durable profile
