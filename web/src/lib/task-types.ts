@@ -89,6 +89,74 @@ export interface TaskContinuationSummary {
   attempts?: ContinuationAttemptSummary[];
 }
 
+/**
+ * A recorded task reference carried inside the parent-child delegation
+ * facts. The API echoes it verbatim from the delegation stamp / wait
+ * contract; every field must re-validate locally before a navigation link
+ * is built — a relationship reference never grants access by itself.
+ */
+export interface AgentTaskRef {
+  kind?: string | null;
+  issuer_domain?: string | null;
+  id?: string | null;
+}
+
+/**
+ * Child side of a delegation: the durable stamp this task was accepted
+ * under. Absent from the detail = this task is not a recorded delegation
+ * child (which is not the same as "delegation is impossible").
+ */
+export interface AgentChildParentStamp {
+  alias?: string | null;
+  call_id?: string | null;
+  parent_task_ref?: AgentTaskRef | null;
+}
+
+/**
+ * The parent's currently recorded agent-child wait facts. Only the CURRENT
+ * wait is summarized — the API promises no full call history. `consumed`
+ * is a callback-consumption fact: it never means the child succeeded and
+ * never means the parent's goal passed.
+ */
+export interface AgentChildPendingCall {
+  alias?: string | null;
+  call_id?: string | null;
+  child_task_ref?: AgentTaskRef | null;
+  consumed?: boolean | null;
+}
+
+/**
+ * Parent side: accepted-call count plus, when a child wait is currently
+ * bound, its live consumption summary. Absent = no recorded delegation
+ * surface on this task (a `accepted_calls` of 0 IS recorded and shown).
+ */
+export interface AgentChildrenSummary {
+  accepted_calls?: number | null;
+  pending?: AgentChildPendingCall | null;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Matches the task issuer in execution.task_control, independently of any
+// imported task's provenance. Equal foreign issuers do not map remote IDs.
+const PLATFORM_TASK_ISSUER = "hecate";
+
+/**
+ * Build the local task-detail link for a recorded reference, or null when
+ * the reference cannot be safely navigated: wrong kind, an issuer domain
+ * that is not the platform this page is running on, or a non-UUID id. A
+ * null result must render as recorded text, never as a guessed link.
+ */
+export function localTaskLinkFromRef(
+  ref: AgentTaskRef | null | undefined,
+  currentIssuerDomain: string | null | undefined,
+): string | null {
+  if (!ref || typeof ref !== "object") return null;
+  if (ref.kind !== "task") return null;
+  if (currentIssuerDomain !== PLATFORM_TASK_ISSUER || ref.issuer_domain !== PLATFORM_TASK_ISSUER) return null;
+  if (typeof ref.id !== "string" || !UUID_PATTERN.test(ref.id)) return null;
+  return `/ops-center/tasks/${ref.id}`;
+}
+
 export interface TaskDetail {
   task_id: string;
   goal: string;
@@ -102,6 +170,10 @@ export interface TaskDetail {
   wait?: Record<string, unknown>;
   /** Task-level continuation trail; absent = no recorded continuation info. */
   continuation?: TaskContinuationSummary;
+  /** Child side of a delegation; absent = this task is not a recorded child. */
+  agent_child_parent?: AgentChildParentStamp;
+  /** Parent side of delegation; absent = no recorded delegation surface. */
+  agent_children?: AgentChildrenSummary;
 }
 
 export interface RunActionItem {

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 
 import { TaskApprovalPanel } from "@/components/tasks/task-approval-panel";
+import { TaskChildObservationPanel } from "@/components/tasks/task-child-observation-panel";
 import { TaskContinuationPanel } from "@/components/tasks/task-continuation-panel";
 import { RunActionsPanel } from "@/components/tasks/run-actions-panel";
 import { RunDeliveryPanel } from "@/components/tasks/run-delivery-panel";
@@ -173,6 +174,15 @@ export default function TaskDetailPage() {
       <div className="space-y-2" data-testid="task-continuation-section">
         <h2 className="font-medium">受控续跑（任务级）</h2>
         <TaskContinuationPanel continuation={detail.continuation} />
+      </div>
+
+      {/* Task-scoped read-only delegation facts: same reasoning as the
+          continuation trail — outside the Run switcher, no commands, links
+          only after local ref validation. Child/parent statuses stay behind
+          their own authorized detail GET. */}
+      <div className="space-y-2" data-testid="task-child-observation-section">
+        <h2 className="font-medium">父子调用（任务级）</h2>
+        <TaskChildObservationPanel detail={detail} />
       </div>
 
       <div className="space-y-2" data-testid="run-switcher">
