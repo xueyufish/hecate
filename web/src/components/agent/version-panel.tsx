@@ -4,13 +4,93 @@
 // version history with commit / publish / rollback / diff / drift, mirroring
 // the workflow versioning UX precedents in components/workflow.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GitBranch, History, RotateCcw, Rocket, AlertTriangle, Upload } from "lucide-react";
 import { agentVersionsApi } from "@/lib/api-client";
-import type { AgentVersion, AgentVersionStatus, VersionDiff } from "@/lib/api-types";
+import type {
+  AgentToolContractDiagnostics,
+  AgentToolContractDiagnostic,
+  AgentVersion,
+  AgentVersionDrift,
+  AgentVersionStatus,
+  VersionDiff,
+} from "@/lib/api-types";
 
 interface VersionPanelProps {
   agentId: string;
+}
+
+const TOOL_CONTRACT_STATUS_LABELS: Record<AgentToolContractDiagnostic["status"], string> = {
+  consistent: "一致",
+  changed: "契约变化",
+  missing: "工具缺失",
+  unverified: "未核验",
+};
+
+function shortHash(hash: string | null | undefined): string {
+  return hash ? (hash.length > 12 ? `${hash.slice(0, 12)}…` : hash) : "未记录";
+}
+
+/**
+ * Per-tool contract diagnostics. The verdict is honest by construction:
+ * "all verified consistent" requires at least one tool and zero changed,
+ * missing or unverified entries — an empty drifted list or a batch of
+ * unverified legacy snapshots never reads as everything matching.
+ */
+function ToolContractDiagnosticsView({ diagnostics }: { diagnostics: AgentToolContractDiagnostics }) {
+  const scope = ["name", "description", "parameters"];
+  if (diagnostics.format_version !== 1 || !Array.isArray(diagnostics.digest_scope)
+    || diagnostics.digest_scope.length !== scope.length
+    || !scope.every((field, index) => diagnostics.digest_scope[index] === field)) {
+    return <div data-testid="tool-contract-not-verified">诊断格式或摘要范围不受支持：工具契约未核验。</div>;
+  }
+  const { summary } = diagnostics;
+  // A same-name rebuild keeps "consistent" but must still be surfaced, so
+  // the problem list includes binding changes, not only non-consistent rows.
+  const problems = diagnostics.tools.filter((tool) => tool.status !== "consistent" || tool.binding_changed);
+  const allVerified =
+    summary.total > 0 && summary.total === diagnostics.tools.length && summary.consistent === summary.total
+    && problems.length === 0 && summary.unverified === 0 && summary.changed === 0 && summary.missing === 0;
+  return (
+    <div className="space-y-2" data-testid="tool-contract-diagnostics">
+      <div className="font-semibold">工具契约诊断</div>
+      <div className="text-muted-foreground" data-testid="tool-contract-scope">
+        摘要范围：{diagnostics.digest_scope.join("、")}（模型可见定义）；解析来源：builtin / workspace
+        工具行；未发起外部调用。
+      </div>
+      <div data-testid="tool-contract-summary">
+        共 {summary.total} 个工具：一致 {summary.consistent} · 变化 {summary.changed} · 缺失 {summary.missing} · 未核验{" "}
+        {summary.unverified}
+      </div>
+      {problems.length > 0 && (
+        <div className="space-y-1" data-testid="tool-contract-problems">
+          {problems.map((tool) => (
+            <div key={tool.name} data-testid="tool-contract-problem-row">
+              {TOOL_CONTRACT_STATUS_LABELS[tool.status]}：{tool.name}
+              {tool.binding_changed
+                ? (tool.committed_contract_hash && tool.committed_contract_hash === tool.live_contract_hash
+                  ? "（解析来源或绑定已变化，记录的契约哈希一致）"
+                  : "（解析来源或绑定已变化）")
+                : ""}
+              {tool.status === "changed"
+                ? `：${shortHash(tool.committed_contract_hash)} → ${shortHash(tool.live_contract_hash)}`
+                : ""}
+              {tool.detail ? ` — ${tool.detail}` : ""}
+            </div>
+          ))}
+        </div>
+      )}
+      {summary.total === 0 ? (
+        <div data-testid="tool-contract-none">该版本未记录任何工具契约，无法核验。</div>
+      ) : allVerified ? (
+        <div data-testid="tool-contract-all-verified">已核验工具契约全部一致。</div>
+      ) : (
+        <div className="text-amber-700" data-testid="tool-contract-not-verified">
+          存在契约变化、绑定变化、缺失或未核验的工具：未核验不等于一致。
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Badge({ status, published }: { status: AgentVersionStatus | null; published: boolean }) {
@@ -38,27 +118,44 @@ export function VersionPanel({ agentId }: VersionPanelProps) {
   const [commitOpen, setCommitOpen] = useState(false);
   const [commitName, setCommitName] = useState("");
   const [commitSummary, setCommitSummary] = useState("");
-  const [drift, setDrift] = useState<string | null>(null);
+  const [drift, setDrift] = useState<{ agentId: string; version: number; report: AgentVersionDrift } | null>(null);
   const [diff, setDiff] = useState<VersionDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Sequence guards: a slow drift or refresh response that belongs to a
+  // previous Agent or a previous click must never land on the current view.
+  const driftRequestRef = useRef(0);
+  const refreshSeqRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeqRef.current;
     try {
       const [s, list] = await Promise.all([
         agentVersionsApi.status(agentId),
         agentVersionsApi.list(agentId),
       ]);
+      if (seq !== refreshSeqRef.current) return;
       setStatus(s);
       setVersions(list.items);
     } catch {
+      if (seq !== refreshSeqRef.current) return;
       setError("Failed to load versions");
     } finally {
-      setLoading(false);
+      if (seq === refreshSeqRef.current) setLoading(false);
     }
   }, [agentId]);
 
   useEffect(() => {
+    setLoading(true);
+    setVersions([]);
+    setStatus(null);
+    setDrift(null);
+    setDiff(null);
+    setError(null);
     void refresh();
+    return () => {
+      ++driftRequestRef.current;
+      ++refreshSeqRef.current;
+    };
   }, [refresh]);
 
   const handleCommit = async () => {
@@ -125,16 +222,13 @@ export function VersionPanel({ agentId }: VersionPanelProps) {
 
   const handleDrift = async (version: number) => {
     setError(null);
+    const requestId = ++driftRequestRef.current;
     try {
       const report = await agentVersionsApi.drift(agentId, version);
-      setDrift(
-        report.drifted.length === 0
-          ? `v${version}: all references match the committed content`
-          : `v${version} drift: ${report.drifted
-              .map((d) => `${d.resource_type} '${d.resource_id}'${d.missing ? " (missing)" : ""}`)
-              .join(", ")}`
-      );
+      if (requestId !== driftRequestRef.current) return;
+      setDrift({ agentId, version, report });
     } catch {
+      if (requestId !== driftRequestRef.current) return;
       setError("Drift check failed");
     }
   };
@@ -192,7 +286,30 @@ export function VersionPanel({ agentId }: VersionPanelProps) {
         </div>
       )}
 
-      {drift && <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs">{drift}</div>}
+      {drift && drift.agentId === agentId && (
+        <div className="space-y-2 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="drift-report">
+          <div className="font-semibold" data-testid="drift-report-version">
+            v{drift.version} 漂移检查
+          </div>
+          {drift.report.tool_contracts ? (
+            <ToolContractDiagnosticsView diagnostics={drift.report.tool_contracts} />
+          ) : (
+            <div className="text-amber-700" data-testid="tool-contract-absent">
+              该后端未返回工具契约诊断：工具契约一律视为未核验，不视为一致。
+            </div>
+          )}
+          <div data-testid="reference-drift">
+            {drift.report.drifted.length === 0
+              ? "引用快照：无技能/引用漂移记录"
+              : `引用漂移：${drift.report.drifted
+                  .map((d) => `${d.resource_type} '${d.resource_id}'${d.missing ? " (missing)" : ""}`)
+                  .join(", ")}`}
+          </div>
+          <div className="text-muted-foreground" data-testid="drift-scope-note">
+            诊断快照不代表运行时实现、权限或业务行为已经固定；未核验不等于一致。
+          </div>
+        </div>
+      )}
 
       {diff && (
         <div className="space-y-1 rounded-md border bg-muted/40 p-3 text-xs">

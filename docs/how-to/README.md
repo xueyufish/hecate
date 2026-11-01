@@ -38,6 +38,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 ## Versioning and lifecycle
 
 - **[Version and roll back an agent or workflow](version-and-rollback-agent.md)** — save immutable versions, publish to production, roll back to any prior version, and audit every change.
+- **[Check agent tool contract drift](check-agent-tool-drift.md)** — read the per-tool contract snapshot a version committed, interpret the four drift statuses, and know why unverified never reads as consistent.
 
 ## Security
 

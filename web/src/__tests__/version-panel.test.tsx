@@ -1,6 +1,6 @@
 // Tests for the agent version panel + channel manager (1.3.20).
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChannelManager } from "@/components/agent/channel-manager";
@@ -120,6 +120,197 @@ describe("VersionPanel", () => {
         change_summary: undefined,
       })
     );
+  });
+
+  const statusReady = { agent_id: "a1", latest_version: 2, published_version: null, has_uncommitted_changes: false };
+  const versionRows = [
+    { id: "v2", version: 2, name: "second", change_summary: "", is_published: false },
+    { id: "v1", version: 1, name: "first", change_summary: "", is_published: false },
+  ];
+
+  function driftReport(toolContracts?: unknown, drifted: unknown[] = []) {
+    return { agent_id: "a1", version: 1, drifted, ...(toolContracts ? { tool_contracts: toolContracts } : {}) };
+  }
+
+  async function openDrift(report: unknown) {
+    const user = (await import("@testing-library/user-event")).default;
+    mockVersion.api.status.mockResolvedValue(statusReady);
+    mockVersion.api.list.mockResolvedValue({ items: versionRows, total: 2 });
+    mockVersion.api.drift.mockResolvedValue(report);
+    const view = render(<VersionPanel agentId="a1" />);
+    await waitFor(() => expect(screen.getByText("v1")).toBeInTheDocument());
+    await user.click(screen.getAllByRole("button", { name: "漂移" })[1]);
+    await waitFor(() => expect(screen.getByTestId("drift-report")).toBeInTheDocument());
+    return { user, view };
+  }
+
+  it("refuses an all-consistent verdict while any tool is unverified", async () => {
+    await openDrift(
+      driftReport({
+        format_version: 1,
+        digest_scope: ["name", "description", "parameters"],
+        tools: [
+          { name: "web_search", status: "consistent" },
+          { name: "legacy_tool", status: "unverified", detail: "snapshot predates tool contract capture" },
+        ],
+        summary: { total: 2, consistent: 1, changed: 0, missing: 0, unverified: 1 },
+      }),
+    );
+    expect(screen.getByTestId("tool-contract-summary").textContent).toContain("未核验 1");
+    expect(screen.getByTestId("tool-contract-problem-row").textContent).toContain("legacy_tool");
+    expect(screen.getByTestId("tool-contract-not-verified").textContent).toContain("未核验不等于一致");
+    expect(screen.queryByTestId("tool-contract-all-verified")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tool-contract-scope").textContent).toContain("未发起外部调用");
+  });
+
+  it("shows the all-verified verdict only when every tool verified consistent", async () => {
+    await openDrift(
+      driftReport({
+        format_version: 1,
+        digest_scope: ["name", "description", "parameters"],
+        tools: [{ name: "web_search", status: "consistent" }],
+        summary: { total: 1, consistent: 1, changed: 0, missing: 0, unverified: 0 },
+      }),
+    );
+    expect(screen.getByTestId("tool-contract-all-verified").textContent).toContain("已核验工具契约全部一致");
+    expect(screen.queryByTestId("tool-contract-not-verified")).not.toBeInTheDocument();
+  });
+
+  it("renders hash movement and a binding change without claiming drift where hashes match", async () => {
+    await openDrift(
+      driftReport({
+        format_version: 1,
+        digest_scope: ["name", "description", "parameters"],
+        tools: [
+          {
+            name: "rebuilt_tool",
+            status: "consistent",
+            binding_changed: true,
+            detail: "resolved to a different database row than the committed binding (same-name rebuild)",
+          },
+          { name: "changed_tool", status: "changed", committed_contract_hash: "a".repeat(16) + "…", live_contract_hash: "b".repeat(16) + "…" },
+        ],
+        summary: { total: 2, consistent: 1, changed: 1, missing: 0, unverified: 0 },
+      }),
+    );
+    const rows = screen.getAllByTestId("tool-contract-problem-row");
+    expect(rows[0].textContent).toContain("解析来源或绑定已变化");
+    expect(rows[0].textContent).not.toContain("→");
+    expect(rows[1].textContent).toContain("契约变化");
+    expect(rows[1].textContent).toContain("→");
+  });
+
+  it("treats a report without tool contracts as unverified, not as consistent", async () => {
+    await openDrift(driftReport());
+    expect(screen.getByTestId("tool-contract-absent").textContent).toContain("工具契约一律视为未核验");
+    expect(screen.queryByTestId("tool-contract-all-verified")).not.toBeInTheDocument();
+  });
+
+  it("drops a late drift response that belongs to a previous version", async () => {
+    const user = (await import("@testing-library/user-event")).default;
+    mockVersion.api.status.mockResolvedValue(statusReady);
+    mockVersion.api.list.mockResolvedValue({ items: versionRows, total: 2 });
+    let resolveSlow: (report: unknown) => void = () => {};
+    const slow = new Promise((resolve) => {
+      resolveSlow = resolve;
+    });
+    mockVersion.api.drift.mockImplementation((_agent: string, version: number) =>
+      version === 2 ? slow : Promise.resolve(driftReport({
+        format_version: 1,
+        digest_scope: ["name", "description", "parameters"],
+        tools: [{ name: "quick_tool", status: "changed", committed_contract_hash: "a", live_contract_hash: "b" }],
+        summary: { total: 1, consistent: 0, changed: 1, missing: 0, unverified: 0 },
+      })),
+    );
+    render(<VersionPanel agentId="a1" />);
+    await waitFor(() => expect(screen.getByText("v2")).toBeInTheDocument());
+    const buttons = screen.getAllByRole("button", { name: "漂移" });
+    await user.click(buttons[0]); // v2 — slow response hangs in flight
+    await user.click(buttons[1]); // v1 — resolves immediately
+    await waitFor(() => expect(screen.getByTestId("drift-report")).toBeInTheDocument());
+    expect(screen.getByTestId("drift-report-version").textContent).toContain("v1");
+    await act(async () => {
+      resolveSlow(driftReport({
+        format_version: 1,
+        digest_scope: ["name", "description", "parameters"],
+        tools: [{ name: "stale_tool", status: "missing" }],
+        summary: { total: 1, consistent: 0, changed: 0, missing: 1, unverified: 0 },
+      }));
+    });
+    // The stale v2 report never replaces the v1 view the user holds.
+    expect(screen.getByTestId("drift-report-version").textContent).toContain("v1");
+    const report = screen.getByTestId("drift-report");
+    expect(report.textContent).toContain("quick_tool");
+    expect(report.textContent).not.toContain("stale_tool");
+  });
+
+  it("clears the drift view when the panel switches to another agent", async () => {
+    const { view } = await openDrift(
+      driftReport({
+        format_version: 1,
+        digest_scope: ["name", "description", "parameters"],
+        tools: [{ name: "web_search", status: "consistent" }],
+        summary: { total: 1, consistent: 1, changed: 0, missing: 0, unverified: 0 },
+      }),
+    );
+    view.rerender(<VersionPanel agentId="a2" />);
+    expect(screen.queryByTestId("drift-report")).not.toBeInTheDocument();
+  });
+
+  it.each(["resolve", "reject"])("drops a pending previous-agent drift response (%s)", async (outcome) => {
+    const user = (await import("@testing-library/user-event")).default;
+    mockVersion.api.status.mockResolvedValue(statusReady);
+    mockVersion.api.list.mockResolvedValue({ items: versionRows, total: 2 });
+    let resolveSlow: (report: unknown) => void = () => {};
+    let rejectSlow: (reason: Error) => void = () => {};
+    mockVersion.api.drift.mockImplementation(() => new Promise((resolve, reject) => {
+      resolveSlow = resolve;
+      rejectSlow = reject;
+    }));
+    const view = render(<VersionPanel agentId="a1" />);
+    await screen.findByText("v1");
+    await user.click(screen.getAllByRole("button", { name: "漂移" })[1]);
+    view.rerender(<VersionPanel agentId="a2" />);
+    await act(async () => {
+      if (outcome === "resolve") resolveSlow(driftReport());
+      else rejectSlow(new Error("old agent error"));
+    });
+    expect(screen.queryByTestId("drift-report")).not.toBeInTheDocument();
+    expect(screen.queryByText("Drift check failed")).not.toBeInTheDocument();
+  });
+
+  it("does not give an all-clear when the binding changed and the contract hash also changed", async () => {
+    await openDrift(driftReport({
+      format_version: 1, digest_scope: ["name", "description", "parameters"],
+      tools: [{ name: "rebuilt_tool", status: "changed", binding_changed: true,
+        committed_contract_hash: "a".repeat(64), live_contract_hash: "b".repeat(64) }],
+      summary: { total: 1, consistent: 0, changed: 1, missing: 0, unverified: 0 },
+    }));
+    expect(screen.getByTestId("tool-contract-problem-row")).not.toHaveTextContent("哈希一致");
+  });
+
+  it("keeps a binding change visible without an unconditional all-clear", async () => {
+    await openDrift(driftReport({
+      format_version: 1, digest_scope: ["name", "description", "parameters"],
+      tools: [{ name: "rebuilt_tool", status: "consistent", binding_changed: true,
+        committed_contract_hash: "a".repeat(64), live_contract_hash: "a".repeat(64) }],
+      summary: { total: 1, consistent: 1, changed: 0, missing: 0, unverified: 0 },
+    }));
+    expect(screen.queryByTestId("tool-contract-all-verified")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tool-contract-problem-row")).toHaveTextContent("解析");
+  });
+
+  it.each([
+    { format_version: 99, digest_scope: ["name", "description", "parameters"] },
+    { format_version: 1, digest_scope: ["name"] },
+  ])("treats unsupported diagnostics as unverified ($format_version / $digest_scope)", async (format) => {
+    await openDrift(driftReport({
+      ...format,
+      tools: [{ name: "tool", status: "consistent" }],
+      summary: { total: 1, consistent: 1, changed: 0, missing: 0, unverified: 0 },
+    }));
+    expect(screen.getByTestId("tool-contract-not-verified")).toHaveTextContent("不受支持");
+    expect(screen.queryByTestId("tool-contract-all-verified")).not.toBeInTheDocument();
   });
 });
 
