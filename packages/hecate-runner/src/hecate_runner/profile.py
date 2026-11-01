@@ -448,17 +448,23 @@ class _LoadedManifest:
     verified: dict[str, bytes]
 
 
-def _load_manifest(profile_dir: Path) -> _LoadedManifest:
+def _load_manifest(profile_dir: Path, artifact_dir: Path) -> _LoadedManifest:
+    """Load the artifact manifest and verify its listed files.
+
+    ``artifact_dir`` is where the manifest, signature envelope and ``files/``
+    content live; host configuration is never read from it.
+    """
+
     try:
-        raw = read_artifact_json(profile_dir / "agent-manifest.json", "agent manifest")
+        raw = read_artifact_json(artifact_dir / "agent-manifest.json", "agent manifest")
         manifest = validate_manifest_dict(raw)
     except (ManifestError, ArtifactAdmissionError) as exc:
         raise ProfileError(f"invalid agent manifest: {exc}") from exc
 
     verified: dict[str, bytes] = {}
     for entry in manifest.files:
-        content_path = profile_dir / "files" / entry.path
-        if not content_path.resolve().is_relative_to((profile_dir / "files").resolve()):
+        content_path = artifact_dir / "files" / entry.path
+        if not content_path.resolve().is_relative_to((artifact_dir / "files").resolve()):
             raise ProfileError(f"manifest file escapes files directory: {entry.path!r}")
         if content_path.is_file():
             # One read per file: the bytes that pass the digest check are the
@@ -478,7 +484,12 @@ def _load_manifest(profile_dir: Path) -> _LoadedManifest:
     return _LoadedManifest(manifest=manifest, raw=raw, verified=verified)
 
 
-def verify_profile_artifact(profile_dir: Path, policy: ArtifactTrustPolicy) -> VerifiedArtifact:
+def verify_profile_artifact(
+    profile_dir: Path,
+    policy: ArtifactTrustPolicy,
+    *,
+    artifact_dir: Path | None = None,
+) -> VerifiedArtifact:
     """Preflight the same file integrity and publisher checks used at startup.
 
     This only reads artifact files; host credentials, execution resources and
@@ -486,9 +497,10 @@ def verify_profile_artifact(profile_dir: Path, policy: ArtifactTrustPolicy) -> V
     """
 
     profile_dir = profile_dir.resolve()
-    loaded = _load_manifest(profile_dir)
+    artifact = (artifact_dir or profile_dir).resolve()
+    loaded = _load_manifest(profile_dir, artifact)
     try:
-        return verify_artifact_admission(loaded.raw, profile_dir, policy)
+        return verify_artifact_admission(loaded.raw, profile_dir, policy, artifact_dir=artifact)
     except ArtifactAdmissionError as exc:
         raise ProfileError(f"artifact admission refused: {exc}") from exc
 
@@ -710,6 +722,12 @@ class Profile:
     # admission was not enabled — never that a digest pass authenticated a
     # publisher.
     artifact_admission: VerifiedArtifact | None = None
+    # Where the artifact content (manifest, signature, files/) lives. Equals
+    # `directory` in the single-directory layout; in release layout it names
+    # the installed release the activation pointer selected. Host-owned state
+    # (runner.json, identity.json, secrets, evidence) always resolves from
+    # `directory`, never from here.
+    artifact_directory: Path = field(default_factory=Path)
 
     def execution_definition_digest(self, dispatch_binding: str | None = None) -> str:
         """Fingerprint the fixed graph inputs and its business dispatch binding."""
@@ -767,8 +785,19 @@ class Profile:
         return summary
 
 
-def load_profile(profile_dir: Path, *, artifact_trust: ArtifactTrustPolicy | None = None) -> Profile:
+def load_profile(
+    profile_dir: Path,
+    *,
+    artifact_dir: Path | None = None,
+    artifact_trust: ArtifactTrustPolicy | None = None,
+) -> Profile:
     """Load and validate a profile; raise :class:`ProfileError` on any violation.
+
+    ``profile_dir`` is always the HOST configuration directory: runner.json,
+    identity.json, secret references and evidence resolve against it, and
+    ``Profile.directory`` keeps that meaning. ``artifact_dir`` (release
+    layout) names where the manifest, signature envelope and listed files
+    live; it defaults to ``profile_dir`` for the single-directory layout.
 
     The preview gate runs after structural validation: a manifest declaring
     ``write`` or ``approval_required`` tools fails startup naming the tool,
@@ -783,8 +812,11 @@ def load_profile(profile_dir: Path, *, artifact_trust: ArtifactTrustPolicy | Non
     profile_dir = profile_dir.resolve()
     if not profile_dir.is_dir():
         raise ProfileError(f"profile directory does not exist: {profile_dir}")
+    artifact = (artifact_dir or profile_dir).resolve()
+    if not artifact.is_dir():
+        raise ProfileError(f"artifact directory does not exist: {artifact}")
 
-    loaded = _load_manifest(profile_dir)
+    loaded = _load_manifest(profile_dir, artifact)
     manifest = loaded.manifest
     if manifest.backend_type != "pregel" or manifest.backend_compat_version != "0.1":
         raise ProfileError("preview supports only backend_type='pregel' with backend_compat_version='0.1'")
@@ -797,7 +829,9 @@ def load_profile(profile_dir: Path, *, artifact_trust: ArtifactTrustPolicy | Non
     artifact_admission: VerifiedArtifact | None = None
     if artifact_trust is not None:
         try:
-            artifact_admission = verify_artifact_admission(loaded.raw, profile_dir, artifact_trust)
+            artifact_admission = verify_artifact_admission(
+                loaded.raw, profile_dir, artifact_trust, artifact_dir=artifact
+            )
         except ArtifactAdmissionError as exc:
             raise ProfileError(f"artifact admission refused: {exc}") from exc
 
@@ -867,6 +901,7 @@ def load_profile(profile_dir: Path, *, artifact_trust: ArtifactTrustPolicy | Non
         tool_output_schemas=getattr(config, "tool_output_schemas", {}),
         governance=_load_governance(_raw_config_for_governance(profile_dir)),
         artifact_admission=artifact_admission,
+        artifact_directory=artifact,
     )
 
 

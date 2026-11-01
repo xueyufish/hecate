@@ -36,6 +36,7 @@ from .managed import (
     managed_principal_for,
 )
 from .profile import Profile, ProfileError, load_profile, resolve_secret_ref
+from .release import ReleaseError, load_host_selection
 from .server import RunnerServer
 from .tools import BusinessApiToolDispatcher
 
@@ -44,7 +45,14 @@ logger = logging.getLogger(__name__)
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hecate-runner", description="Standalone Hecate execution host (preview)")
-    parser.add_argument("--profile", required=True, type=Path, help="profile directory (manifest, config, identity)")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--profile", type=Path, help="profile directory (manifest, config, identity)")
+    source.add_argument(
+        "--host",
+        type=Path,
+        help="release-managed host directory: start the release committed in active.json "
+        "(requires --artifact-trust; management via hecate-runner-release)",
+    )
     parser.add_argument(
         "--artifact-trust",
         type=Path,
@@ -69,11 +77,37 @@ def main(argv: list[str] | None = None) -> int:
             print(f"hecate-runner: artifact trust policy error: {exc}", file=sys.stderr)
             return 2
 
+    host_lock = None
+    profile: Profile
+    if args.host is not None:
+        if artifact_trust is None:
+            print(
+                "hecate-runner: --host requires --artifact-trust: the committed selection is "
+                "re-verified under the current policy at every start",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            profile, host_lock = load_host_selection(args.host, artifact_trust)
+        except (ProfileError, ReleaseError) as exc:
+            print(f"hecate-runner: host startup error: {exc}", file=sys.stderr)
+            return 2
+    else:
+        try:
+            profile = load_profile(args.profile, artifact_trust=artifact_trust)
+        except ProfileError as exc:
+            print(f"hecate-runner: profile error: {exc}", file=sys.stderr)
+            return 2
+
     try:
-        profile: Profile = load_profile(args.profile, artifact_trust=artifact_trust)
-    except ProfileError as exc:
-        print(f"hecate-runner: profile error: {exc}", file=sys.stderr)
-        return 2
+        return _run_profile(profile, args)
+    finally:
+        if host_lock is not None:
+            host_lock.release()
+
+
+def _run_profile(profile: Profile, args: argparse.Namespace) -> int:
+    """Run an admitted profile; the caller owns the complete host-lock lifetime."""
 
     # Managed assembly (step6a): control_plane + durable is the closed loop
     # (channel + persistent receive queue + serial scheduling + upload +
@@ -297,6 +331,9 @@ def main(argv: list[str] | None = None) -> int:
     admission_label = (
         f"strict publisher={admission.publisher_ref} key={admission.key_id}" if admission else "digest-only"
     )
+    # In release mode the started content is the committed selection; the
+    # short digest names it without implying a live revocation check.
+    release_label = f"release={profile.artifact_directory.name}" if args.host is not None else "release=profile"
     # Optional port disclosure for harnesses that start the runner with an
     # OS-assigned port (profile port 0); written after bind succeeds. The
     # temp+rename publication is atomic, so a poller that sees the file
@@ -311,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         f"hecate-runner: serving on {profile.config.host}:{actual_port} "
         f"(backend={profile.manifest.backend_type}, model={profile.config.model_backend}, "
         f"tools={list(profile.config.tool_allowlist)}, durable={durable is not None}, "
-        f"managed={managed is not None}, artifact-admission={admission_label})",
+        f"managed={managed is not None}, {release_label}, artifact-admission={admission_label})",
         flush=True,
     )
     try:
