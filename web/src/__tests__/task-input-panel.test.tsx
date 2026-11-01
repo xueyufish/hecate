@@ -42,6 +42,16 @@ describe("TaskInputPanel operation boundaries", () => {
     expect(apiMock.post).not.toHaveBeenCalled();
   });
 
+  it("explains an agent child wait without offering a human input command", () => {
+    render(<TaskInputPanel taskId="task-1" detail={{ ...detail(), wait: {
+      wake_kind: "agent_child", consumed: false, wait_token: "child-token", wait_expires_at: null,
+      contract_ref: { kind: "agent_child", alias: "worker", call_id: "c1" },
+    } }} />);
+    expect(screen.getByTestId("task-input-read-only")).toHaveTextContent("Agent 子调用等待");
+    expect(screen.queryByTestId("task-input-textarea")).not.toBeInTheDocument();
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
   it("retries the complete frozen body after the task enters a different wait", async () => {
     apiMock.post.mockRejectedValueOnce(new Error("network lost")).mockResolvedValueOnce(receipt);
     const onIssued = vi.fn();

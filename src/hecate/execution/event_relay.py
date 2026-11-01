@@ -109,12 +109,16 @@ class PlatformOutboxProjector:
             if event_type == "run_terminal":
                 await db.commit()
                 task_input = await asyncio.to_thread(self._store.get_task_input, envelope.task_ref) or {}
-                if isinstance(task_input.get("workflow_parent"), dict):
-                    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+                from hecate.execution.task_dispatcher import PlatformTaskDispatcher
 
+                if isinstance(task_input.get("workflow_parent"), dict):
                     dispatcher = PlatformTaskDispatcher(self._store, self._session_factory)
                     context = dispatcher._context_of(envelope.task_ref, task_input)
                     await dispatcher._issue_child_callback(db, context, payload, retry_errors=True)
+                elif isinstance(task_input.get("agent_child_parent"), dict):
+                    dispatcher = PlatformTaskDispatcher(self._store, self._session_factory)
+                    context = dispatcher._context_of(envelope.task_ref, task_input)
+                    await dispatcher._issue_agent_child_callback(db, context, payload, retry_errors=True)
 
     async def _resolve_workspace(self, task_ref: Any) -> uuid.UUID | None:
         """Task attribution: the row column, then the persisted input payload."""

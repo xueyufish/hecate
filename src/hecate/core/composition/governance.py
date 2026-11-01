@@ -560,8 +560,15 @@ def build_platform_governance(
     rules: list[dict[str, Any]] | None = None,
     identity: dict[str, Any] | None = None,
     workspace_id: Any = None,
+    model_budget: BudgetGate | None = None,
+    override_model_budget: bool = False,
 ) -> PlatformGovernance:
-    """Assemble the platform governance facade (composition entry point)."""
+    """Assemble the platform governance facade (composition entry point).
+
+    ``override_model_budget`` with an explicit ``model_budget`` replaces the
+    default workspace-quota gate for one dispatch (the durable Agent child
+    slice gate); without the override the wiring stays exactly as before.
+    """
     from hecate.core.config import settings
 
     resolved_mode = mode or GovernanceMode(settings.GOVERNANCE_MODE)
@@ -588,13 +595,16 @@ def build_platform_governance(
         approval_ledger=approval_ledger,
         revocation=PrincipalLifecycleRevocation(db, agent_id),
     )
-    model_budget = None
-    if db is not None and workspace_id is not None and settings.QUOTA_ENABLED:
-        from hecate.ops.budget_reservations import QuotaBudgetLedger
+    # An explicit override passes the caller's gate through unchanged;
+    # without it the default workspace-quota wiring applies exactly as before.
+    if not override_model_budget:
+        model_budget = None
+        if db is not None and workspace_id is not None and settings.QUOTA_ENABLED:
+            from hecate.ops.budget_reservations import QuotaBudgetLedger
 
-        model_budget = BudgetGate(
-            QuotaBudgetLedger(db, workspace_id=workspace_id, session_factory=factory, unit_scale=0.00001)
-        )
+            model_budget = BudgetGate(
+                QuotaBudgetLedger(db, workspace_id=workspace_id, session_factory=factory, unit_scale=0.00001)
+            )
     return PlatformGovernance(
         service,
         resolved_mode,

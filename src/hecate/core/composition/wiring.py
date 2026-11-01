@@ -445,6 +445,7 @@ async def start_durable_worker(app: FastAPI) -> None:
     from hecate_durable.worker import DurableWorker, OutboxRelay
 
     from hecate.core.database import async_session_factory
+    from hecate.execution.agent_child_wake import AgentChildRunReconciler
     from hecate.execution.approval_decision import ApprovalResumeRecovery
     from hecate.execution.approval_wait_expiration import ApprovalWaitExpirer
     from hecate.execution.event_relay import PlatformOutboxProjector
@@ -465,6 +466,7 @@ async def start_durable_worker(app: FastAPI) -> None:
     expirer = ApprovalWaitExpirer(store, async_session_factory)
     input_expirer = InputWaitExpirer(store, async_session_factory)
     timer_waker = TimerWaitWaker(store, async_session_factory)
+    agent_child_reconciler = AgentChildRunReconciler(store, async_session_factory)
 
     async def _platform_wait_reconcilers() -> int:
         processed = 0
@@ -473,6 +475,7 @@ async def start_durable_worker(app: FastAPI) -> None:
             ("approval decision", decision_recovery.resume_once),
             ("input expiry", input_expirer.expire_once),
             ("timer wake", timer_waker.wake_once),
+            ("agent child", agent_child_reconciler.converge_once),
         ):
             try:
                 processed += await reconcile()

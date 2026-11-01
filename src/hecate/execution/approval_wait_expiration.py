@@ -405,6 +405,7 @@ def standalone_wait_reconcilers(*, store: Any | None = None) -> WaitReconciler:
 
     from hecate.core.composition.durable_platform import get_durable_suite
     from hecate.core.database import async_session_factory
+    from hecate.execution.agent_child_wake import AgentChildRunReconciler
     from hecate.execution.approval_decision import ApprovalResumeRecovery
     from hecate.execution.input_wait_expiration import InputWaitExpirer
     from hecate.execution.timer_wait_wake import TimerWaitWaker
@@ -413,6 +414,7 @@ def standalone_wait_reconcilers(*, store: Any | None = None) -> WaitReconciler:
     approval = standalone_expirer(store=store)
     input_expiry = InputWaitExpirer(store, async_session_factory).expire_once
     timer_wake = TimerWaitWaker(store, async_session_factory).wake_once
+    agent_child = AgentChildRunReconciler(store, async_session_factory).converge_once
     # A non-None worker suppresses inline dispatch in the control service.
     # Resumes only requeue here; the dedicated worker acquires the normal
     # dispatch lease in its next cycle, after this callback returns.
@@ -422,6 +424,7 @@ def standalone_wait_reconcilers(*, store: Any | None = None) -> WaitReconciler:
         ("approval resume", resume),
         ("input expiry", input_expiry),
         ("timer wake", timer_wake),
+        ("agent child", agent_child),
     )
 
     async def reconcile() -> int:

@@ -346,3 +346,56 @@ turn, deadline, authorization and no-progress limits still apply. Timer expiry
 only makes the task eligible for its next dispatch; it does not promise that
 the business job completed or permit a new action after cancellation or expiry
 of the task's own deadline.
+
+## Platform controller Agent child calls
+
+- **The implementation is a partial execution slice** — it currently admits
+  text-only children. Parent/target/resource permission intersection, aggregate
+  model-budget reservations, live cancellation and child-side crash recovery
+  are not established by this slice. Do not treat the parent callback recovery
+  test as certification of the full Agent-to-Agent execution contract.
+- **Delegation is a declared, host-owned tool** — a controller task opts in
+  via `controller.agent_children` (aliases bound to same-workspace agents,
+  optional `input_schema`/`output_schema` and per-target `max_calls`).
+  `budget_units` is rejected until real parent reservations exist; call
+  counts are not a resource budget. The model sees `delegate_agent` with
+  a declared alias enum. Child submission freezes its target execution
+  snapshot; the callback verifies the settled call receipt, child input
+  digest, deployment, ownership and declared acceptance standard.
+- **Acceptance is idempotent by call identity** — the tool submits the
+  child under `agent-child:<parent task>:<action execution id>`; settled
+  acceptance replays its receipt. The park-commit crash test verifies the
+  same child is reused. An unresolved submission still revalidates the
+  current target before idempotent replay, so deployment changes in that
+  window require further recovery work. `SubmitResult.task_ref` is a
+  BackendRef — do not re-wrap it.
+- **Responsibility chain** — the child keeps the parent's real initiator
+  (`user_id` flows through); workflow children's `user_id=None` system
+  identity was deliberately NOT copied. The child is one level deep: it
+  cannot declare targets or be a workflow parent, and it always runs the
+  durable controller chain — committed decisions replay after a crash,
+  settled actions never re-execute, and the cooperative cancel observes
+  a pending cancel command or a terminal parent before every turn.
+- **The child result's truth source** — only the verified
+  `submit_agent_child_callback` consumes an `agent_child` wait (manual
+  `provide_input` is rejected); the wake records a durable
+  `agent_child_result` input revision built from the child's committed
+  facts. Successful delivery requires the shared output acceptance record
+  bound to content, Task, Run, workspace and output schema; failed or
+  cancelled children supply failure facts without successful content.
+  `usage` remains `null` until a real usage integration reports.
+- **Waker scope** — `AgentChildRunReconciler` (in both reconciler
+  composites) recovers lost callbacks by re-issuing the deterministic
+  callback and converges expired parent deadlines to
+  `agent_child_deadline` (the still-queued child receives a durable
+  cancel request — a request, not a stop). QUEUED children of a cancelled
+  parent are cancelled outright. Dispatch entry also refuses inactive or
+  expired parents. These checks do not interrupt a live model request.
+  Indeterminate child state or corrupt wait bindings move the parent to
+  reconciliation instead of leaving an unbounded wait.
+- **Authorization boundary** — child submission requires the target's active
+  agent principal. Targets with effective tools, knowledge, skills or memory
+  configuration are refused until resource-level authorization is integrated.
+  The declaration's exact `allowed_tools` narrowing alone cannot express the
+  parent's resource scope. Runner rejects platform child declarations and
+  external task input cannot set the internal `agent_child_parent` stamp.

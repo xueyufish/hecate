@@ -39,10 +39,18 @@ from hecate_runtime.errors import ApprovalWaitSignal
 from hecate_runtime.tool_call_executor import AcceptedToolCallOutcome, ToolCallExecutor
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from hecate.contracts.execution.durable import ControlCommandKind, TaskLifecycleState, TaskStateRecord
+from hecate.contracts.execution.durable import CommandState, ControlCommandKind, TaskLifecycleState, TaskStateRecord
 from hecate.contracts.execution.events import ActorKind, ActorRef
 from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
 from hecate.contracts.execution.references import BackendRef, RefKind, deployment_ref, run_ref
+from hecate.execution.agent_child import (
+    AGENT_CHILD_CONTRACT_KIND,
+    DELEGATE_AGENT_TOOL_NAME,
+    AgentChildDelegateTool,
+    agent_child_acceptance,
+    agent_child_policy,
+    agent_child_stamp,
+)
 from hecate.execution.delivery_acceptance_view import delivery_projection
 from hecate.execution.entry_events import RunEventMapper
 from hecate.execution.governance_events import PlatformEventService
@@ -136,6 +144,52 @@ class TimerWaitSignalError(Exception):
         self.contract_ref = dict(contract_ref)
 
 
+class AgentChildWaitSignalError(Exception):
+    """Raised at a controller turn boundary to park a durable Agent child wait.
+
+    The contract binds the accepting action's stable execution id, the
+    submitted child task, the frozen target facts and the declared
+    acceptance; the child's verified terminal callback is the only wake.
+    """
+
+    def __init__(self, contract_ref: dict[str, Any]) -> None:
+        super().__init__(f"task waits for an agent child call: {contract_ref}")
+        self.contract_ref = dict(contract_ref)
+
+
+class _ControllerAgentChildWatch:
+    """Observe the delegation tool's durable acceptance envelopes.
+
+    A candidate becomes a request only when the task opted in (the watch
+    exists), the envelope is the delegation tool's own structured
+    acceptance, and the envelope's ``call_id`` equals the observing
+    action's execution id — a copied envelope under another action never
+    parks a wait. Refusal envelopes stay inert model data.
+    """
+
+    def __init__(self, acknowledged: list[str]) -> None:
+        self.requested: dict[str, Any] | None = None
+        self._acknowledged = frozenset(acknowledged)
+
+    def observe_result(self, execution_id: str, tool_name: str, arguments: dict[str, Any], result: Any) -> None:
+        if self.requested is not None or execution_id in self._acknowledged:
+            return
+        if tool_name != DELEGATE_AGENT_TOOL_NAME:
+            return
+        call = agent_child_acceptance(result)
+        if call is None or call.get("call_id") != execution_id:
+            return
+        self.requested = {
+            "call_id": execution_id,
+            "tool": tool_name,
+            "arguments_digest": tool_arguments_digest(arguments),
+            "call": call,
+        }
+
+    def stop_reason(self) -> str | None:
+        return "agent_child_wait_requested" if self.requested is not None else None
+
+
 class _ControllerInputWait:
     """Observe governed outcomes, including replay, by durable action identity."""
 
@@ -224,11 +278,17 @@ class _InputRequestExecutor(ToolCallExecutor):
     """Observe only confirmed, governed results of fresh and recovered actions."""
 
     def __init__(
-        self, *, watch: _ControllerInputWait, timer_watch: _ControllerTimerWait | None = None, **kwargs: Any
+        self,
+        *,
+        watch: _ControllerInputWait,
+        timer_watch: _ControllerTimerWait | None = None,
+        agent_child_watch: _ControllerAgentChildWatch | None = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._watch = watch
         self._timer_watch = timer_watch
+        self._agent_child_watch = agent_child_watch
 
     async def execute_accepted_call(
         self,
@@ -259,6 +319,10 @@ class _InputRequestExecutor(ToolCallExecutor):
             self._watch.observe_result(context["invocation_id"], function["name"], function["arguments"], result)
             if self._timer_watch is not None:
                 await self._timer_watch.observe_result(
+                    context["invocation_id"], function["name"], function["arguments"], result
+                )
+            if self._agent_child_watch is not None:
+                self._agent_child_watch.observe_result(
                     context["invocation_id"], function["name"], function["arguments"], result
                 )
         return outcome
@@ -299,6 +363,13 @@ class _DispatchContext:
     # (``controller.timer_wait``). Absent keeps original semantics — wait
     # declarations stay inert data.
     controller_timer_wait: dict[str, int] | None = None
+    # Persistent Agent child calls: the validated target declaration
+    # (``controller.agent_children``). Absent keeps original semantics —
+    # the delegation tool does not exist for the model at all.
+    controller_agent_children: dict[str, Any] | None = None
+    # The child-side parent stamp (``agent_child_parent``): the durable
+    # association a child's terminal path calls back through.
+    agent_child_parent: dict[str, Any] | None = None
     # Explicit opt-in: freeze a governed skill catalog for this task
     # before its first model call (absent keeps original semantics).
     skill_catalog: bool = False
@@ -358,6 +429,54 @@ class PlatformTaskDispatcher:
         task = await registry.get_task(context.task_id, context.workspace_id)
         runs = await registry.list_runs_for_task(context.task_id, context.workspace_id)
         latest = runs[-1] if runs else None
+
+        if context.agent_child_parent is not None and latest is not None:
+            # Recheck the parent before spending model usage. Cancellation
+            # propagation can fail after the parent's terminal commit.
+            parent_ref_raw = context.agent_child_parent.get("task_ref") or {}
+            parent_ref = BackendRef(
+                RefKind.TASK, str(parent_ref_raw.get("issuer_domain")), str(parent_ref_raw.get("id"))
+            )
+            parent_state = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+            parent_error = None
+            if parent_state is None or parent_state.lifecycle_state in {
+                TaskLifecycleState.SUCCEEDED,
+                TaskLifecycleState.FAILED,
+                TaskLifecycleState.RECONCILIATION_REQUIRED,
+            }:
+                parent_error = "parent_inactive"
+            elif parent_state.lifecycle_state is TaskLifecycleState.CANCELLED:
+                parent_error = "parent_cancelled"
+            parent_input = await asyncio.to_thread(self._store.get_task_input, parent_ref) or {}
+            parent_deadline = (parent_input.get("controller") or {}).get("deadline")
+            if parent_deadline is not None and parent_error is None:
+                try:
+                    parsed = datetime.fromisoformat(parent_deadline)
+                    if datetime.now(UTC) >= (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)):
+                        parent_error = "parent_deadline"
+                except (TypeError, ValueError):
+                    parent_error = "parent_deadline_unverifiable"
+            if parent_error is not None:
+                await db.commit()
+                # The finish CAS expects the live row revision: the caller's
+                # record may predate the dispatch claim's own bump.
+                fresh = await asyncio.to_thread(self._store.get_task_state, task_ref)
+                await self._finish(
+                    db,
+                    task_ref,
+                    run_row_ref(latest),
+                    context,
+                    {
+                        "status": "failed",
+                        "content": "",
+                        "error": "parent task no longer permits child execution",
+                        "error_category": parent_error,
+                    },
+                    run=latest,
+                    expected_revision=fresh.revision if fresh is not None else record.revision + 1,
+                    lease=lease,
+                )
+                return
 
         resume_interrupted = False
         # step5e: a consumed resume-wait contract IS the authorization fact
@@ -545,6 +664,12 @@ class PlatformTaskDispatcher:
         except TimerWaitSignalError as signal:
             await db.commit()
             await self._park_timer(
+                db, task_ref, signal, context, run_ref=r_ref, expected_revision=live_revision["value"], lease=lease
+            )
+            return
+        except AgentChildWaitSignalError as signal:
+            await db.commit()
+            await self._park_agent_child(
                 db, task_ref, signal, context, run_ref=r_ref, expected_revision=live_revision["value"], lease=lease
             )
             return
@@ -825,6 +950,66 @@ class PlatformTaskDispatcher:
                 raise
             logger.warning("task %s workflow auto-callback deferred to outbox", context.task_id, exc_info=True)
 
+    async def _issue_agent_child_callback(
+        self, db: AsyncSession, context: _DispatchContext, outcome: dict[str, Any], *, retry_errors: bool = False
+    ) -> None:
+        """Auto-callback: an Agent child's terminal fact wakes its parent.
+
+        The child's input payload carries the parent stamp (written at
+        acceptance); the callback is issued through the REAL verified path
+        (``submit_agent_child_callback``) with the parent's live wait
+        token — the platform trusts its own records, so no external caller
+        is involved and a forged caller cannot manufacture a child
+        result. The immediate path logs failures after the terminal
+        commit; the outbox path propagates them to its durable retry
+        cursor. Neither path undoes the child's committed terminal fact.
+        """
+
+        parent = context.agent_child_parent or {}
+        raw_ref = parent.get("task_ref") or {}
+        declared = outcome.get("status")
+        if not isinstance(raw_ref, dict) or declared not in ("succeeded", "failed", "cancelled"):
+            return
+        try:
+            parent_ref = BackendRef(RefKind.TASK, str(raw_ref.get("issuer_domain")), str(raw_ref.get("id")))
+            state = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+            wait = (state.extra or {}).get("wait") or {} if state else {}
+            token = str(wait.get("wait_token") or "")
+            contract = wait.get("contract_ref") or {}
+            if (
+                not token
+                or state is None
+                or state.lifecycle_state is not TaskLifecycleState.WAITING_INPUT
+                or wait.get("consumed")
+                or wait.get("wake_kind") != "agent_child"
+                or (contract.get("child_task_ref") or {}).get("id") != str(context.task_id)
+                or contract.get("call_id") != parent.get("call_id")
+            ):
+                return
+            service = self._task_control(db)
+            receipt = await service.submit_agent_child_callback(
+                workspace_id=context.workspace_id,
+                task_id=uuid.UUID(parent_ref.id),
+                command_id=f"agent-child-callback-{parent.get('call_id')}-{token}",
+                wait_token=token,
+                child_task_id=context.task_id,
+                declared_state=str(declared),
+            )
+            if retry_errors and receipt.record.state.value != "applied":
+                current = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+                current_wait = (current.extra or {}).get("wait") or {} if current else {}
+                if (
+                    current is not None
+                    and current.lifecycle_state is TaskLifecycleState.WAITING_INPUT
+                    and current_wait.get("wait_token") == token
+                    and not current_wait.get("consumed")
+                ):
+                    raise RuntimeError(f"agent child callback was not applied: {receipt.detail}")
+        except Exception:  # noqa: BLE001 — the outbox retries without undoing the terminal
+            if retry_errors:
+                raise
+            logger.warning("task %s agent child auto-callback deferred to outbox", context.task_id, exc_info=True)
+
     # -- internals -------------------------------------------------------------
 
     def _db(self) -> AsyncSession:
@@ -875,6 +1060,7 @@ class PlatformTaskDispatcher:
             workflow_plan=WorkflowChildTaskAdapter.plan(payload),
             workflow_parent=(payload["workflow_parent"] if isinstance(payload.get("workflow_parent"), dict) else None),
             workflow_step=payload.get("workflow_step"),
+            agent_child_parent=agent_child_stamp(payload.get("agent_child_parent")),
             approval_wait=payload.get("approval_wait") is True,
             controller_loop=payload.get("controller_loop") is True,
             skill_catalog=controller.get("skill_catalog") is True,
@@ -883,6 +1069,7 @@ class PlatformTaskDispatcher:
             controller_no_progress=controller.get("no_progress"),
             controller_input_wait_timeout_seconds=input_wait_timeout(controller.get("input_wait_timeout_seconds")),
             controller_timer_wait=timer_wait_policy(controller.get("timer_wait")),
+            controller_agent_children=agent_child_policy(controller.get("agent_children")),
             controller_continuation=controller_continuation,
             output_schema=payload.get("output_schema") if isinstance(payload.get("output_schema"), dict) else None,
             platform_run_id=payload.get("platform_run_id") if isinstance(payload.get("platform_run_id"), str) else None,
@@ -1067,6 +1254,26 @@ class PlatformTaskDispatcher:
                     user_id=context.user_id,
                     dlp_scanner=None,
                 )
+        if context.agent_child_parent is not None:
+            # The declared exact-name narrowing is the only delegation
+            # grant: the child's surface is its own frozen tools ∩ the
+            # declaration, enforced twice — the model never sees an
+            # excluded tool, and a denied rule backstops the registry.
+            from hecate_runtime.tool_access import RuleAction, ToolRule
+
+            allowed = context.agent_child_parent.get("allowed_tools")
+            if allowed is not None:
+                allowed_set = set(allowed)
+                effective_tools = [
+                    tool
+                    for tool in effective_tools
+                    if isinstance(tool, dict) and tool.get("function", {}).get("name") in allowed_set
+                ]
+                if bundle is not None:
+                    excluded = sorted(set(tool_refs) - allowed_set)
+                    bundle.rules = list(bundle.rules or []) + [
+                        ToolRule(action=RuleAction.DENY, pattern=name) for name in excluded
+                    ]
         await self._wire_approval_backend(db, context, bundle, resume_interrupted=resume_interrupted)
 
         port = create_runtime_port(
@@ -1173,6 +1380,15 @@ class PlatformTaskDispatcher:
         result = outcome.result
         if not isinstance(result, dict):
             raise ValueError(f"unexpected entry result type {type(result)}")
+        if context.agent_child_parent is not None:
+            from hecate_runtime.accepted_decision import RunRef
+
+            return self._evaluate_delivery(
+                str(result.get("content") or ""),
+                context,
+                task_ref=task_ref,
+                run_ref=RunRef(issuer_domain=run_ref.issuer_domain, run_id=run_ref.id),
+            )
         return self._child_result(result, context)
 
     async def _execute_controller(
@@ -1287,18 +1503,38 @@ class PlatformTaskDispatcher:
                     "error": str(exc),
                     "error_category": "skill_catalog_corrupt" if exc.reconciliation else "skill_catalog_freeze_failed",
                 }
-        if tool_refs or skill_catalog_row is not None:
+        agent_child_tool_map: dict[str, AgentChildDelegateTool] | None = None
+        if context.controller_agent_children is not None:
+            # The durable delegation tool exists ONLY for opted-in tasks:
+            # the model cannot address agents the declaration never named.
+            delegate_tool = AgentChildDelegateTool(
+                policy=context.controller_agent_children,
+                parent_ref=task_ref,
+                parent_goal=context.goal,
+                initiator_user_id=str(context.user_id) if context.user_id else None,
+                parent_agent_id=agent.id,
+                workspace_id=str(context.workspace_id),
+                session_factory=self._db,
+                store=self._store,
+                engine_backed=hasattr(self._store, "engine"),
+            )
+            agent_child_tool_map = {DELEGATE_AGENT_TOOL_NAME: delegate_tool}
+        if tool_refs or skill_catalog_row is not None or agent_child_tool_map is not None:
             # Opt-in tasks always get a wired registry: load_skill must be
-            # executable (and L2-pinned) even with zero business tools.
+            # executable (and L2-pinned) even with zero business tools, and
+            # a delegating task needs the registry to route its host tool.
             if skill_catalog_row is not None:
                 skill_loader = ControllerSkillLoader(db, skill_catalog_row)
                 tool_registry = build_tool_registry(
                     db,
                     skill_loader=skill_loader,
                     workspace_id=context.workspace_id,
+                    host_tools=agent_child_tool_map,
                 )
             else:
-                tool_registry = build_tool_registry(db, workspace_id=context.workspace_id)
+                tool_registry = build_tool_registry(
+                    db, workspace_id=context.workspace_id, host_tools=agent_child_tool_map
+                )
             effective_tools = await load_agent_tools(db, tool_refs, workspace_id=context.workspace_id)
         bundle = await assemble_guardrails(
             db,
@@ -1310,8 +1546,52 @@ class PlatformTaskDispatcher:
             user_id=context.user_id,
             dlp_scanner=None,
         )
+        if context.agent_child_parent is not None:
+            # The delegation grant is the parent ∧ target rule intersection:
+            # the engine is deny-wins (DENY → ASK → ALLOW tiers), so the
+            # merged rule set enforces the intersection at runtime for
+            # every child action.
+            from hecate.core.composition.guardrail_platform import assemble_guardrails as _assemble_rules
+
+            parent_rules = await _assemble_rules(
+                db,
+                workspace_id=context.workspace_id,
+                agent_id=uuid.UUID(str(context.agent_child_parent.get("parent_agent_id"))),
+                guardrail_config=None,
+            )
+            bundle.rules = list(bundle.rules or []) + list(parent_rules.rules or [])
+        slice_budget: Any = None
+        slice_ledger: Any = None
+        child_call_budget = 0
+        if context.agent_child_parent is not None:
+            # The declared call slice bounds the child's metered model
+            # usage: every controller turn reserves and settles against
+            # this gate (actual usage settles, unknown usage holds — the
+            # same semantics the platform budget gate applies).
+            per_call = context.agent_child_parent.get("budget_units")
+            if isinstance(per_call, int) and per_call > 0:
+                from hecate_governance.usage import BudgetGate, MemoryBudgetLedger
+
+                slice_ledger = MemoryBudgetLedger(limit=per_call)
+                slice_budget = BudgetGate(slice_ledger)
+                child_call_budget = per_call
+        governance_for_port = None
+        if slice_budget is not None:
+            from hecate.core.composition.governance import build_platform_governance
+
+            governance_for_port = build_platform_governance(
+                db,
+                agent_id=agent.id,
+                workspace_id=context.workspace_id,
+                model_budget=slice_budget,
+                override_model_budget=True,
+            )
         await self._wire_approval_backend(db, context, bundle, resume_interrupted=resume_interrupted)
 
+        # The slice gate rides an explicit governance override ONLY when a
+        # budget slice exists; without one the port is built exactly as
+        # before (composition doubles patch this factory signature).
+        port_kwargs: dict[str, Any] = {"governance": governance_for_port} if governance_for_port is not None else {}
         port = create_runtime_port(
             db,
             llm_service,
@@ -1323,6 +1603,7 @@ class PlatformTaskDispatcher:
                 "agent_principal": str(agent.id),
                 "task_scope": str(context.task_id) if context.approval_wait else None,
             },
+            **port_kwargs,
         )
         hook = None
         if hasattr(self._store, "claim_ex"):
@@ -1377,6 +1658,11 @@ class PlatformTaskDispatcher:
             "acceptance_version": (context.acceptance or {}).get("version"),
             **({"timer_wait_policy": dict(context.controller_timer_wait)} if context.controller_timer_wait else {}),
             **(
+                {"agent_children_policy": dict(context.controller_agent_children)}
+                if context.controller_agent_children
+                else {}
+            ),
+            **(
                 {"skill_catalog_version": 1, "skill_catalog_sha256": skill_catalog_row.content_sha256}
                 if skill_catalog_row is not None
                 else {}
@@ -1406,9 +1692,22 @@ class PlatformTaskDispatcher:
             )
         elif context.controller_timer_wait is not None:
             raise ValueError("controller.timer_wait requires the platform SQL action ledger")
+        agent_child_watch: _ControllerAgentChildWatch | None = None
+        if context.controller_agent_children is not None:
+            agent_child_watch = _ControllerAgentChildWatch(persisted_payload.get("_input_wait_acknowledgements", []))
+        if agent_child_watch is not None:
+            # The delegation surface is frozen from the task's declaration:
+            # the alias enum names exactly the declared targets.
+            from hecate_llm.tool_calling import format_tools_for_llm
+
+            converted_delegate = format_tools_for_llm([{"name": DELEGATE_AGENT_TOOL_NAME, **delegate_tool.definition}])
+            if converted_delegate:
+                tool_definitions[DELEGATE_AGENT_TOOL_NAME] = converted_delegate[0]
+
         executor = _InputRequestExecutor(
             watch=input_watch,
             timer_watch=timer_watch,
+            agent_child_watch=agent_child_watch,
             port=port,
             event_store=event_store,
             access_policy=bundle.access_policy if bundle else None,
@@ -1544,8 +1843,14 @@ class PlatformTaskDispatcher:
             # it.
             stop_check=(
                 input_watch.stop_reason
-                if timer_watch is None
-                else (lambda: input_watch.stop_reason() or timer_watch.stop_reason())
+                if timer_watch is None and agent_child_watch is None
+                else (
+                    lambda: (
+                        input_watch.stop_reason()
+                        or (timer_watch.stop_reason() if timer_watch is not None else None)
+                        or (agent_child_watch.stop_reason() if agent_child_watch is not None else None)
+                    )
+                )
             ),
             continuation_policy=continuation_policy,
         )
@@ -1569,17 +1874,46 @@ class PlatformTaskDispatcher:
         first_responder = source.responder_for(messages, {**base_refs, "controller": "agent-loop/1", "turn": 1})
         controller = AgentController(AgentTurn(store, first_responder, executor), source)
 
+        def _parent_still_active() -> bool:
+            raw = (context.agent_child_parent or {}).get("task_ref") or {}
+            parent_state = self._store.get_task_state(
+                BackendRef(RefKind.TASK, str(raw.get("issuer_domain")), str(raw.get("id")))
+            )
+            # The parent is normally WAITING while the child runs; only a
+            # terminal (or cancelled) parent stops new child work.
+            return parent_state is None or parent_state.lifecycle_state not in {
+                TaskLifecycleState.CANCELLED,
+                TaskLifecycleState.SUCCEEDED,
+                TaskLifecycleState.FAILED,
+                TaskLifecycleState.RECONCILIATION_REQUIRED,
+            }
+
+        def _pending_cancel() -> bool:
+            commands, _total = self._store.list_task_commands(str(context.workspace_id), task_ref, 20, 0)
+            return any(
+                command.kind is ControlCommandKind.CANCEL and command.state is CommandState.REQUESTED
+                for command in commands
+            )
+
         def should_cancel() -> bool:
             current = self._store.get_task_state(task_ref)
-            return current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING
+            if current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING:
+                return True
+            if context.agent_child_parent is not None and not _parent_still_active():
+                # The parent's terminal bounds the child mid-run: no new
+                # model calls or actions after the parent stopped.
+                return True
+            return _pending_cancel()
 
         def observe(event: dict[str, Any]) -> Any:
-            # A recorded input request or a verified timer declaration parks
-            # at the turn boundary instead of deciding the next turn without
-            # the awaited fact.
+            # A recorded input request, a verified timer declaration or an
+            # accepted agent call parks at the turn boundary instead of
+            # deciding the next turn without the awaited fact.
             if input_watch.stop_reason() is not None:
                 return RuntimeEventDecision.STOP_UNKNOWN
             if timer_watch is not None and timer_watch.stop_reason() is not None:
+                return RuntimeEventDecision.STOP_UNKNOWN
+            if agent_child_watch is not None and agent_child_watch.stop_reason() is not None:
                 return RuntimeEventDecision.STOP_UNKNOWN
             return RuntimeEventDecision.CONTINUE
 
@@ -1644,6 +1978,28 @@ class PlatformTaskDispatcher:
                         "engine_session_id": str(engine_session),
                     },
                 )
+            if agent_child_watch is not None and agent_child_watch.requested is not None:
+                # The acceptance envelope's call identity was verified
+                # against the observing action; the submitted child task is
+                # already durable. The park binds the wait to the child —
+                # only the child's verified terminal callback wakes it.
+                request = agent_child_watch.requested
+                call = request["call"]
+                raise AgentChildWaitSignalError(
+                    {
+                        "kind": AGENT_CHILD_CONTRACT_KIND,
+                        "tool": request["tool"],
+                        "alias": call["alias"],
+                        "call_id": call["call_id"],
+                        "child_task_ref": call["child_task_ref"],
+                        "target": call["target"],
+                        "input_digest": call["input_digest"],
+                        "arguments_digest": request["arguments_digest"],
+                        **({"budget_units": call["budget_units"]} if isinstance(call.get("budget_units"), int) else {}),
+                        **({"run_id": str(run.id)} if run is not None else {}),
+                        "engine_session_id": str(engine_session),
+                    },
+                )
             if result.state.value == "failed":
                 if result.detail.get("requires_reconciliation"):
                     return {
@@ -1654,6 +2010,18 @@ class PlatformTaskDispatcher:
                     }
                 raise RuntimeError(result.error or "controller execution failed")
             if result.state.value in ("unknown", "cancelled"):
+                # A cooperative stop whose task never left RUNNING is a real
+                # cancellation (the pending cancel command or a cancelled
+                # parent): the terminal is CANCELLED, not reconciliation.
+                # When the task already moved, its fact wins and the run
+                # stays pending reconciliation exactly as before.
+                current = self._store.get_task_state(task_ref)
+                if (
+                    result.state.value == "cancelled"
+                    and current is not None
+                    and (current.lifecycle_state is TaskLifecycleState.RUNNING)
+                ):
+                    return {"status": "cancelled", "content": "", "error": "controller execution cancelled"}
                 return {"status": "unknown", "content": "", "error": f"controller execution {result.state.value}"}
             outcome = driver.outcome
             if outcome is None:  # pragma: no cover - a completed stream always carries one
@@ -1669,15 +2037,18 @@ class PlatformTaskDispatcher:
                 )
                 last_delivery = {"content": evaluated["content"], "acceptance": evaluated["acceptance"]}
                 if evaluated.get("status") == "succeeded" or continuation_policy is None:
+                    evaluated = await self._attach_slice_budget(evaluated, slice_ledger, child_call_budget)
                     return evaluated
                 # A rejected answer at the last turn has no correction budget.
                 # Preserve its delivery and verdict without consuming a trigger.
                 if outcome.turns >= limits.max_turns:
+                    evaluated = await self._attach_slice_budget(evaluated, slice_ledger, child_call_budget)
                     return evaluated
                 if limits.deadline:
                     deadline = datetime.fromisoformat(limits.deadline)
                     if datetime.now(UTC) >= (deadline if deadline.tzinfo else deadline.replace(tzinfo=UTC)):
-                        return evaluated
+                        evaluated = await self._attach_slice_budget(evaluated, slice_ledger, child_call_budget)
+                    return evaluated
                 # Bounded continuation: only an acceptance record whose
                 # checks are ALL verifiable with at least one explicit
                 # failure may consume a persisted trigger. Unverified
@@ -1693,6 +2064,7 @@ class PlatformTaskDispatcher:
                     live_revision=live_revision,
                 )
                 if advanced is None:
+                    evaluated = await self._attach_slice_budget(evaluated, slice_ledger, child_call_budget)
                     return evaluated
                 if advanced == "cancelled":
                     # The task moved off RUNNING while the trigger was being
@@ -2026,6 +2398,21 @@ class PlatformTaskDispatcher:
         if context.workflow_plan is not None:
             await self._wake_finished_child(db, task_ref, context, wait, token)
 
+    @staticmethod
+    async def _attach_slice_budget(outcome: dict[str, Any], slice_ledger: Any, allocated: int) -> dict[str, Any]:
+        """Persist the call slice's consumption on the delivery facts.
+
+        ``used`` counts reservations the ledger still holds as consumed —
+        actual settlements shrink it back, unknown outcomes never do. The
+        verified callback carries these facts to the parent's durable
+        accumulation; an absent slice records nothing.
+        """
+
+        if slice_ledger is None or allocated <= 0:
+            return outcome
+        remaining = await slice_ledger.remaining()
+        return {**outcome, "budget": {"allocated": allocated, "used": allocated - int(remaining)}}
+
     def _readonly_confirmation(self, run_ref: BackendRef) -> Any:
         """The host's readonly confirmation: the action's durable ledger intent.
 
@@ -2127,6 +2514,86 @@ class PlatformTaskDispatcher:
             },
         )
         logger.info("task %s parked in waiting_input (timer wait anchored)", task_ref.id)
+
+    async def _park_agent_child(
+        self,
+        db: AsyncSession,
+        task_ref: BackendRef,
+        wait: AgentChildWaitSignalError,
+        context: _DispatchContext,
+        *,
+        run_ref: BackendRef,
+        expected_revision: int,
+        lease: Any,
+    ) -> None:
+        """Persist the durable Agent child wait: state + single-use token.
+
+        The contract binds the accepting action's execution id, the
+        submitted child task, the frozen target facts and the declared
+        output schema (re-read from the task's own declaration — the model
+        can never widen it). The wait's deadline is the parent's own task
+        deadline; the reconciler converges expiry and child dispatch checks
+        it again before beginning model work.
+        """
+
+        contract = wait.contract_ref
+        record = await asyncio.to_thread(self._store.get_task_state, task_ref)
+        if record is None or record.lifecycle_state is not TaskLifecycleState.RUNNING:
+            return  # cancelled or otherwise moved while the execution ran
+        target = (context.controller_agent_children or {}).get("targets", {}).get(contract["alias"]) or {}
+        expires_at = None
+        if context.controller_deadline:
+            deadline = datetime.fromisoformat(context.controller_deadline)
+            expires_at = (deadline if deadline.tzinfo else deadline.replace(tzinfo=UTC)).isoformat()
+        token = uuid.uuid4().hex
+        await asyncio.to_thread(
+            self._store.apply_task_state,
+            task_ref,
+            TaskLifecycleState.WAITING_INPUT,
+            expected_revision=expected_revision,
+            **({"event_run_ref": run_ref} if hasattr(self._store, "engine") else {}),
+            **({"lease": lease} if lease is not None else {}),
+            extra_update={
+                "wait": {
+                    "wake_kind": "agent_child",
+                    "contract_ref": {
+                        **contract,
+                        "output_schema": target.get("output_schema"),
+                    },
+                    "wait_token": token,
+                    "wait_expires_at": expires_at,
+                    "consumed": False,
+                },
+                # The accepted-call count persists so a wake's fresh
+                # dispatch continues the declared bound, not a fresh one.
+                "agent_child_calls": int((record.extra or {}).get("agent_child_calls") or 0) + 1,
+                "agent_child_calls_by_alias": {
+                    **((record.extra or {}).get("agent_child_calls_by_alias") or {}),
+                    contract["alias"]: int(
+                        ((record.extra or {}).get("agent_child_calls_by_alias") or {}).get(contract["alias"], 0)
+                    )
+                    + 1,
+                },
+            },
+        )
+        logger.info("task %s parked in waiting_input (agent child %s)", task_ref.id, contract.get("alias"))
+        # A fast child can finish before this park commits; recheck so the
+        # child's skipped early callback is not lost to the poll cycle.
+        child_raw = contract.get("child_task_ref") or {}
+        child_ref = BackendRef(RefKind.TASK, str(child_raw.get("issuer_domain")), str(child_raw.get("id")))
+        child_state = await asyncio.to_thread(self._store.get_task_state, child_ref)
+        if child_state is not None and child_state.lifecycle_state.value in _RUN_PROJECTION_TERMINAL:
+            try:
+                await self._task_control(db).submit_agent_child_callback(
+                    workspace_id=context.workspace_id,
+                    task_id=uuid.UUID(task_ref.id),
+                    command_id=f"agent-child-callback-{contract.get('call_id')}-{token}",
+                    wait_token=token,
+                    child_task_id=uuid.UUID(str(child_raw.get("id"))),
+                    declared_state=child_state.lifecycle_state.value,
+                )
+            except Exception:  # noqa: BLE001 — the reconciler re-issues from durable facts
+                logger.warning("task %s fast agent child callback failed", task_ref.id, exc_info=True)
 
     async def _park_approval(
         self,
@@ -2357,3 +2824,7 @@ class PlatformTaskDispatcher:
             # step6e: the child's terminal fact is committed — auto-callback
             # the waiting parent through the verified path.
             await self._issue_child_callback(db, context, outcome)
+        elif context.agent_child_parent is not None:
+            # The Agent child's terminal fact is committed — auto-callback
+            # the waiting parent through the verified agent-child path.
+            await self._issue_agent_child_callback(db, context, outcome)

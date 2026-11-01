@@ -154,9 +154,9 @@ def _merge_resolutions(
 
 # Host wait envelopes: structured tool-to-host control facts that must
 # survive the JSON round trip used by durable ledger backfill. The input
-# request and the versioned timer declaration are the same protocol
-# family; everything else stays opaque text.
-_HOST_WAIT_ENVELOPE_STATUSES = ("input_required", "timer_wait_required")
+# request, the versioned timer declaration and the agent child acceptance
+# are the same protocol family; everything else stays opaque text.
+_HOST_WAIT_ENVELOPE_STATUSES = ("input_required", "timer_wait_required", "agent_child_accepted")
 
 
 def _input_request_value(result: Any) -> Any:
