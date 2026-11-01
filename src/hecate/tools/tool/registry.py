@@ -60,12 +60,19 @@ class ToolRegistry:
         self._cache = cache
         self._rest_executor = rest_executor
         self._workspace_id = workspace_id
-        self._builtin_names: set[str] = set(BUILTIN_TOOL_DEFINITIONS.keys())
+        self._builtin_names: set[str] = set(BUILTIN_TOOL_DEFINITIONS.keys()) | set(
+            getattr(builtin_executor, "host_tool_names", ())
+        )
 
     async def describe(self, name: str) -> dict[str, Any]:
         """Resolve trusted tool metadata and schemas in this registry's scope."""
         if name in self._builtin_names:
-            return {"name": name, "source": "builtin", **BUILTIN_TOOL_DEFINITIONS[name]}
+            if name in BUILTIN_TOOL_DEFINITIONS:
+                return {"name": name, "source": "builtin", **BUILTIN_TOOL_DEFINITIONS[name]}
+            host_definition = getattr(self._builtin, "host_tool_definition", None)
+            definition = host_definition(name) if callable(host_definition) else None
+            if definition is not None:
+                return {"name": name, "source": "builtin", **definition}
         query = select(ToolModel).where(ToolModel.name == name, ~ToolModel.deleted)
         if self._workspace_id is not None:
             query = query.where(ToolModel.workspace_id == self._workspace_id)

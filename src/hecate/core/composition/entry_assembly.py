@@ -166,6 +166,7 @@ def build_tool_registry(
     explicit_skill_names: list[str] | None = None,
     strict_pins: bool = False,
     skill_loader: Any | None = None,
+    host_tools: dict[str, Any] | None = None,
 ) -> Any:
     """Construct a ToolRegistry wired to builtin + DB tools using app settings.
 
@@ -177,6 +178,9 @@ def build_tool_registry(
         strict_pins: When set, a pinned skill whose snapshot or live row can
             no longer be resolved raises instead of falling back to live
             content (durable executions must not silently change surface).
+        host_tools: Optional host-provided tools for this one execution
+            (name → object with ``definition`` and ``async execute``), e.g.
+            the controller's durable ``delegate_agent``.
 
     Returns:
         A configured ToolRegistry.
@@ -217,5 +221,6 @@ def build_tool_registry(
             strict_pins=strict_pins,
         ),
         memory_backend=memory_backend,
+        host_tools=host_tools,
     )
     return ToolRegistry(db=db, builtin_executor=builtin_executor, workspace_id=workspace_id)

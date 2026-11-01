@@ -270,6 +270,7 @@ class TaskControlService:
         idempotency_key: str | None = None,
         wait: bool = False,
         stream: bool = False,
+        _verified_agent_child: bool = False,
     ) -> SubmitResult:
         """Idempotently submit one task; the durable worker dispatches it."""
         if not goal or not goal.strip():
@@ -307,6 +308,14 @@ class TaskControlService:
                         for method in ("get_run_action", "action_receipt_time", "wait_now")
                     ):
                         raise ValueError("controller.timer_wait requires the platform SQL action ledger")
+                from hecate.execution.agent_child import agent_child_policy
+
+                agent_children = agent_child_policy(options.get("agent_children"))
+                if agent_children is not None:
+                    if input.get("workflow") is not None or input.get("workflow_parent") is not None:
+                        raise ValueError("controller.agent_children is unsupported for Workflow tasks")
+                    if not hasattr(self._store, "engine"):
+                        raise ValueError("controller.agent_children requires the platform SQL action ledger")
                 continuation_policy = ControllerContinuationPolicy.from_declaration(options.get("continuation"))
                 if continuation_policy is not None and not isinstance(input.get("acceptance"), dict):
                     raise ValueError("controller.continuation requires a declared acceptance block")
@@ -326,10 +335,37 @@ class TaskControlService:
                 raise TaskControlValidationError(str(exc)) from exc
         elif isinstance(input.get("controller"), dict) and "timer_wait" in input["controller"]:
             raise TaskControlValidationError("controller.timer_wait requires controller_loop")
+        elif isinstance(input.get("controller"), dict) and "agent_children" in input["controller"]:
+            raise TaskControlValidationError("controller.agent_children requires controller_loop")
         elif isinstance(input.get("controller"), dict) and "skill_catalog" in input["controller"]:
             raise TaskControlValidationError("controller.skill_catalog requires controller_loop")
         elif input.get("harness") is not None:
             raise TaskControlValidationError("input.harness requires controller_loop")
+        if input.get("agent_child_parent") is not None:
+            if not _verified_agent_child:
+                raise TaskControlValidationError("agent_child_parent is reserved for the host delegation tool")
+            # A persisted Agent child call: one level deep, plain chat
+            # execution, never a workflow parent or a delegator itself.
+            from hecate.execution.agent_child import agent_child_stamp
+
+            try:
+                if agent_child_stamp(input["agent_child_parent"]) is None:
+                    raise ValueError("agent_child_parent stamp is incomplete")
+            except ValueError as exc:
+                raise TaskControlValidationError(str(exc)) from exc
+            conflicts = sorted({"workflow", "workflow_parent", "workflow_step"}.intersection(input))
+            if conflicts:
+                raise TaskControlValidationError(
+                    f"agent_child_parent conflicts with reserved fields: {', '.join(conflicts)}"
+                )
+            if input.get("controller_loop") is not True:
+                # Host-built children always run the durable controller
+                # chain (recovery, effects-not-repeated, cooperative
+                # cancel); nothing else may impersonate a child.
+                raise TaskControlValidationError("agent_child_parent requires the controller chain")
+            controller_block = input.get("controller")
+            if isinstance(controller_block, dict) and "agent_children" in controller_block:
+                raise TaskControlValidationError("agent children cannot declare their own agent children")
         agent = await self._db.get(AgentModel, agent_id)
         if agent is None or agent.deleted or agent.workspace_id != workspace_id:
             raise TaskControlNotFoundError(f"agent {agent_id} not found in workspace")
@@ -338,6 +374,41 @@ class TaskControlService:
             raise TaskControlValidationError(f"agent {agent_id} has no default deployment")
         if deployment.backend_type != "builtin" or deployment.access_mode != "in_process":
             raise TaskControlValidationError("task-control dispatch currently supports builtin/in_process deployments")
+        if input.get("agent_child_parent") is not None:
+            from hecate.models.agent_version import AgentVersionModel
+
+            child_principal = await self._db.scalar(
+                select(AgentPrincipalModel.id).where(
+                    AgentPrincipalModel.agent_id == agent_id,
+                    AgentPrincipalModel.workspace_id == workspace_id,
+                    AgentPrincipalModel.deleted.is_(False),
+                )
+            )
+            if child_principal is None:
+                raise TaskControlValidationError("agent child target requires an active agent principal")
+            version = await self._db.get(AgentVersionModel, deployment.agent_version_id)
+            if version is None or version.deleted:
+                raise TaskControlValidationError("agent child target version does not resolve")
+            config = version.config_snapshot or {}
+            if any(
+                config.get(key)
+                for key in (
+                    "knowledge_base_ids",
+                    "knowledge_bases",
+                    "skills",
+                    "skill_ids",
+                    "skill_discovery_enabled",
+                    "memory",
+                    "memory_policy",
+                )
+            ):
+                # Tool delegation runs under the verified parent ∧ target
+                # rule intersection; knowledge, skill and memory surfaces
+                # have no expressable intersection yet and stay refused.
+                raise TaskControlValidationError(
+                    "agent child knowledge/skill/memory delegation is unsupported until their "
+                    "authorization intersection is enforced"
+                )
 
         digest = canonical_request_digest({"goal": goal, "agent_id": str(agent_id), "input": input, "stream": stream})
         minted_task, minted_run, engine_session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -373,6 +444,10 @@ class TaskControlService:
             "workflow": input.get("workflow"),
             "workflow_parent": input.get("workflow_parent"),
             "workflow_step": input.get("workflow_step"),
+            # Persistent Agent child call: the child carries its parent's
+            # stamp (task ref, call identity, frozen target narrowing) the
+            # same durable way workflow children carry theirs.
+            "agent_child_parent": input.get("agent_child_parent"),
             # step5e: durable approval wait opt-in — the dispatch assembly
             # parks on a policy-required approval instead of asking inline.
             "approval_wait": input.get("approval_wait") is True,
@@ -608,6 +683,29 @@ class TaskControlService:
         wait = (record.extra or {}).get("wait") if record else None
         if wait:
             detail["wait"] = wait
+        task_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
+        if isinstance(task_input.get("agent_child_parent"), dict):
+            # The child side: the durable delegation stamp it was accepted
+            # under — read-only identity facts, never a command surface.
+            detail["agent_child_parent"] = {
+                "alias": task_input["agent_child_parent"].get("alias"),
+                "call_id": task_input["agent_child_parent"].get("call_id"),
+                "parent_task_ref": task_input["agent_child_parent"].get("task_ref"),
+            }
+        if record is not None and (record.extra or {}).get("agent_child_calls") is not None:
+            # The parent side: the accepted-call count and, when a wait is
+            # bound, its live consumption facts (the child's own state is
+            # readable through the child task's detail).
+            summary: dict[str, Any] = {"accepted_calls": record.extra["agent_child_calls"]}
+            if isinstance(wait, dict) and wait.get("wake_kind") == "agent_child":
+                contract = wait.get("contract_ref") or {}
+                summary["pending"] = {
+                    "alias": contract.get("alias"),
+                    "call_id": contract.get("call_id"),
+                    "child_task_ref": contract.get("child_task_ref"),
+                    "consumed": wait.get("consumed"),
+                }
+            detail["agent_children"] = summary
         continuation = (record.extra or {}).get("continuation") if record else None
         if isinstance(continuation, dict) and isinstance(continuation.get("attempts"), list):
             # Minimal read-only continuation summary: trigger reason,
@@ -934,14 +1032,17 @@ class TaskControlService:
         expires_at: str | None = None,
         detail_ns: dict[str, Any] | None = None,
         _verified_workflow_callback: bool = False,
+        _verified_agent_child_callback: bool = False,
     ) -> CommandIssueResult:
         """Record a command and act on what the platform can enforce."""
         if payload_schema_ref == TASK_USER_INPUT_SCHEMA_REF and (
             kind is not ControlCommandKind.PROVIDE_INPUT or not isinstance(payload, dict)
         ):
             raise TaskControlValidationError("task-user-input requires provide_input with a JSON object payload")
-        if (detail_ns or {}).get("callback_digest") and not _verified_workflow_callback:
-            raise TaskControlValidationError("callback metadata is reserved for verified workflow callbacks")
+        if (detail_ns or {}).get("callback_digest") and not (
+            _verified_workflow_callback or _verified_agent_child_callback
+        ):
+            raise TaskControlValidationError("callback metadata is reserved for verified child callbacks")
         if expires_at is not None:
             try:
                 datetime.fromisoformat(expires_at)
@@ -1029,6 +1130,7 @@ class TaskControlService:
                 expected_state=TaskLifecycleState.WAITING_INPUT,
                 payload=payload or {},
                 verified_workflow_callback=_verified_workflow_callback,
+                verified_agent_child_callback=_verified_agent_child_callback,
             )
         elif kind is ControlCommandKind.RESUME:
             detail = await self._wake_waiting(
@@ -1200,6 +1302,195 @@ class TaskControlService:
             # end: issue_command records under it and replays the receipt.
         )
 
+    async def submit_agent_child_callback(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        task_id: uuid.UUID,
+        command_id: str,
+        wait_token: str,
+        child_task_id: uuid.UUID,
+        declared_state: str,
+        issuer: str = "agent-child-callback",
+    ) -> CommandIssueResult:
+        """Verify a real Agent child's terminal facts, then wake the parent.
+
+        The platform trusts only its own records: the parent's wait must be
+        an unconsumed ``agent_child`` wait whose contract names this child
+        and the accepting call identity, the child's persisted parent stamp
+        must agree, and the child must be terminal in this workspace with
+        committed result facts. The child's committed outcome — content,
+        acceptance record and unknown-until-reported usage — becomes the
+        wake payload's ``agent_child_result``; the parent's controller
+        consumes it as a durable ``agent_child_result`` revision, never a
+        human ``provide_input`` revision. Any mismatch rejects the command
+        without consuming the token.
+        """
+
+        from hecate.execution.agent_child import (
+            AGENT_CHILD_RESULT_SCHEMA_REF,
+            agent_child_contract,
+            agent_child_stamp,
+            validate_child_delivery,
+            verify_child_call,
+        )
+
+        declared = declared_state.strip().lower()
+        if declared not in _TERMINAL_LIFECYCLE_STATES:
+            raise TaskControlValidationError(
+                "declared_state must be one of: " + ", ".join(sorted(_TERMINAL_LIFECYCLE_STATES))
+            )
+        task = await self._get_task(workspace_id, task_id)
+        t_ref = task_ref_of(task.id)
+        callback_digest = canonical_request_digest(
+            {
+                "task_ref": t_ref.to_dict(),
+                "workspace_id": str(workspace_id),
+                "issuer": issuer,
+                "child_task_id": str(child_task_id),
+                "declared_state": declared,
+                "wait_token": wait_token,
+            }
+        )
+        existing = await asyncio.to_thread(self._recorder.get, command_id)
+        if existing is not None:
+            if (
+                existing.task_ref != t_ref
+                or existing.issuer != issuer
+                or existing.extra.get("workspace_id") != str(workspace_id)
+                or existing.detail_ns.get("callback_digest") != callback_digest
+            ):
+                raise TaskControlValidationError("callback command ID is bound to a different request")
+            if existing.state in (CommandState.APPLIED, CommandState.REJECTED, CommandState.EXPIRED):
+                return CommandIssueResult(record=existing, detail="idempotent replay of a settled command")
+        current = await asyncio.to_thread(self._store.get_task_state, t_ref)
+        wait = (current.extra or {}).get("wait") if current else None
+        contract = (wait or {}).get("contract_ref") if isinstance(wait, dict) else None
+        if (
+            not isinstance(wait, dict)
+            or wait.get("wake_kind") != "agent_child"
+            or agent_child_contract(contract) is None
+        ):
+            return await self._reject_callback(
+                command_id,
+                task,
+                "task is not waiting on an agent child callback",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
+        if wait.get("consumed"):
+            return await self._reject_callback(
+                command_id,
+                task,
+                "the agent child wait is already consumed",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
+        if str((contract or {}).get("child_task_ref", {}).get("id") or "") != str(child_task_id):
+            return await self._reject_callback(
+                command_id,
+                task,
+                "callback child does not match the wait contract",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
+        try:
+            child = await self._get_task(workspace_id, child_task_id)
+        except TaskControlNotFoundError:
+            return await self._reject_callback(
+                command_id,
+                task,
+                "child task does not exist in this workspace",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
+        child_ref = task_ref_of(child.id)
+        try:
+            await verify_child_call(self._store, t_ref, contract, wait=wait)
+        except (KeyError, TypeError, ValueError) as exc:
+            return await self._reject_callback(
+                command_id, task, str(exc), issuer=issuer, callback_digest=callback_digest
+            )
+        child_record = await asyncio.to_thread(self._store.get_task_state, child_ref)
+        child_state = child_record.lifecycle_state.value if child_record else UNRECORDED_LIFECYCLE
+        if child_state not in _TERMINAL_LIFECYCLE_STATES:
+            return await self._reject_callback(
+                command_id,
+                task,
+                f"child task is {child_state}, not in a terminal state",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
+        if child_state != declared:
+            return await self._reject_callback(
+                command_id,
+                task,
+                f"declared state {declared!r} does not match child task state {child_state!r}",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
+        child_input = await asyncio.to_thread(self._store.get_task_input, child_ref) or {}
+        stamp = agent_child_stamp(child_input.get("agent_child_parent"))
+        if (
+            stamp is None
+            or stamp.get("task_ref") != t_ref.to_dict()
+            or stamp.get("call_id") != contract.get("call_id")
+            or stamp.get("alias") != contract.get("alias")
+        ):
+            return await self._reject_callback(
+                command_id,
+                task,
+                "child parent stamp does not match the accepted call",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
+        facts = (child_record.extra or {}).get("result") or {}
+        if not facts:
+            if child_state == "cancelled":
+                facts = {"status": "cancelled", "error_category": "cancelled"}
+            else:
+                return await self._reject_callback(
+                    command_id, task, "child result facts are missing", issuer=issuer, callback_digest=callback_digest
+                )
+        try:
+            validate_child_delivery(
+                facts,
+                child_state=child_state,
+                task_ref=child_ref,
+                run_ref=await asyncio.to_thread(self._store.run_for_task, child_ref),
+                schema=contract.get("output_schema"),
+                workspace_id=str(workspace_id),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return await self._reject_callback(
+                command_id, task, str(exc), issuer=issuer, callback_digest=callback_digest
+            )
+        child_summary = {
+            "child_task_id": str(child.id),
+            "child_state": child_state,
+            "alias": stamp.get("alias"),
+            "call_id": stamp.get("call_id"),
+            # The child's committed result facts; usage is unknown unless a
+            # future integration reports it — never fabricated as zero.
+            "content": facts.get("content") if child_state == "succeeded" else None,
+            "error": facts.get("error"),
+            "error_category": facts.get("error_category"),
+            "acceptance": facts.get("acceptance"),
+            "usage": None,
+            "budget": facts.get("budget"),
+        }
+        return await self.issue_command(
+            workspace_id=workspace_id,
+            task_id=task_id,
+            kind=ControlCommandKind.PROVIDE_INPUT,
+            issuer=issuer,
+            command_id=command_id,
+            payload={"agent_child_result": child_summary},
+            payload_schema_ref=AGENT_CHILD_RESULT_SCHEMA_REF,
+            detail_ns={"wait_token": wait_token, "callback_digest": callback_digest},
+            _verified_agent_child_callback=True,
+        )
+
     async def _reject_callback(
         self, command_id: str, task: Any, reason: str, *, issuer: str, callback_digest: str
     ) -> CommandIssueResult:
@@ -1229,6 +1520,7 @@ class TaskControlService:
         expected_state: TaskLifecycleState,
         payload: dict[str, Any],
         verified_workflow_callback: bool = False,
+        verified_agent_child_callback: bool = False,
     ) -> str:
         """Wake a durable wait with the single-use token (revision-CAS consumed)."""
 
@@ -1252,6 +1544,12 @@ class TaskControlService:
             # caller command may consume the token or shortcut the clock.
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "timer waits reject manual wake; expiry is the only wake"
+        if wait.get("wake_kind") == "agent_child" and not verified_agent_child_callback:
+            # An Agent child wait consumes only through the verified
+            # callback that checked the child's own terminal facts; a
+            # caller's provide_input can never fabricate a child result.
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return "agent child waits reject manual wake; use the verified callback"
         if _expired(wait.get("wait_expires_at")):
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "wake token expired; rejected"
@@ -1288,13 +1586,48 @@ class TaskControlService:
         base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
         controller_loop = base_input.get("controller_loop") is True
         input_revision: dict[str, Any] | None = None
+        budget_used_delta: int | None = None
         if controller_loop:
             # Controller input wakes record an immutable revision (never a
             # latest-snapshot overwrite); approval-resume wakes keep
             # ``provided`` as the pure control transport the approval
             # consumer reads, and it never reaches the model.
             merged_input = dict(base_input)
-            if expected_state is TaskLifecycleState.WAITING_INPUT:
+            if expected_state is TaskLifecycleState.WAITING_INPUT and wait.get("wake_kind") == "agent_child":
+                # A verified Agent child result becomes a durable revision
+                # under its own source — never a human provide_input
+                # revision, and never a latest-snapshot overwrite. The
+                # accepting action is acknowledged so the wake's replay
+                # does not re-park on its settled envelope.
+                from hecate.execution.agent_child import AGENT_CHILD_RESULT_SOURCE
+
+                result = wake_payload.get("agent_child_result")
+                if not isinstance(result, dict) or not result.get("call_id"):
+                    await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                    return "agent child result facts are missing from the verified callback"
+                run_for_task = getattr(self._store, "run_for_task", None)
+                linkage = await asyncio.to_thread(run_for_task, t_ref) if run_for_task else None
+                if linkage is None:
+                    await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                    return "controller task has no run linkage; child result revision rejected"
+                input_revision = {
+                    "source": AGENT_CHILD_RESULT_SOURCE,
+                    "source_ref": record.command_id,
+                    "content": result,
+                    "wait_token": token,
+                }
+                acknowledged = list(base_input.get("_input_wait_acknowledgements", []))
+                call_id = str(contract_ref.get("call_id") or "")
+                if call_id and call_id not in acknowledged:
+                    acknowledged.append(call_id)
+                merged_input["_input_wait_acknowledgements"] = acknowledged
+                budget = result.get("budget")
+                if isinstance(budget, dict) and isinstance(budget.get("used"), int):
+                    # The parent's durable, cumulative spend: a new child
+                    # task can never reset it — the counter lives here and
+                    # is folded into the wake's own CAS write below.
+                    budget_used_delta = int(budget["used"])
+            elif expected_state is TaskLifecycleState.WAITING_INPUT:
                 revision_content = {k: v for k, v in wake_payload.items() if k != "approval_ref"}
                 contract = human_input_contract(contract_ref.get("contract"))
                 fields = contract["fields"] if contract is not None else []
@@ -1326,6 +1659,10 @@ class TaskControlService:
         else:
             merged_input = {**base_input, "provided": wake_payload}
         extra_update = {"wait": {**wait, "consumed": True}}
+        if budget_used_delta is not None:
+            extra_update["agent_child_budget_used"] = (
+                int((current.extra or {}).get("agent_child_budget_used") or 0) + budget_used_delta
+            )
         if verified_workflow_callback and "step_index" in wake_payload:
             callbacks = dict((current.extra or {}).get("_workflow_callbacks") or {})
             index = str(wake_payload["step_index"])
@@ -1600,9 +1937,43 @@ class TaskControlService:
                 if hasattr(self._store, "engine")
                 else await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
             )
+            await self._cancel_pending_agent_child(t_ref, current, workspace_id)
             return f"cancel applied before dispatch (receipt {applied.state.value})"
         await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REQUESTED)
         return _CANCEL_RUNNING_NOTE
+
+    async def _cancel_pending_agent_child(self, t_ref: BackendRef, current: Any, workspace_id: uuid.UUID) -> None:
+        """Persist a cancel request for the child an unconsumed agent wait holds.
+
+        A cancel request is not a stop fact: the child converges through its
+        own dispatch rules, and an already-terminal child's cancel command
+        is rejected honestly. Failures are logged — the parent's committed
+        cancel never depends on the propagation.
+        """
+
+        wait = (current.extra or {}).get("wait") if current else None
+        from hecate.execution.agent_child import agent_child_contract, verify_child_call
+
+        contract = agent_child_contract((wait or {}).get("contract_ref")) if isinstance(wait, dict) else None
+        if (
+            contract is None
+            or wait.get("wake_kind") != "agent_child"
+            or wait.get("consumed")
+            or not contract.get("child_task_ref", {}).get("id")
+        ):
+            return
+        try:
+            await verify_child_call(self._store, t_ref, contract, wait=wait)
+            child_task_id = uuid.UUID(str(contract["child_task_ref"]["id"]))
+            await self.issue_command(
+                workspace_id=workspace_id,
+                task_id=child_task_id,
+                kind=ControlCommandKind.CANCEL,
+                issuer="agent-child-cancel",
+                command_id=f"agent-child-cancel:{t_ref.id}:{contract['call_id']}",
+            )
+        except Exception:  # noqa: BLE001 — propagation must not un-commit the cancel
+            logger.warning("task %s agent child cancel propagation failed", t_ref.id, exc_info=True)
 
     async def assert_command_visible(self, *, workspace_id: uuid.UUID, command_id: str) -> None:
         """Raise the read not-found error for a command outside this workspace.

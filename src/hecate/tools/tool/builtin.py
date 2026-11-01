@@ -598,6 +598,7 @@ class BuiltInToolExecutor:
         allowed_domains: list[str] | None = None,
         skill_loader: Any | None = None,
         memory_backend: Any | None = None,
+        host_tools: dict[str, Any] | None = None,
     ) -> None:
         self._search = search_provider
         self._workspace = Path(workspace_root).resolve()
@@ -612,12 +613,30 @@ class BuiltInToolExecutor:
         # (agent-memory-tools). None → memory tools fail closed with an
         # informative error instead of acting without a scope.
         self._memory_backend = memory_backend
+        # Host-provided tools for one execution (e.g. the controller's
+        # durable ``delegate_agent``): name → object exposing ``definition``
+        # and ``async execute(name, args, context)``. Routed before the
+        # static builtin handlers; an absent map means the names do not
+        # exist for the model at all.
+        self._host_tools = dict(host_tools or {})
+
+    @property
+    def host_tool_names(self) -> set[str]:
+        """Names of the trusted tools registered for this execution."""
+        return set(self._host_tools)
+
+    def host_tool_definition(self, name: str) -> dict[str, Any] | None:
+        """One host tool's trusted definition, or ``None`` when not a host tool."""
+
+        tool = self._host_tools.get(name)
+        return dict(tool.definition) if tool is not None else None
 
     async def execute(self, name: str, args: dict[str, Any], context: dict[str, Any] | None = None) -> Any:
         """Execute a built-in tool by name.
 
         Args:
-            name: Tool name (must be a key in BUILTIN_TOOL_DEFINITIONS).
+            name: Tool name (must be a key in BUILTIN_TOOL_DEFINITIONS or a
+                registered host tool).
             args: Tool arguments.
             context: Optional execution context. For execute_code, may
                 contain ``_sandbox_volumes`` (dict[str, str]) for environment
@@ -632,6 +651,9 @@ class BuiltInToolExecutor:
         Raises:
             ValueError: If the tool name is unknown.
         """
+        host_tool = self._host_tools.get(name)
+        if host_tool is not None:
+            return await host_tool.execute(name, args, context)
         if name in _BROWSER_TOOLS:
             return await self._dispatch_browser(name, args, context)
 

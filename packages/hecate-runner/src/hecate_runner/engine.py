@@ -921,6 +921,10 @@ class ExecutionEngine:
             raise ValueError("tool_arguments must be an object")
         if isinstance(run_input.get("controller"), dict) and "timer_wait" in run_input["controller"]:
             raise ValueError("controller.timer_wait is unsupported by Runner")
+        if isinstance(run_input.get("controller"), dict) and "agent_children" in run_input["controller"]:
+            raise ValueError("controller.agent_children is unsupported by Runner")
+        if "agent_child_parent" in run_input:
+            raise ValueError("agent_child_parent is reserved and unsupported by Runner")
         if self._controller_loop:
             from hecate_runtime.agent_controller import ControllerContinuationPolicy, ControllerLimits, NoProgressPolicy
             from hecate_runtime.delivery_acceptance import validate_acceptance_declaration
