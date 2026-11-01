@@ -94,6 +94,24 @@ host configuration. See
 [Sign runner artifacts](../../docs/how-to/sign-runner-artifacts.md) for the
 full workflow, rotation and revocation semantics.
 
+## Release-managed hosts: offline install, switching, rollback
+
+A host directory can also be release-managed: signed artifacts install into
+digest-addressed `releases/<manifest-sha256>/` directories, an atomic
+`active.json` records the selection, and `runner.json`, `identity.json`,
+secrets and evidence stay in the stable host root. `hecate-runner-release`
+provides `install`, `list`/`status`, `activate` and `rollback`; the real
+startup entry consumes the selection with `hecate-runner --host <dir>
+--artifact-trust <policy.json>`, re-verifying the committed release under
+the current policy and holding the host lock (shared with the management
+commands) for its whole lifetime — a serving host cannot be switched, and
+a host whose local SQLite ledger still carries non-terminal tasks refuses to
+switch. Version selection requires the generation read from status, and the
+recorded database binding cannot be removed or redirected during a switch.
+Cold start only: no hot upgrade, no live-run migration, no remote
+activation, and no shared-database multi-host switching. See
+[Install, switch and roll back runner releases](../../docs/how-to/install-runner-releases.md).
+
 ## Durable profile
 
 Add an explicit host-owned database and deployment/data domain:

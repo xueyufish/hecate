@@ -388,13 +388,19 @@ def verify_artifact_admission(
     raw_manifest: dict,
     profile_dir: Path,
     policy: ArtifactTrustPolicy,
+    *,
+    artifact_dir: Path | None = None,
 ) -> VerifiedArtifact:
     """Strict admission: verify publisher trust and signature over the manifest.
 
-    Raises :class:`ArtifactAdmissionError` on every refusal path; the caller
-    must treat any refusal as "do not start".
+    ``artifact_dir`` names where the artifact content lives (default: the
+    profile directory itself, the single-directory layout). The signature
+    reference resolves inside the artifact directory; host configuration is
+    not read here. Raises :class:`ArtifactAdmissionError` on every refusal
+    path; the caller must treat any refusal as "do not start".
     """
 
+    artifact_dir = (artifact_dir or profile_dir).resolve()
     try:
         manifest = validate_manifest_dict(raw_manifest)
     except ManifestError as exc:
@@ -403,7 +409,7 @@ def verify_artifact_admission(
         raise ArtifactAdmissionError("manifest declares no publisher_ref; strict admission requires a signed publisher")
     if not isinstance(manifest.signature_ref, str) or not manifest.signature_ref:
         raise ArtifactAdmissionError("manifest declares no signature_ref; strict admission requires a signature")
-    envelope_path = resolve_signature_path(profile_dir, manifest.signature_ref)
+    envelope_path = resolve_signature_path(artifact_dir, manifest.signature_ref)
     envelope_data = read_artifact_json(envelope_path, "signature envelope")
     envelope = parse_signature_envelope(envelope_data)
     if envelope.version != SIGNATURE_VERSION:
