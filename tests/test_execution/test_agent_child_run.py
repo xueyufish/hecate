@@ -26,10 +26,342 @@ import pytest
 
 from hecate.contracts.execution.durable import CommandState, ControlCommandKind, TaskLifecycleState
 from hecate.execution.agent_child import DELEGATE_AGENT_TOOL_NAME as DELEGATE_MARKER
-from hecate.execution.task_control import TaskControlService
+from hecate.execution.task_control import TaskControlService, task_ref_of
 from tests.test_execution.conftest import HARNESS_ORG as ORG
 from tests.test_execution.conftest import HARNESS_OWNER as OWNER
 from tests.test_execution.conftest import HARNESS_WS as WS
+
+
+async def _budget_child(harness, *, units=10000):
+    target_id = await _add_agent(harness, "budget-worker")
+    declaration = _declaration_of(harness, target_id)
+    declaration["budget_units"] = units * 2
+    declaration["targets"][0]["budget_units"] = units
+    parent = await _submit_parent(harness, declaration)
+    worker = _worker_of(harness)
+    await worker.dispatch_once(parent.task_ref)
+    child_ref, _ = _children_of(harness, parent.task_ref)[0]
+    return parent, child_ref, worker
+
+
+async def _child_holds(harness, parent):
+    from sqlalchemy import select
+
+    from hecate.models.quota import QuotaReservationModel
+
+    async with harness["session_factory"]() as db:
+        return list(
+            (
+                await db.scalars(
+                    select(QuotaReservationModel).where(
+                        QuotaReservationModel.invocation_key.like(f"agent-child:{parent.task_ref.id}:%")
+                    )
+                )
+            ).all()
+        )
+
+
+async def test_slice_concurrent_reservations_do_not_overwrite_each_other(harness, llm_stub, monkeypatch):
+    from hecate_governance.usage import ReservationStatus
+
+    from hecate.execution.agent_child import DurableSliceLedger
+
+    _, child, _ = await _budget_child(harness)
+    harness["store"].apply_task_state(child, TaskLifecycleState.RUNNING)
+    ledgers = [DurableSliceLedger(store=harness["store"], task_ref=child, allocation=10) for _ in range(2)]
+    gate = asyncio.Event()
+    loaded = 0
+
+    for ledger in ledgers:
+        original = ledger._load
+
+        async def simultaneous_load(original=original):
+            nonlocal loaded
+            state = await original()
+            loaded += 1
+            if loaded == 2:
+                gate.set()
+            await gate.wait()
+            return state
+
+        monkeypatch.setattr(ledger, "_load", simultaneous_load)
+    results = await asyncio.gather(*(ledger.reserve(f"attempt-{i}", 6) for i, ledger in enumerate(ledgers)))
+    assert [r.status for r in results].count(ReservationStatus.RESERVED) == 1
+    assert [r.status for r in results].count(ReservationStatus.INSUFFICIENT) == 1
+    assert await ledgers[0].remaining() == 4
+
+
+async def test_slice_allocation_mismatch_is_not_a_fresh_budget(harness, llm_stub):
+    from hecate.execution.agent_child import DurableSliceLedger
+
+    _, child, _ = await _budget_child(harness)
+    harness["store"].apply_task_state(
+        child,
+        TaskLifecycleState.RUNNING,
+        extra_update={
+            "budget_slice": {"allocated": 12, "entries": {"attempt": {"reserved": 8, "settled": 8, "status": "actual"}}}
+        },
+    )
+    ledger = DurableSliceLedger(store=harness["store"], task_ref=child, allocation=10)
+    with pytest.raises(ValueError, match="allocation"):
+        await ledger.remaining()
+
+
+def test_budget_total_cannot_leave_an_unmetered_target():
+    from hecate.execution.agent_child import agent_child_policy
+
+    declaration = json.loads(json.dumps(DECLARATION))
+    declaration["targets"][0]["agent_id"] = str(uuid.uuid4())
+    declaration["budget_units"] = 100
+    with pytest.raises(ValueError, match="every target"):
+        agent_child_policy(declaration)
+
+
+async def test_policy_refusal_does_not_leave_an_open_quota_hold(harness, monkeypatch):
+    from hecate.execution.agent_child import AgentChildDelegateTool, agent_child_policy
+
+    async def deny(*args, **kwargs):
+        return "tool denied by the parent"
+
+    monkeypatch.setattr("hecate.execution.agent_child.verify_delegable_tools", deny)
+    target_id = await _add_agent(harness, "budget-worker")
+    declaration = _declaration_of(harness, target_id)
+    declaration["budget_units"] = 100
+    declaration["targets"][0]["budget_units"] = 50
+    parent = await _submit_parent(harness, declaration)
+    tool = AgentChildDelegateTool(
+        policy=agent_child_policy(declaration),
+        parent_ref=parent.task_ref,
+        parent_goal="x",
+        initiator_user_id=str(OWNER),
+        parent_agent_id=harness["agent_id"],
+        workspace_id=str(WS),
+        session_factory=harness["session_factory"],
+        store=harness["store"],
+        engine_backed=True,
+    )
+    result = await tool.execute(
+        "delegate_agent", {"alias": "worker", "input": {"task": "x"}}, {"invocation_id": "deny"}
+    )
+    assert result["status"] == "agent_child_refused"
+    assert not [r for r in await _child_holds(harness, parent) if not r.released and not r.settled]
+
+
+async def test_failed_quota_settlement_does_not_consume_the_wait(harness, llm_stub, monkeypatch):
+    from hecate_governance.usage import SettleOutcome, SettleStatus
+
+    async def conflict(*args, **kwargs):
+        return SettleOutcome(SettleStatus.CONFLICT, None)
+
+    parent, child, worker = await _budget_child(harness)
+    monkeypatch.setattr("hecate.ops.budget_reservations.QuotaBudgetLedger.settle", conflict)
+    await worker.dispatch_once(child)
+    assert harness["store"].get_task_state(parent.task_ref).lifecycle_state is TaskLifecycleState.WAITING_INPUT
+    assert harness["store"].list_input_revisions(parent.task_ref) == []
+
+
+async def test_corrupt_slice_converges_to_reconciliation_without_refunding(harness, llm_stub, monkeypatch):
+    from hecate_durable.storage.models import TaskStateRow
+
+    from hecate.execution.agent_child_wake import AgentChildRunReconciler
+
+    async def no_callback(*args, **kwargs):
+        return None
+
+    parent, child, worker = await _budget_child(harness)
+    monkeypatch.setattr(
+        "hecate.execution.task_dispatcher.PlatformTaskDispatcher._issue_agent_child_callback", no_callback
+    )
+    await worker.dispatch_once(child)
+    with harness["store"].session_factory() as db:
+        row = db.get(TaskStateRow, (child.issuer_domain, child.id))
+        row.extra = {**row.extra, "budget_slice": {"allocated": 0, "entries": {}}}
+        db.commit()
+    await AgentChildRunReconciler(harness["store"], harness["session_factory"]).converge_once()
+    assert (
+        harness["store"].get_task_state(parent.task_ref).lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+    )
+    assert all(not row.released and not row.settled for row in await _child_holds(harness, parent))
+
+
+async def test_parent_cancel_still_closes_the_unexecuted_child_hold(harness, llm_stub):
+    from hecate.execution.agent_child_wake import AgentChildRunReconciler
+
+    parent, child, _ = await _budget_child(harness)
+    async with harness["session_factory"]() as db:
+        await _service_of(harness, db).issue_command(
+            workspace_id=WS, task_id=uuid.UUID(parent.task_ref.id), kind=ControlCommandKind.CANCEL, issuer="tester"
+        )
+    await AgentChildRunReconciler(harness["store"], harness["session_factory"]).converge_once()
+    assert harness["store"].get_task_state(child).lifecycle_state is TaskLifecycleState.CANCELLED
+    assert not [r for r in await _child_holds(harness, parent) if not r.released and not r.settled]
+
+
+async def test_unknown_slice_attempt_cannot_be_released(harness, llm_stub):
+    from hecate_governance.usage import ReleaseStatus, UsageRecord, UsageStatus
+
+    from hecate.execution.agent_child import DurableSliceLedger
+
+    _, child, _ = await _budget_child(harness)
+    harness["store"].apply_task_state(child, TaskLifecycleState.RUNNING)
+    ledger = DurableSliceLedger(store=harness["store"], task_ref=child, allocation=10)
+    await ledger.reserve("unknown", 6)
+    await ledger.settle(UsageRecord("unknown", 0, UsageStatus.UNKNOWN))
+    assert await ledger.release("unknown") is ReleaseStatus.HELD_FOR_RECONCILIATION
+    assert await ledger.remaining() == 4
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"allocated": 10, "entries": []},
+        {"allocated": 10, "entries": {"bad": {"reserved": -2, "settled": None}}},
+        {"allocated": 10, "entries": {"bad": {"reserved": 2, "settled": True}}},
+    ],
+)
+def test_malformed_budget_facts_cannot_become_zero_usage(block):
+    from hecate.execution.agent_child import derive_slice_usage
+
+    with pytest.raises(ValueError):
+        derive_slice_usage(block, allocated=10)
+    assert derive_slice_usage(None, allocated=10)["status"] == "unknown"
+    assert derive_slice_usage(None, allocated=10)["used"] == 10
+
+
+async def test_failed_release_keeps_the_delegation_retryable(harness, monkeypatch):
+    from hecate.execution.agent_child import AgentChildDelegateTool, agent_child_policy
+    from hecate.execution.task_control import TaskControlValidationError
+    from hecate.ops.budget_reservations import QuotaBudgetLedger
+
+    async def refuse(*args, **kwargs):
+        raise TaskControlValidationError("target refused")
+
+    target_id = await _add_agent(harness, "budget-worker")
+    declaration = _declaration_of(harness, target_id)
+    declaration["budget_units"] = 100
+    declaration["targets"][0]["budget_units"] = 50
+    parent = await _submit_parent(harness, declaration)
+    tool = AgentChildDelegateTool(
+        policy=agent_child_policy(declaration),
+        parent_ref=parent.task_ref,
+        parent_goal="x",
+        initiator_user_id=str(OWNER),
+        parent_agent_id=harness["agent_id"],
+        workspace_id=str(WS),
+        session_factory=harness["session_factory"],
+        store=harness["store"],
+        engine_backed=True,
+    )
+    real_release = QuotaBudgetLedger.release
+    failures = 0
+
+    async def flaky_release(self, key):
+        nonlocal failures
+        failures += 1
+        if failures == 1:
+            raise OSError("release storage unavailable")
+        return await real_release(self, key)
+
+    monkeypatch.setattr(TaskControlService, "submit", refuse)
+    monkeypatch.setattr(QuotaBudgetLedger, "release", flaky_release)
+    args = {"alias": "worker", "input": {"task": "x"}}
+    with pytest.raises(OSError, match="storage unavailable"):
+        await tool.execute("delegate_agent", args, {"invocation_id": "release-retry"})
+    result = await tool.execute("delegate_agent", args, {"invocation_id": "release-retry"})
+    assert result["status"] == "agent_child_refused"
+    assert all(row.released for row in await _child_holds(harness, parent))
+
+
+async def test_created_child_prevents_refunding_a_submission_error(harness, llm_stub):
+    from hecate.execution.agent_child import AgentChildDelegateTool, agent_child_policy
+
+    parent, child, _ = await _budget_child(harness)
+    payload = harness["store"].get_task_input(child)
+    declaration = harness["store"].get_task_input(parent.task_ref)["controller"]["agent_children"]
+    tool = AgentChildDelegateTool(
+        policy=agent_child_policy(declaration),
+        parent_ref=parent.task_ref,
+        parent_goal="x",
+        initiator_user_id=str(OWNER),
+        parent_agent_id=harness["agent_id"],
+        workspace_id=str(WS),
+        session_factory=harness["session_factory"],
+        store=harness["store"],
+        engine_backed=True,
+    )
+    with pytest.raises(ValueError, match="already exists"):
+        await tool._release_call_budget(call_id=payload["agent_child_parent"]["call_id"])
+    assert all(not row.released and not row.settled for row in await _child_holds(harness, parent))
+
+
+async def test_budget_reservations_survive_an_abrupt_process_exit(harness, llm_stub):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from hecate_governance.usage import ReservationStatus
+
+    from hecate.execution.agent_child import DurableSliceLedger
+
+    _, child, _ = await _budget_child(harness)
+    harness["store"].apply_task_state(child, TaskLifecycleState.RUNNING)
+    command = [
+        sys.executable,
+        "-m",
+        "tests.test_execution._agent_child_budget_process",
+        str(harness["store"].engine.url),
+        child.id,
+    ]
+    completed = await asyncio.to_thread(
+        subprocess.run,
+        command,
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert completed.returncode == 73, completed.stderr
+    ledger = DurableSliceLedger(store=harness["store"], task_ref=child, allocation=10)
+    summary = await ledger.snapshot()
+    assert summary["used"] == 8 and summary["unknown_count"] == 1
+    assert (await ledger.reserve("retry", 3)).status is ReservationStatus.INSUFFICIENT
+
+
+async def test_parent_deadline_still_closes_the_cancelled_child_hold(harness, llm_stub):
+    from hecate.execution.agent_child_wake import AgentChildRunReconciler
+
+    # Use the immutable deadline binding, not a rewritten wait contract.
+    deadline = datetime.now(UTC) + timedelta(seconds=30)
+    target = await _add_agent(harness, "deadline-budget-worker")
+    declaration = _declaration_of(harness, target)
+    declaration["budget_units"] = 20000
+    declaration["targets"][0]["budget_units"] = 10000
+    parent = await _submit_parent(harness, declaration, controller_extra={"deadline": deadline.isoformat()})
+    await _worker_of(harness).dispatch_once(parent.task_ref)
+    child, _ = _children_of(harness, parent.task_ref)[0]
+    reconciler = AgentChildRunReconciler(
+        harness["store"], harness["session_factory"], clock=lambda: deadline + timedelta(seconds=1)
+    )
+    await reconciler.converge_once()
+    assert harness["store"].get_task_state(parent.task_ref).lifecycle_state is TaskLifecycleState.FAILED
+    assert harness["store"].get_task_state(child).lifecycle_state is TaskLifecycleState.CANCELLED
+    assert all(row.settled or row.released for row in await _child_holds(harness, parent))
+
+
+@pytest.mark.parametrize("status", ["estimated", "unverified"])
+def test_budget_summary_preserves_uncertain_usage_quality(status):
+    from hecate.execution.agent_child import derive_slice_usage
+
+    block = {
+        "allocated": 10,
+        "entries": {
+            "known": {"reserved": 4, "settled": 2, "status": "actual"},
+            "uncertain": {"reserved": 4, "settled": 3, "status": status},
+        },
+    }
+    assert derive_slice_usage(block, allocated=10)["status"] == status
+
 
 DECLARATION = {
     "targets": [
@@ -1182,3 +1514,353 @@ async def test_running_child_stops_for_a_parent_cancel(harness, llm_stub, monkey
     assert llm_stub.child_asks == 1 and asks_after_release == 0
     assert tool_runs == 1
     assert harness["store"].get_task_state(parent.task_ref).lifecycle_state.value == "cancelled"
+
+
+async def test_slice_usage_persists_across_a_child_dispatch_crash(harness, llm_stub, monkeypatch) -> None:
+    """A crashed child dispatch re-seeds its slice from the durable block."""
+
+    from hecate_runtime.accepted_action_batch import AcceptedActionBatch
+
+    import hecate.core.composition.entry_assembly as entry_assembly
+
+    async def _load_tools(db, tool_names, *, workspace_id=None):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "search",
+                    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+                },
+            }
+        ]
+
+    monkeypatch.setattr(entry_assembly, "load_agent_tools", _load_tools)
+
+    real_batch_run = AcceptedActionBatch.run
+    crashed = 0
+    armed = False
+
+    async def crash_after_first_turn(self, **kwargs):
+        nonlocal crashed
+        result = await real_batch_run(self, **kwargs)
+        if armed and crashed == 0:
+            crashed += 1
+            raise OSError("injected child crash after the first turn")
+        return result
+
+    monkeypatch.setattr(AcceptedActionBatch, "run", crash_after_first_turn)
+
+    import hecate.core.composition.entry_assembly as entry_assembly
+    from hecate.tools.tool.builtin import BuiltInToolExecutor
+
+    async def _load_tools(db, tool_names, *, workspace_id=None):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "search",
+                    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+                },
+            }
+        ]
+
+    monkeypatch.setattr(entry_assembly, "load_agent_tools", _load_tools)
+    tool_runs = 0
+    real_execute = BuiltInToolExecutor.execute
+
+    async def counting_execute(self, name, args, context=None):
+        nonlocal tool_runs
+        if name != "web_search":
+            return await real_execute(self, name, args, context)
+        tool_runs += 1
+        return {"results": ["found"]}
+
+    monkeypatch.setattr(BuiltInToolExecutor, "execute", counting_execute)
+
+    original_stream = llm_stub.chat_stream
+
+    async def child_stream(*, messages, model=None, tools=None, **kwargs):
+        named = (
+            sorted({t["function"]["name"] for t in tools if isinstance(t, dict) and t.get("function", {}).get("name")})
+            if tools
+            else []
+        )
+        if "delegate_agent" in named:
+            async for chunk in original_stream(messages=messages, model=model, tools=tools, **kwargs):
+                yield chunk
+            return
+        tool_messages = [m for m in messages if isinstance(m, dict) and m.get("role") == "tool"]
+        llm_stub.child_asks += 1
+        if not tool_messages:
+            yield {
+                "content": "",
+                "tool_calls": [_Delta(0, "call-1", "web_search", json.dumps({"query": "stock"}))],
+            }
+            return
+        yield {"content": json.dumps({"answer": "child done"}), "tool_calls": None}
+
+    monkeypatch.setattr(llm_stub, "chat_stream", child_stream)
+
+    target_id = await _add_agent(harness, "worker-agent", tools=["web_search"])
+    declaration = _declaration_of(harness, target_id)
+    declaration["budget_units"] = 50000
+    declaration["targets"][0]["budget_units"] = 20000
+    parent = await _submit_parent(harness, declaration)
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    child_ref, _stamp = _children_of(harness, parent.task_ref)[0]
+
+    armed = True
+    await worker.dispatch_once(child_ref)  # dies after the first committed turn
+    armed = False
+    record = harness["store"].get_task_state(child_ref)
+    if record.lifecycle_state.value == "queued" and record.extra.get("next_dispatch_at"):
+        await asyncio.to_thread(
+            harness["store"].apply_task_state,
+            child_ref,
+            TaskLifecycleState.QUEUED,
+            extra_update={"next_dispatch_at": None},
+        )
+    assert await worker.dispatch_once(child_ref) is True
+    child_record = harness["store"].get_task_state(child_ref)
+    print("CHILD RESULT:", str((child_record.extra or {}).get("result"))[:300])
+    print("CHILD SLICE:", str((child_record.extra or {}).get("budget_slice"))[:300])
+    actions = harness["store"].list_run_actions(harness["store"].run_for_task(child_ref))
+    print(
+        "CHILD ACTIONS:",
+        [
+            (
+                a.get("intent", {}).get("action_name"),
+                a.get("state"),
+                str(a.get("last_outcome", {}).get("result_content"))[:100],
+                a.get("pending_reconciliation"),
+            )
+            for a in actions
+        ],
+    )
+    print("tool_runs:", tool_runs, "child_asks:", llm_stub.child_asks)
+    assert child_record.lifecycle_state.value == "succeeded", child_record.extra
+
+    # The durable slice block carries BOTH dispatches' model usage: the
+    # first attempt's settled turn and the recovery's turns. A fresh
+    # per-dispatch in-memory ledger would lose the first attempt.
+    from hecate.execution.agent_child import derive_slice_usage
+
+    block = (child_record.extra or {}).get("budget_slice")
+    assert block is not None, "the slice state must be durable on the child row"
+    assert block["allocated"] == 20000
+    assert len(block["entries"]) == 2, "both dispatches' model usage persists"
+    derived = derive_slice_usage(block, allocated=20000)
+    assert derived["unknown_count"] == 0
+    assert tool_runs == 1, "the settled effect never re-executes"
+    assert llm_stub.child_asks == 2, "the committed turn replays without a model call"
+    # first attempt's settled turn and the recovery's turns. A fresh
+    # per-dispatch in-memory ledger would lose the first attempt.
+    from hecate.execution.agent_child import derive_slice_usage
+
+    block = (child_record.extra or {}).get("budget_slice")
+    assert block is not None, "the slice state must be durable on the child row"
+    assert block["allocated"] == 20000
+    assert len(block["entries"]) == 2, "both dispatches' model usage persists"
+    derived = derive_slice_usage(block, allocated=20000)
+    assert derived["unknown_count"] == 0
+    assert tool_runs == 1, "the settled effect never re-executes"
+    assert llm_stub.child_asks == 2, "the committed turn replays without a model call"
+
+
+async def test_unknown_hold_survives_restart_and_refuses_before_the_next_model_request(
+    harness, llm_stub, monkeypatch
+) -> None:
+    """A model attempt that died mid-stream keeps its hold; the retry is refused."""
+
+    target_id = await _add_agent(harness, "worker-agent")
+    declaration = _declaration_of(harness, target_id)
+    declaration["budget_units"] = 20000
+    declaration["targets"][0]["budget_units"] = 5000  # one estimate fits, two do not
+    parent = await _submit_parent(harness, declaration)
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    child_ref, _stamp = _children_of(harness, parent.task_ref)[0]
+
+    original_stream = llm_stub.chat_stream
+
+    async def dying_child_stream(*, messages, model=None, tools=None, **kwargs):
+        named = (
+            sorted({t["function"]["name"] for t in tools if isinstance(t, dict) and t.get("function", {}).get("name")})
+            if tools
+            else []
+        )
+        if "delegate_agent" in named:
+            async for chunk in original_stream(messages=messages, model=model, tools=tools, **kwargs):
+                yield chunk
+            return
+        llm_stub.child_asks += 1
+        yield {"content": "partial"}
+        raise RuntimeError("process died mid-stream")
+
+    monkeypatch.setattr(llm_stub, "chat_stream", dying_child_stream)
+
+    await worker.dispatch_once(child_ref)  # the model attempt dies: unknown hold
+    record = harness["store"].get_task_state(child_ref)
+    child_state_before = record.lifecycle_state.value
+    if child_state_before == "queued" and record.extra.get("next_dispatch_at"):
+        await asyncio.to_thread(
+            harness["store"].apply_task_state,
+            child_ref,
+            TaskLifecycleState.QUEUED,
+            extra_update={"next_dispatch_at": None},
+        )
+
+    monkeypatch.setattr(llm_stub, "chat_stream", original_stream)
+    asks_before = llm_stub.child_asks
+    await worker.dispatch_once(child_ref)
+    record = harness["store"].get_task_state(child_ref)
+
+    # The retry's model request was refused BEFORE reaching the model: the
+    # unknown hold from the dead attempt is still charged, so the slice
+    # cannot fund a second full-call estimate.
+    assert llm_stub.child_asks == asks_before, "the retry must be refused before a new model request"
+    from hecate.execution.agent_child import derive_slice_usage
+
+    block = (record.extra or {}).get("budget_slice")
+    derived = derive_slice_usage(block, allocated=5000)
+    assert derived["unknown_count"] >= 1, derived
+    assert derived["used"] > 0
+    # Every retry is refused before the model again; the worker's bounded
+    # budget parks the child for reconciliation.
+    for _ in range(6):
+        record = harness["store"].get_task_state(child_ref)
+        if record.lifecycle_state.value in ("failed", "reconciliation_required"):
+            break
+        if record.extra.get("next_dispatch_at"):
+            await asyncio.to_thread(
+                harness["store"].apply_task_state,
+                child_ref,
+                TaskLifecycleState.QUEUED,
+                extra_update={"next_dispatch_at": None},
+            )
+        await worker.dispatch_once(child_ref)
+    record = harness["store"].get_task_state(child_ref)
+    assert record.lifecycle_state.value == "reconciliation_required", record.extra
+    assert llm_stub.child_asks == asks_before, "no retry ever reached the model"
+
+
+async def test_reservation_released_when_the_child_submission_is_refused(harness) -> None:
+    """A validation refusal after the reservation releases the unexecuted hold."""
+
+    from hecate.execution.agent_child import AgentChildDelegateTool, agent_child_policy
+    from hecate.models.organization import OrganizationModel
+    from hecate.models.workspace import WorkspaceModel
+
+    other_ws = uuid.UUID("00000000-0000-0000-0000-0000000000e1")
+    other_org = uuid.UUID("00000000-0000-0000-0000-0000000000e2")
+    async with harness["session_factory"]() as db:
+        db.add(OrganizationModel(id=other_org, name="other-rel", slug=f"org-rel-{other_org.hex[:8]}", owner_id=OWNER))
+        db.add(WorkspaceModel(id=other_ws, org_id=other_org, name="other-ws", slug=f"ws-{other_ws.hex}"))
+        await db.commit()
+    foreign_target = await _add_agent(harness, "foreign-worker")
+    async with harness["session_factory"]() as db:
+        from hecate.models.agent import AgentModel
+
+        agent = await db.get(AgentModel, foreign_target)
+        agent.workspace_id = other_ws
+        await db.commit()
+
+    declaration = _declaration_of(harness, foreign_target)
+    declaration["budget_units"] = 10000
+    declaration["targets"][0]["budget_units"] = 5000
+    policy = agent_child_policy(json.loads(json.dumps(declaration)))
+    tool = AgentChildDelegateTool(
+        policy=policy,
+        parent_ref=task_ref_of(uuid.uuid4()),
+        parent_goal="x",
+        initiator_user_id=str(OWNER),
+        parent_agent_id=harness["agent_id"],
+        workspace_id=str(WS),
+        session_factory=harness["session_factory"],
+        store=harness["store"],
+        engine_backed=True,
+    )
+    result = await tool.execute(
+        "delegate_agent", {"alias": "worker", "input": {"task": "x"}}, {"invocation_id": "call-rel-1"}
+    )
+    assert result["status"] == "agent_child_refused"
+    from hecate.models.quota import QuotaReservationModel
+
+    async with harness["session_factory"]() as db:
+        from sqlalchemy import select
+
+        rows = (
+            (
+                await db.execute(
+                    select(QuotaReservationModel).where(QuotaReservationModel.invocation_key.like("%call-rel-1"))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    released = [row for row in rows if row.released]
+    assert rows, "the reservation fact must exist"
+    assert released and all(row.released for row in rows), "the unexecuted hold must be released"
+
+
+async def test_callback_settlement_is_idempotent_under_redelivery(harness, llm_stub, monkeypatch) -> None:
+    """A crash between the budget settlement and the wake converges without double charge."""
+
+    from hecate.models.quota import QuotaReservationModel
+
+    target_id = await _add_agent(harness, "worker-agent")
+    declaration = _declaration_of(harness, target_id)
+    declaration["budget_units"] = 50000
+    declaration["targets"][0]["budget_units"] = 20000
+    parent = await _submit_parent(harness, declaration)
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    child_ref, _stamp = _children_of(harness, parent.task_ref)[0]
+
+    real_apply = harness["store"].apply_task_state
+    wake_failures = 0
+
+    def flaky_wake(task_ref, target, **kwargs):
+        nonlocal wake_failures
+        if (
+            target is TaskLifecycleState.QUEUED
+            and (kwargs.get("extra_update") or {}).get("wait", {}).get("wake_kind") == "agent_child"
+        ):
+            wake_failures += 1
+            if wake_failures == 1:
+                raise OSError("injected crash between settlement and wake")
+        return real_apply(task_ref, target, **kwargs)
+
+    monkeypatch.setattr(harness["store"], "apply_task_state", flaky_wake)
+
+    assert await worker.dispatch_once(child_ref) is True  # settles, then the wake crashes
+    assert wake_failures >= 1
+
+    # The child's terminal callback retries through the named reconciler
+    # (the same deterministic callback): the settlement is idempotent and
+    # the wake converges exactly once.
+    from hecate.execution.agent_child_wake import AgentChildRunReconciler
+
+    reconciler = AgentChildRunReconciler(harness["store"], harness["session_factory"])
+    assert await reconciler.converge_once() == 1
+    record = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    assert record.lifecycle_state.value == "queued", record.extra
+
+    async with harness["session_factory"]() as db:
+        from sqlalchemy import select
+
+        rows = (await db.execute(select(QuotaReservationModel))).scalars().all()
+    child_reservations = [row for row in rows if row.invocation_key.startswith("agent-child:")]
+    assert child_reservations, "the call reservation must be settled from the durable slice"
+    assert all(row.settled for row in child_reservations), "the hold settled exactly once, from the trusted slice"
+    assert all(row.settled_units == child_reservations[0].settled_units for row in child_reservations), (
+        "no double charge across redeliveries"
+    )
+
+    assert await worker.dispatch_once(parent.task_ref) is True
+    final = harness["store"].get_task_state(parent.task_ref)
+    assert final.lifecycle_state.value == "succeeded", final.extra
+    assert final.extra["agent_child_budget_used"] == round(child_reservations[0].settled_units / 0.00001)

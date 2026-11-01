@@ -349,16 +349,23 @@ of the task's own deadline.
 
 ## Platform controller Agent child calls
 
-- **The implementation is a partial execution slice** — it currently admits
-  text-only children. Parent/target/resource permission intersection, aggregate
-  model-budget reservations, live cancellation and child-side crash recovery
-  are not established by this slice. Do not treat the parent callback recovery
-  test as certification of the full Agent-to-Agent execution contract.
+- **Execution scope** — the slice admits children whose targets carry
+  effective tools: the delegation grant is the parent ∧ target rule
+  intersection (deny-wins engine; the acceptance pre-check refuses tools
+  either side denies or gates behind approval). Knowledge, skill and
+  memory surfaces have no expressable intersection and stay refused.
+  Delegated token-budget reservations are persisted (see the budget
+  bullet); enterprise Team and cross-workspace targets are not. Do not
+  treat the callback recovery tests as certification of the full
+  Agent-to-Agent execution contract.
 - **Delegation is a declared, host-owned tool** — a controller task opts in
   via `controller.agent_children` (aliases bound to same-workspace agents,
-  optional `input_schema`/`output_schema` and per-target `max_calls`).
-  `budget_units` is rejected until real parent reservations exist; call
-  counts are not a resource budget. The model sees `delegate_agent` with
+  optional `input_schema`/`output_schema` and per-target `max_calls`)
+  plus a durable budget: `controller.agent_children.budget_units` (total,
+  required with any per-target slice) and every target's `budget_units` are model-metered
+  TOKENS, reserved against the workspace cost quota through the shared
+  `MODEL_TOKEN_UNIT_SCALE`. Call counts are not a resource budget. The
+  model sees `delegate_agent` with
   a declared alias enum. Child submission freezes its target execution
   snapshot; the callback verifies the settled call receipt, child input
   digest, deployment, ownership and declared acceptance standard.
@@ -369,6 +376,24 @@ of the task's own deadline.
   current target before idempotent replay, so deployment changes in that
   window require further recovery work. `SubmitResult.task_ref` is a
   BackendRef — do not re-wrap it.
+- **The budget loop is durable and non-resettable** — the child's slice
+  ledger persists on the child's row (`budget_slice`, revision-CAS +
+  dispatch lease): restarts, retries and fresh dispatches re-seed spent
+  and unknown budget, and a retry's model attempt is refused BEFORE the
+  model when the remaining slice cannot fund it (unknown attempts keep
+  holding their full estimate — never charged as zero). The verified
+  callback settles the workspace hold from that trusted record
+  (idempotent per call identity; unknown holds stay held, proven-zero
+  releases) and the wake accumulates the settled spend into the parent's
+  cumulative `agent_child_budget_used`. Budget exhaustion refuses as
+  model-visible data; a refused submission releases its proven-unexecuted
+  hold. Release failures keep the action retryable. The reconciler also
+  processes open delegation reservations after parent cancellation or
+  expiry; cost settlement does not depend on waking that parent. Missing
+  legacy metering retains an unknown allocation instead of declaring zero
+  usage. Corrupt allocations or entries fail closed. Child budgets cover
+  delegated model calls; parent model usage retains the normal workspace
+  quota gate.
 - **Responsibility chain** — the child keeps the parent's real initiator
   (`user_id` flows through); workflow children's `user_id=None` system
   identity was deliberately NOT copied. The child is one level deep: it

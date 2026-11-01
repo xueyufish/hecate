@@ -3,8 +3,9 @@
 A controller task may explicitly declare callable sibling agents
 (``controller.agent_children``): named targets bound to concrete agents in
 the same workspace, each with an optional input schema and call limit.
-Resource-bearing targets and budget allocation remain unsupported. The
-parent model then delegates through the host-provided
+Tool targets use the parent's and target's rule intersection; knowledge,
+skills and memory remain unsupported. Declared token budgets persist
+through recovery. The parent model delegates through the host-provided
 ``delegate_agent`` tool — it chooses ONLY a declared alias and authors the
 input object; it can never pick the subject, workspace, deployment,
 version or relax the declared acceptance.
@@ -27,9 +28,8 @@ chain is never ``user_id=None`` system-scoped like workflow children);
 its authorization is the target's own frozen policy narrowed by the
 declared exact tool list — combinations that would need resource-level
 intersection the platform cannot express are refused at acceptance.
-Resource-budget allocation and tool/resource permission intersection are
-not implemented: budget declarations and tool-enabled target profiles
-are rejected rather than treated as enforced grants.
+The child's token allocation is metered durably, including unknown model
+attempts. Workspace quota holds settle independently of parent wakes.
 
 Supported scope: same-workspace, builtin/in_process, Agent → Agent, one
 level deep (children can neither declare targets nor be workflow
@@ -40,12 +40,17 @@ plans, enterprise teams and cross-tenant targets are out of scope.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
+import logging
 import re
 from typing import Any
 
 from hecate_runtime.action_ledger import tool_arguments_digest
 from hecate_runtime.tool_side_effects import _BUILTIN_CLASSIFICATIONS, SideEffectClass
+
+from hecate.contracts.execution.durable import InvalidTaskTransitionError
+from hecate.contracts.execution.durable import TaskLifecycleState as TaskLifecycleStateRef
 
 AGENT_CHILD_ENVELOPE_STATUS = "agent_child_accepted"
 AGENT_CHILD_REFUSAL_STATUS = "agent_child_refused"
@@ -67,6 +72,8 @@ _POLICY_KEYS = frozenset({"targets", "max_calls", "budget_units"})
 # instead of duplicating it, so the ledger may safely re-dispatch it.
 _BUILTIN_CLASSIFICATIONS[DELEGATE_AGENT_TOOL_NAME] = SideEffectClass.IDEMPOTENT_WRITE
 
+logger = logging.getLogger(__name__)
+
 
 def agent_child_policy(value: Any) -> dict[str, Any] | None:
     """Validate the task-level declaration; ``None`` keeps prior behavior.
@@ -75,9 +82,9 @@ def agent_child_policy(value: Any) -> dict[str, Any] | None:
     each target binds an alias to a concrete same-workspace agent with an
     optional exact-name ``allowed_tools`` narrowing, an optional
     ``input_schema`` (JSON Schema for the model-authored input object), an
-    optional per-target ``max_calls``. ``budget_units`` is rejected until
-    aggregate reservations exist. Any other shape is a submission error,
-    never a silent disable.
+    optional per-target ``max_calls``. A task-level token budget requires
+    an allocation on every target, and allocations require a task total.
+    Any other shape is a submission error, never a silent disable.
     """
 
     if value is None:
@@ -100,9 +107,16 @@ def agent_child_policy(value: Any) -> dict[str, Any] | None:
     if isinstance(max_calls, bool) or not isinstance(max_calls, int) or max_calls < 1:
         raise ValueError("controller.agent_children.max_calls must be a positive integer")
     total_budget = value.get("budget_units")
+    per_call_declared = any(target.get("budget_units") is not None for target in parsed.values())
+    if per_call_declared and total_budget is None:
+        # A per-call slice without a task total cannot be checked against
+        # any remaining budget — the combination stays refused.
+        raise ValueError("controller.agent_children.budget_units (task total) is required with per-call budget_units")
     if total_budget is not None:
         if isinstance(total_budget, bool) or not isinstance(total_budget, int) or total_budget < 1:
             raise ValueError("controller.agent_children.budget_units must be a positive integer")
+        if any(target.get("budget_units") is None for target in parsed.values()):
+            raise ValueError("every target requires budget_units when a task total is declared")
         for alias, target in parsed.items():
             per_call = target.get("budget_units")
             if per_call is not None and per_call > total_budget:
@@ -360,6 +374,7 @@ async def verify_child_call(
             "child_task_ref",
             "target",
             "input_digest",
+            "budget_units",
         )
     ):
         raise ValueError("agent child wait does not match its acceptance receipt")
@@ -501,6 +516,73 @@ def validate_child_delivery(
         raise ValueError("agent child delivery did not pass its required checks")
 
 
+def stamp_budget_units(contract: Any) -> int | None:
+    """The slice allocation the acceptance froze into the wait contract."""
+
+    if not isinstance(contract, dict):
+        return None
+    units = contract.get("budget_units")
+    if isinstance(units, bool) or not isinstance(units, int) or units < 1:
+        return None
+    return units
+
+
+def derive_slice_usage(slice_block: Any, *, allocated: int | None) -> dict[str, Any] | None:
+    """Export the trusted budget summary from the child's durable slice block.
+
+    ``used`` counts settled units plus every entry still holding a
+    reservation (in flight or unknown) — an unknown attempt is never
+    charged as zero. ``status`` is unknown when any hold remains, else the
+    weakest settled quality, else "none" for a proven-unexecuted call.
+    ``None`` (no contract allocation) means there is nothing to settle.
+    """
+
+    if allocated is None:
+        return None
+    if slice_block is None:
+        # Legacy or missing accounting cannot establish that no model ran.
+        return {"allocated": allocated, "used": allocated, "status": "unknown", "unknown_count": 1}
+    if not isinstance(slice_block, dict) or slice_block.get("allocated") != allocated:
+        raise ValueError("agent child slice allocation is inconsistent")
+    entries = slice_block.get("entries")
+    if not isinstance(entries, dict):
+        raise ValueError("agent child slice entries are malformed")
+    for key, entry in entries.items():
+        if not isinstance(key, str) or not key or not isinstance(entry, dict):
+            raise ValueError("agent child slice entry is malformed")
+        for field in ("reserved", "settled"):
+            units = entry.get(field)
+            if field == "settled" and units is None:
+                continue
+            if isinstance(units, bool) or not isinstance(units, int) or units < 0:
+                raise ValueError("agent child slice units are malformed")
+        if entry.get("status") not in (None, "actual", "estimated", "unverified", "unknown"):
+            raise ValueError("agent child slice usage status is malformed")
+    used = 0
+    statuses: set[str] = set()
+    unknown_count = 0
+    for entry in entries.values():
+        if entry.get("settled") is not None:
+            used += int(entry["settled"])
+            statuses.add(entry.get("status") or "actual")
+        else:
+            # In flight or explicitly unknown: the reservation stays held.
+            used += int(entry["reserved"])
+            statuses.add("unknown")
+            unknown_count += 1
+    if unknown_count:
+        status = "unknown"
+    elif "unverified" in statuses:
+        status = "unverified"
+    elif "estimated" in statuses:
+        status = "estimated"
+    elif "actual" in statuses:
+        status = "actual"
+    else:
+        status = "none"
+    return {"allocated": allocated, "used": used, "status": status, "unknown_count": unknown_count}
+
+
 def child_messages(input_obj: Any) -> list[dict[str, str]]:
     """The child's base messages: the authored input, verbatim JSON."""
 
@@ -517,6 +599,229 @@ class _QueuedChildWorker:
 
     async def dispatch_once(self, task_ref: Any) -> bool:
         return False
+
+
+class DurableSliceLedger:
+    """The call slice's durable ledger, persisted on the child task row.
+
+    State lives in the child's durable ``budget_slice`` block under the
+    lifecycle revision CAS with the dispatch lease as fence: a recovered
+    dispatch re-seeds from the persisted block, so spent and unknown
+    budget survive restarts, retries and process boundaries, and no fresh
+    dispatch can mint a new slice. Units are model-metered tokens - the
+    same contract the port adapter's estimate/settle applies. Charges: a
+    settled entry charges its settled units; an entry with no settled
+    outcome (in flight or unknown) keeps holding its full reservation.
+    """
+
+    _RETRIES = 4
+
+    def __init__(
+        self, *, store: Any, task_ref: Any, allocation: int, lease: Any = None, on_revision_advance: Any = None
+    ) -> None:
+        self._store = store
+        self._task_ref = task_ref
+        self._allocation = int(allocation)
+        self._lease = lease
+        self._on_revision_advance = on_revision_advance
+
+    async def _load(self) -> dict[str, Any]:
+        record = await asyncio.to_thread(self._store.get_task_state, self._task_ref)
+        if record is None:
+            raise ValueError("the slice's task row disappeared")
+        block = (record.extra or {}).get("budget_slice") if record else None
+        if block is None:
+            entries = (
+                {}
+                if record.revision <= 1
+                else {"unverified-history": {"reserved": self._allocation, "settled": None, "status": "unknown"}}
+            )
+            block = {"allocated": self._allocation, "entries": entries}
+        derive_slice_usage(block, allocated=self._allocation)
+        return {**copy.deepcopy(block), "_revision": record.revision, "_lifecycle": record.lifecycle_state}
+
+    @staticmethod
+    def _charged(entries: dict[str, Any]) -> int:
+        total = 0
+        for entry in entries.values():
+            total += entry["settled"] if entry.get("settled") is not None else entry["reserved"]
+        return total
+
+    async def _save(self, state: dict[str, Any]) -> None:
+        if state["_lifecycle"] is not TaskLifecycleStateRef.RUNNING:
+            raise ValueError("the slice's task is not running")
+        block = {"allocated": state["allocated"], "entries": state["entries"]}
+        derive_slice_usage(block, allocated=self._allocation)
+        # The revision must be the one that supplied these entries. The
+        # caller retries the entire read/modify/write on a lost CAS.
+        updated = await asyncio.to_thread(
+            self._store.apply_task_state,
+            self._task_ref,
+            TaskLifecycleStateRef.RUNNING,
+            expected_revision=state["_revision"],
+            **({"lease": self._lease} if self._lease is not None else {}),
+            extra_update={"budget_slice": block},
+        )
+        if self._on_revision_advance is not None:
+            self._on_revision_advance(updated.revision)
+
+    async def reserve(self, invocation_id: str, units: int) -> Any:
+        """Reserve one model attempt against the persisted remaining allocation."""
+        from hecate_governance.usage import ReservationOutcome, ReservationStatus
+
+        if units < 0:
+            raise ValueError("reservation units must be non-negative")
+        last: Exception | None = None
+        for _ in range(self._RETRIES):
+            state = await self._load()
+            entries = state["entries"]
+            entry = entries.get(invocation_id)
+            if entry is not None:
+                if entry.get("settled") is not None or entry["reserved"] != units:
+                    return ReservationOutcome(ReservationStatus.CONFLICT, self._charged(entries))
+                return ReservationOutcome(ReservationStatus.RESERVED, self._charged(entries))
+            charged = self._charged(entries)
+            if charged + units > state["allocated"]:
+                return ReservationOutcome(ReservationStatus.INSUFFICIENT, max(0, state["allocated"] - charged))
+            entries[invocation_id] = {"reserved": units, "settled": None, "status": None}
+            try:
+                await self._save(state)
+            except (InvalidTaskTransitionError, ValueError) as exc:
+                last = exc
+                continue
+            return ReservationOutcome(ReservationStatus.RESERVED, max(0, state["allocated"] - self._charged(entries)))
+        raise last if last is not None else RuntimeError("slice reservation could not be persisted")
+
+    async def release(self, invocation_id: str) -> Any:
+        """Release a proven-unexecuted attempt without refunding unknown usage."""
+        from hecate_governance.usage import ReleaseStatus
+
+        last: Exception | None = None
+        for _ in range(self._RETRIES):
+            state = await self._load()
+            entries = state["entries"]
+            entry = entries.get(invocation_id)
+            if entry is None or entry.get("settled") is not None:
+                return ReleaseStatus.NO_RESERVATION
+            if entry.get("status") == "unknown":
+                return ReleaseStatus.HELD_FOR_RECONCILIATION
+            del entries[invocation_id]
+            try:
+                await self._save(state)
+            except (InvalidTaskTransitionError, ValueError) as exc:
+                last = exc
+                continue
+            return ReleaseStatus.RELEASED
+        raise last if last is not None else RuntimeError("slice release could not be persisted")
+
+    async def hold_for_reconciliation(self, invocation_id: str) -> bool:
+        """Keep the attempt's reservation when execution cannot be established."""
+        last: Exception | None = None
+        for _ in range(self._RETRIES):
+            state = await self._load()
+            entry = state["entries"].get(invocation_id)
+            if entry is None or entry.get("settled") is not None:
+                return False
+            if entry.get("status") == "unknown":
+                return True
+            entry["status"] = "unknown"
+            try:
+                await self._save(state)
+            except (InvalidTaskTransitionError, ValueError) as exc:
+                last = exc
+                continue
+            return True
+        raise last if last is not None else RuntimeError("slice hold could not be persisted")
+
+    async def settle(self, record: Any) -> Any:
+        """Merge a usage report into the same durable model attempt."""
+        from hecate_governance.usage import SettleOutcome, SettleStatus
+
+        last: Exception | None = None
+        for _ in range(self._RETRIES):
+            state = await self._load()
+            entries = state["entries"]
+            entry = entries.get(record.invocation_id)
+            if entry is not None and entry.get("settled") is not None:
+                # An established charge exists.
+                if record.status.value == "unknown":
+                    # A late uncertain report must not erase an established
+                    # charge (the platform ledger's own semantics).
+                    return SettleOutcome(SettleStatus.CONFLICT, record)
+                if entry["settled"] == record.units and entry.get("status") == record.status.value:
+                    return SettleOutcome(SettleStatus.IDEMPOTENT_CONFIRMED, record)
+                entry["settled"] = record.units
+                entry["status"] = record.status.value
+                try:
+                    await self._save(state)
+                except (InvalidTaskTransitionError, ValueError) as exc:
+                    last = exc
+                    continue
+                return SettleOutcome(SettleStatus.REVISED, record)
+            if record.status.value == "unknown":
+                # The outcome is not established: the reservation keeps
+                # holding its FULL estimate — never charged as zero.
+                if entry is None:
+                    entries[record.invocation_id] = {"reserved": 0, "settled": None, "status": "unknown"}
+                else:
+                    entry["status"] = "unknown"
+                try:
+                    await self._save(state)
+                except (InvalidTaskTransitionError, ValueError) as exc:
+                    last = exc
+                    continue
+                return SettleOutcome(SettleStatus.SETTLED, record)
+            if entry is None:
+                entries[record.invocation_id] = {
+                    "reserved": record.units,
+                    "settled": record.units,
+                    "status": record.status.value,
+                }
+            else:
+                entry["settled"] = record.units
+                entry["status"] = record.status.value
+            try:
+                await self._save(state)
+            except (InvalidTaskTransitionError, ValueError) as exc:
+                last = exc
+                continue
+            return SettleOutcome(SettleStatus.SETTLED, record)
+        raise last if last is not None else RuntimeError("slice settlement could not be persisted")
+
+    async def remaining(self) -> int:
+        """Return allocation less settled usage and outstanding reservations."""
+        state = await self._load()
+        return max(0, state["allocated"] - self._charged(state["entries"]))
+
+    async def usage_for(self, invocation_id: str) -> Any:
+        """Return the established report for one model attempt, if available."""
+        from hecate_governance.usage import UsageRecord, UsageStatus
+
+        state = await self._load()
+        entry = state["entries"].get(invocation_id)
+        if entry is None or entry.get("settled") is None:
+            return None
+        return UsageRecord(
+            invocation_id=invocation_id,
+            units=entry["settled"],
+            status=UsageStatus(entry["status"] or "actual"),
+            detail="",
+        )
+
+    async def snapshot(self) -> dict[str, Any]:
+        """The trusted durable summary the wake path exports to the parent."""
+
+        record = await asyncio.to_thread(self._store.get_task_state, self._task_ref)
+        block = (record.extra or {}).get("budget_slice") if record else None
+        # The allocation is a concrete int here, so the derivation always
+        # produces a summary; the fallback only satisfies the optional
+        # contract of derive_slice_usage.
+        return derive_slice_usage(block, allocated=self._allocation) or {
+            "allocated": self._allocation,
+            "used": 0,
+            "status": "none",
+            "unknown_count": 0,
+        }
 
 
 class AgentChildDelegateTool:
@@ -624,6 +929,8 @@ class AgentChildDelegateTool:
                     tools=list(target["allowed_tools"]),
                 )
             if reason is not None:
+                if per_call_budget is not None:
+                    await self._release_call_budget(call_id=call_id)
                 return refusal(reason)
 
         digest = input_digest_of(input_obj)
@@ -678,9 +985,11 @@ class AgentChildDelegateTool:
             except Exception as exc:  # noqa: BLE001 — validation refusals vs internal failures
                 from hecate.execution.task_control import TaskControlError, TaskControlValidationError
 
-                if isinstance(exc, TaskControlValidationError):
-                    return refusal(str(exc))
-                if isinstance(exc, TaskControlError):
+                if isinstance(exc, (TaskControlValidationError, TaskControlError)):
+                    if per_call_budget is not None:
+                        # Nothing was created: the hold is proven unexecuted
+                        # and is released instead of lingering as an orphan.
+                        await self._release_call_budget(call_id=call_id)
                     return refusal(str(exc))
                 raise
         self.accepted_this_dispatch += 1
@@ -737,10 +1046,10 @@ class AgentChildDelegateTool:
         unlimited headroom — the slice gate still enforces the allocation.
         """
 
-        from hecate.ops.budget_reservations import QuotaBudgetLedger
+        from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
 
         async with self._session_factory() as db:
-            ledger = QuotaBudgetLedger(db, workspace_id=self._policy_workspace(), unit_scale=1.0)
+            ledger = QuotaBudgetLedger(db, workspace_id=self._policy_workspace(), unit_scale=MODEL_TOKEN_UNIT_SCALE)
             outcome = await ledger.reserve(f"agent-child:{self._parent_ref.id}:{call_id}", units)
             await db.commit()
         from hecate_governance.usage import ReservationStatus
@@ -750,6 +1059,27 @@ class AgentChildDelegateTool:
         if outcome.status is ReservationStatus.CONFLICT:
             return "another reservation holds this call identity"
         return None
+
+    async def _release_call_budget(self, *, call_id: str) -> None:
+        """Release a proven-unexecuted hold; failure keeps the action retryable."""
+
+        from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
+
+        # A submission may fail after creating its durable association. A
+        # validation exception alone cannot establish absence of execution.
+        for child in await asyncio.to_thread(self._store.list_tasks):
+            payload = await asyncio.to_thread(self._store.get_task_input, child.task_ref) or {}
+            stamp = agent_child_stamp(payload.get("agent_child_parent"))
+            if stamp and stamp.get("task_ref") == self._parent_ref.to_dict() and stamp.get("call_id") == call_id:
+                raise ValueError("agent child already exists; its reservation requires reconciliation")
+        async with self._session_factory() as db:
+            ledger = QuotaBudgetLedger(db, workspace_id=self._policy_workspace(), unit_scale=MODEL_TOKEN_UNIT_SCALE)
+            outcome = await ledger.release(f"agent-child:{self._parent_ref.id}:{call_id}")
+            await db.commit()
+        from hecate_governance.usage import ReleaseStatus
+
+        if outcome is ReleaseStatus.HELD_FOR_RECONCILIATION:
+            raise ValueError("agent child reservation has an unknown execution outcome")
 
     async def _parent_payload(self) -> dict[str, Any]:
         import asyncio

@@ -31,6 +31,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.models.quota import QuotaModel, QuotaReservationModel, QuotaUsageModel
 
+# The platform's model-metered token -> cost-unit conversion for quota
+# storage: every model-call settlement and every pre-allocated hold that
+# shares a workspace cost window converts through this one scale. Defining
+# it once keeps reservation and settlement on the same contract.
+MODEL_TOKEN_UNIT_SCALE = 0.00001
+
 
 class QuotaBudgetLedger(BudgetLedger):
     """Budget authority over the platform quota storage for one scope."""
