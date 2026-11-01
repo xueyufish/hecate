@@ -33,6 +33,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Cancel a task](task-cancellation.md)** — request task cancellation from the ops console, read the five receipt states, retry safely with a stable command id, and know what cancellation cannot promise.
 - **[Approval wait expiry](approval-wait-expiry.md)** — what happens when an approval wait outlives its deadline: who converges it, which facts survive, and what expiry never does.
 - **[Run the Controller two-host model baseline](run-controller-host-baseline.md)** — collect the recorded platform-vs-runner Controller baseline (deterministic matrix, gated real collection), read the record, and know what it does not certify.
+- **[Observe parent-child task relationships](observe-parent-child-tasks.md)** — read the recorded delegation facts on both task sides, navigate between parent and child details, and keep callback consumption separate from child success and parent verdicts.
 
 ## Versioning and lifecycle
 
