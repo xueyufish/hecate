@@ -600,10 +600,12 @@ def build_platform_governance(
     if not override_model_budget:
         model_budget = None
         if db is not None and workspace_id is not None and settings.QUOTA_ENABLED:
-            from hecate.ops.budget_reservations import QuotaBudgetLedger
+            from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
 
             model_budget = BudgetGate(
-                QuotaBudgetLedger(db, workspace_id=workspace_id, session_factory=factory, unit_scale=0.00001)
+                QuotaBudgetLedger(
+                    db, workspace_id=workspace_id, session_factory=factory, unit_scale=MODEL_TOKEN_UNIT_SCALE
+                )
             )
     return PlatformGovernance(
         service,

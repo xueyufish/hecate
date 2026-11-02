@@ -971,6 +971,8 @@ class PlatformTaskDispatcher:
         if not isinstance(raw_ref, dict) or declared not in ("succeeded", "failed", "cancelled"):
             return
         try:
+            service = self._task_control(db)
+            await service.settle_agent_child_budget(workspace_id=context.workspace_id, child_task_id=context.task_id)
             parent_ref = BackendRef(RefKind.TASK, str(raw_ref.get("issuer_domain")), str(raw_ref.get("id")))
             state = await asyncio.to_thread(self._store.get_task_state, parent_ref)
             wait = (state.extra or {}).get("wait") or {} if state else {}
@@ -1570,9 +1572,22 @@ class PlatformTaskDispatcher:
             # same semantics the platform budget gate applies).
             per_call = context.agent_child_parent.get("budget_units")
             if isinstance(per_call, int) and per_call > 0:
-                from hecate_governance.usage import BudgetGate, MemoryBudgetLedger
+                from hecate_governance.usage import BudgetGate
 
-                slice_ledger = MemoryBudgetLedger(limit=per_call)
+                from hecate.execution.agent_child import DurableSliceLedger
+
+                # The slice ledger persists on the child's durable row: a
+                # recovered dispatch re-seeds its spent and unknown budget,
+                # so a fresh dispatch can never mint a new slice.
+                slice_ledger = DurableSliceLedger(
+                    store=self._store,
+                    task_ref=task_ref,
+                    allocation=per_call,
+                    lease=lease,
+                    on_revision_advance=lambda rev: (
+                        live_revision.__setitem__("value", rev) if live_revision is not None else None
+                    ),
+                )
                 slice_budget = BudgetGate(slice_ledger)
                 child_call_budget = per_call
         governance_for_port = None
@@ -2400,18 +2415,17 @@ class PlatformTaskDispatcher:
 
     @staticmethod
     async def _attach_slice_budget(outcome: dict[str, Any], slice_ledger: Any, allocated: int) -> dict[str, Any]:
-        """Persist the call slice's consumption on the delivery facts.
+        """Attach the durable slice snapshot to the delivery facts.
 
-        ``used`` counts reservations the ledger still holds as consumed —
-        actual settlements shrink it back, unknown outcomes never do. The
-        verified callback carries these facts to the parent's durable
-        accumulation; an absent slice records nothing.
+        The numbers come from the child's persisted slice state, never from
+        an in-process accumulator: the verified callback re-derives its
+        settlement from the same durable record.
         """
 
         if slice_ledger is None or allocated <= 0:
             return outcome
-        remaining = await slice_ledger.remaining()
-        return {**outcome, "budget": {"allocated": allocated, "used": allocated - int(remaining)}}
+        snapshot = await slice_ledger.snapshot()
+        return {**outcome, "budget": snapshot}
 
     def _readonly_confirmation(self, run_ref: BackendRef) -> Any:
         """The host's readonly confirmation: the action's durable ledger intent.

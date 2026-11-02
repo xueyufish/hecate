@@ -79,6 +79,68 @@ class AgentChildRunReconciler:
                     converged += 1
             except Exception:  # noqa: BLE001 — one bad record must not block the pass
                 logger.warning("agent child convergence failed for task %s", record.task_ref.id, exc_info=True)
+        # Terminal children may have a cancelled/expired parent, so they no
+        # longer appear in the waiting-parent scan. Retry metering separately.
+        from sqlalchemy import select
+
+        from hecate.execution.agent_child import agent_child_acceptance
+        from hecate.execution.task_control import TaskControlService
+        from hecate.models.quota import QuotaReservationModel
+
+        async with self._session_factory() as db:
+            holds = list(
+                (
+                    await db.execute(
+                        select(QuotaReservationModel.invocation_key, QuotaReservationModel.scope_id).where(
+                            QuotaReservationModel.invocation_key.like("agent-child:%"),
+                            QuotaReservationModel.scope == "workspace",
+                            QuotaReservationModel.resource_type == "cost",
+                            QuotaReservationModel.released.is_(False),
+                            QuotaReservationModel.settled.is_(False),
+                            QuotaReservationModel.deleted.is_(False),
+                        )
+                    )
+                ).all()
+            )
+        for key, workspace_id in holds:
+            try:
+                _, parent_id, call_id = key.split(":", 2)
+                parent_ref = BackendRef(RefKind.TASK, self._platform_issuer, parent_id)
+                run = await asyncio.to_thread(self._store.run_for_task, parent_ref)
+                if run is None:
+                    continue
+                receipt = await asyncio.to_thread(self._store.get_run_action, run, call_id)
+                result = (receipt or {}).get("result_payload")
+                if isinstance(result, str):
+                    import json
+
+                    result = json.loads(result)
+                call = agent_child_acceptance(result)
+                if call is None:
+                    continue
+                child_ref = BackendRef.from_dict(call["child_task_ref"])
+                child = await asyncio.to_thread(self._store.get_task_state, child_ref)
+                if child is None:
+                    continue
+                async with self._session_factory() as db:
+                    if not await verify_platform_local(db, self._store, child_ref, child):
+                        continue
+                    service = TaskControlService(
+                        db,
+                        store=self._store,
+                        recorder=self._store,
+                        backend="postgres",
+                        ledger_source="core",
+                        session_factory=self._session_factory,
+                        worker=_QueuedChildWorker(),
+                    )
+                    _, changed = await service.settle_agent_child_budget(
+                        workspace_id=workspace_id,
+                        child_task_id=self._uuid_of(child_ref.id),
+                    )
+                    converged += int(changed)
+            except Exception:  # noqa: BLE001 — a failed settlement stays retryable on the next pass
+                logger.warning("agent child budget convergence failed for %s", key, exc_info=True)
         return converged
 
     async def _converge_one(self, record: Any) -> bool:
@@ -150,14 +212,17 @@ class AgentChildRunReconciler:
             worker=_QueuedChildWorker(),
         )
         token = str(wait.get("wait_token"))
-        receipt = await service.submit_agent_child_callback(
-            workspace_id=await self._workspace_of(t_ref, record),
-            task_id=await self._task_id_of(db, t_ref, record),
-            command_id=f"agent-child-callback-{contract.get('call_id')}-{token}",
-            wait_token=token,
-            child_task_id=self._uuid_of(str(contract["child_task_ref"]["id"])),
-            declared_state=state,
-        )
+        try:
+            receipt = await service.submit_agent_child_callback(
+                workspace_id=await self._workspace_of(t_ref, record),
+                task_id=await self._task_id_of(db, t_ref, record),
+                command_id=f"agent-child-callback-{contract.get('call_id')}-{token}",
+                wait_token=token,
+                child_task_id=self._uuid_of(str(contract["child_task_ref"]["id"])),
+                declared_state=state,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return await self._park_for_reconciliation(t_ref, record, f"agent child facts are invalid: {exc}")
         if receipt.record.state.value == "applied":
             logger.info("task %s agent child callback recovered; requeued", t_ref.id)
             return True

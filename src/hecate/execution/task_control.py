@@ -1465,6 +1465,12 @@ class TaskControlService:
             return await self._reject_callback(
                 command_id, task, str(exc), issuer=issuer, callback_digest=callback_digest
             )
+        # The budget settlement derives from the child's DURABLE slice
+        # state, never from the result's self-reported numbers: the slice
+        # block is written under the child's own lifecycle CAS during its
+        # dispatches, so it is the trusted record of what the call spent
+        # and what stayed unknown.
+        budget_facts, _ = await self.settle_agent_child_budget(workspace_id=workspace_id, child_task_id=child_task_id)
         child_summary = {
             "child_task_id": str(child.id),
             "child_state": child_state,
@@ -1477,8 +1483,13 @@ class TaskControlService:
             "error_category": facts.get("error_category"),
             "acceptance": facts.get("acceptance"),
             "usage": None,
-            "budget": facts.get("budget"),
+            "budget": budget_facts,
         }
+        # Close the delegation's quota loop: the acceptance hold settles to
+        # the trusted used figure (unknown holds stay held, proven-zero
+        # releases). The settle is idempotent per call identity and runs
+        # BEFORE the wake: a failure here leaves the callback un-issued so
+        # the child's outbox retry re-runs it — no permanent orphan.
         return await self.issue_command(
             workspace_id=workspace_id,
             task_id=task_id,
@@ -1490,6 +1501,124 @@ class TaskControlService:
             detail_ns={"wait_token": wait_token, "callback_digest": callback_digest},
             _verified_agent_child_callback=True,
         )
+
+    async def settle_agent_child_budget(
+        self, *, workspace_id: uuid.UUID, child_task_id: uuid.UUID
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Settle a terminal child's metering independently of the parent's wake.
+
+        The settled action receipt, rather than a mutable current wait, binds
+        the parent and child. This also covers cancelled parents and callbacks
+        that finish before the parent parks.
+        """
+        from hecate.execution.agent_child import (
+            AGENT_CHILD_CONTRACT_KIND,
+            agent_child_acceptance,
+            agent_child_stamp,
+            derive_slice_usage,
+            stamp_budget_units,
+            verify_child_call,
+        )
+
+        child_ref = task_ref_of(child_task_id)
+        payload = await asyncio.to_thread(self._store.get_task_input, child_ref) or {}
+        stamp = agent_child_stamp(payload.get("agent_child_parent"))
+        if stamp is None or stamp_budget_units(stamp) is None:
+            return None, False
+        await self._get_task(workspace_id, child_task_id)
+        if payload.get("workspace_id") != str(workspace_id):
+            raise TaskControlValidationError("agent child budget belongs to another workspace")
+        child = await asyncio.to_thread(self._store.get_task_state, child_ref)
+        if child is None or child.lifecycle_state not in {
+            TaskLifecycleState.SUCCEEDED,
+            TaskLifecycleState.FAILED,
+            TaskLifecycleState.CANCELLED,
+            TaskLifecycleState.RECONCILIATION_REQUIRED,
+        }:
+            return None, False
+        parent_ref = BackendRef.from_dict(stamp["task_ref"])
+        parent_run = await asyncio.to_thread(self._store.run_for_task, parent_ref)
+        if parent_run is None:
+            return None, False
+        receipt = await asyncio.to_thread(self._store.get_run_action, parent_run, stamp["call_id"])
+        result = (receipt or {}).get("result_payload")
+        if isinstance(result, str):
+            import json
+
+            result = json.loads(result)
+        call = agent_child_acceptance(result)
+        if call is None:
+            return None, False  # Acceptance may still be committing in another worker.
+        parent_input = await asyncio.to_thread(self._store.get_task_input, parent_ref) or {}
+        from hecate.execution.agent_child import agent_child_policy
+
+        policy = agent_child_policy((parent_input.get("controller") or {}).get("agent_children"))
+        target = (policy or {}).get("targets", {}).get(stamp["alias"]) or {}
+        contract = {
+            **call,
+            "kind": AGENT_CHILD_CONTRACT_KIND,
+            "run_id": parent_run.id,
+            "arguments_digest": (receipt or {}).get("intent", {}).get("arguments_digest"),
+            "output_schema": target.get("output_schema"),
+        }
+        await verify_child_call(self._store, parent_ref, contract)
+        allocated = stamp_budget_units(contract)
+        block = (child.extra or {}).get("budget_slice")
+        if block is None and child.lifecycle_state is TaskLifecycleState.CANCELLED and child.revision == 1:
+            # Initial submission is revision zero; only a pre-dispatch cancel
+            # can be terminal at revision one. No model request was possible.
+            block = {"allocated": allocated, "entries": {}}
+        budget = derive_slice_usage(block, allocated=allocated)
+        if budget is None:
+            return None, False
+        changed = await self._settle_agent_child_reservation(
+            workspace_id=workspace_id, parent_task_id=parent_ref.id, call_id=stamp["call_id"], budget=budget
+        )
+        return budget, changed
+
+    async def _settle_agent_child_reservation(
+        self, *, workspace_id: uuid.UUID, parent_task_id: str, call_id: str, budget: dict[str, Any]
+    ) -> bool:
+        """Settle one delegation's workspace hold to its trusted used figure.
+
+        Idempotent per call identity: a replay settles the same figure and
+        is confirmed; a revise merges the delta. Unknown usage keeps its
+        hold (never charged as zero); a proven-zero call releases the hold.
+        """
+
+        from hecate_governance.usage import UsageRecord, UsageStatus
+
+        from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
+
+        usage_status = {
+            "actual": UsageStatus.ACTUAL,
+            "estimated": UsageStatus.ESTIMATED,
+            "unknown": UsageStatus.UNKNOWN,
+        }.get(budget.get("status"), UsageStatus.UNVERIFIED)
+        ledger = QuotaBudgetLedger(
+            self._db,
+            workspace_id=workspace_id,
+            session_factory=self._session_factory,
+            unit_scale=MODEL_TOKEN_UNIT_SCALE,
+        )
+        key = f"agent-child:{parent_task_id}:{call_id}"
+        previous = await ledger.usage_for(key)
+        if previous is not None and previous.status is UsageStatus.UNKNOWN and usage_status is UsageStatus.UNKNOWN:
+            return False
+        outcome = await ledger.settle(
+            UsageRecord(
+                invocation_id=key,
+                units=int(budget.get("used") or 0),
+                status=usage_status,
+            )
+        )
+        from hecate_governance.usage import SettleStatus
+
+        if outcome.status is SettleStatus.CONFLICT:
+            raise TaskControlValidationError("agent child budget settlement requires reconciliation")
+        if self._session_factory is None:
+            await self._db.commit()
+        return outcome.status is not SettleStatus.IDEMPOTENT_CONFIRMED
 
     async def _reject_callback(
         self, command_id: str, task: Any, reason: str, *, issuer: str, callback_digest: str
