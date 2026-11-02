@@ -22,6 +22,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from .artifact_signing import ArtifactAdmissionError, ArtifactTrustPolicy, load_trust_policy
 from .durable import DurableRuntime
@@ -61,6 +62,13 @@ def main(argv: list[str] | None = None) -> int:
         "(unsigned or untrusted-publisher artifacts refuse to start)",
     )
     parser.add_argument(
+        "--artifact-trust-recheck",
+        action="store_true",
+        help="re-read the --artifact-trust policy before every new model request and real "
+        "tool dispatch, so revoking a publisher or key stops new calls while serving "
+        "(requires --artifact-trust; without it admission stays startup-only)",
+    )
+    parser.add_argument(
         "--business-api",
         default=None,
         help="base URL of the business App's HTTP API (default: value from runner.json 'business_api_base')",
@@ -76,6 +84,12 @@ def main(argv: list[str] | None = None) -> int:
         except ArtifactAdmissionError as exc:
             print(f"hecate-runner: artifact trust policy error: {exc}", file=sys.stderr)
             return 2
+    if args.artifact_trust_recheck and artifact_trust is None:
+        print(
+            "hecate-runner: --artifact-trust-recheck requires --artifact-trust",
+            file=sys.stderr,
+        )
+        return 2
 
     host_lock = None
     profile: Profile
@@ -100,13 +114,23 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     try:
-        return _run_profile(profile, args)
+        # Freeze from the policy admission verified, while retaining ownership
+        # of the host lock even if guard initialization fails.
+        trust_guard = None
+        if args.artifact_trust_recheck:
+            from .runtime_trust import RuntimeTrustGuard
+
+            if profile.artifact_admission is None or artifact_trust is None:  # unreachable: validated above
+                print("hecate-runner: runtime trust re-check requires strict admission", file=sys.stderr)
+                return 2
+            trust_guard = RuntimeTrustGuard(profile.artifact_admission, artifact_trust)
+        return _run_profile(profile, args, trust_guard=trust_guard)
     finally:
         if host_lock is not None:
             host_lock.release()
 
 
-def _run_profile(profile: Profile, args: argparse.Namespace) -> int:
+def _run_profile(profile: Profile, args: argparse.Namespace, *, trust_guard: Any = None) -> int:
     """Run an admitted profile; the caller owns the complete host-lock lifetime."""
 
     # Managed assembly (step6a): control_plane + durable is the closed loop
@@ -285,6 +309,7 @@ def _run_profile(profile: Profile, args: argparse.Namespace) -> int:
         lease_gate=lease_gate,
         dispatch_binding=business_api,
         governance_service=governance_service,
+        trust_guard=trust_guard,
         approval_gate=approval_gate,
         approval_finder=(
             make_local_approval_finder(durable.store.session_factory, approvers=lambda: current_governance().approvers)
@@ -344,11 +369,19 @@ def _run_profile(profile: Profile, args: argparse.Namespace) -> int:
         staged = port_path.with_name(port_path.name + ".tmp")
         staged.write_text(str(actual_port), encoding="utf-8")
         staged.replace(port_path)
+    # Trust posture is labeled honestly: a runtime re-check names the policy
+    # file consulted before each new call; otherwise admission is startup-only.
+    trust_label = (
+        f"trust-recheck=per-call policy={trust_guard.policy_path}"
+        if trust_guard is not None
+        else "trust-recheck=startup-only"
+    )
     print(
         f"hecate-runner: serving on {profile.config.host}:{actual_port} "
         f"(backend={profile.manifest.backend_type}, model={profile.config.model_backend}, "
         f"tools={list(profile.config.tool_allowlist)}, durable={durable is not None}, "
-        f"managed={managed is not None}, {release_label}, artifact-admission={admission_label})",
+        f"managed={managed is not None}, {release_label}, artifact-admission={admission_label}, "
+        f"{trust_label})",
         flush=True,
     )
     try:

@@ -167,6 +167,36 @@ class DurableRuntime:
             return None
         if not isinstance(result, dict):
             raise ValueError("stored delivery result is malformed")
+        if result.get("error_category") == "policy_denied" and "artifact_trust" in result:
+            # This is a host refusal before a new call, not a delivered answer.
+            # Bind it to its task/run/definition without inventing acceptance
+            # history or weakening validation of successful deliveries.
+            payload = self.store.get_task_input(task_ref) or {}
+            refusal = result["artifact_trust"]
+            if (
+                state.lifecycle_state is not TaskLifecycleState.FAILED
+                or result.get("status") != "failed"
+                or result.keys() - {"status", "error_category", "error", "artifact_trust"}
+                or not isinstance(refusal, dict)
+                or type(refusal.get("version")) is not int
+                or refusal["version"] != 1
+                or refusal.get("task_ref") != {"issuer": task_ref.issuer_domain, "id": task_ref.id}
+                or refusal.get("run_ref") != {"issuer": run_ref.issuer_domain, "id": run_ref.id}
+                or not payload.get("_host_definition")
+                or refusal.get("execution_definition") != payload["_host_definition"]
+                or refusal.get("error_category") != "policy_denied"
+                or not all(
+                    isinstance(refusal.get(key), str) and refusal[key]
+                    for key in ("reason", "publisher_ref", "key_id", "trust_policy", "call_site")
+                )
+                or not str(refusal.get("call_site", "")).startswith(("model:", "tool:"))
+                or result.get("error") != f"artifact trust refused: {refusal.get('reason')}"
+                or not isinstance(refusal.get("artifact_sha256"), str)
+                or len(refusal["artifact_sha256"]) != 64
+                or any(char not in "0123456789abcdef" for char in refusal["artifact_sha256"])
+            ):
+                raise ValueError("stored artifact trust refusal has invalid bindings")
+            return result
         if result.get("error_category") == "controller_no_progress_limit":
             from hecate_runtime.agent_controller import NoProgressPolicy, decision_step_id_for_turn
 
