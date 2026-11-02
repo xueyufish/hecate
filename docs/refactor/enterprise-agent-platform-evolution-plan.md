@@ -203,18 +203,19 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 
 ## 二、现状及可复用资产
 
-本次核对基点为 `origin/main` 的 `fc41a058`，逐项对照代码、测试及关联验证记录；本文更新未重新执行真实模型或生产 profile 认证。历史报告中的“未提交/未推送/未归档”保留当次语境；当前交付事实以该基点已包含的实现为准，不以是否归档判断代码是否交付。“技术完成”只适用于已验证切片，不能替代整体场景或生产认证。
+本次核对基点为 `origin/main` 的 `2f44f450`，逐项对照代码、测试及关联验证记录；本文更新未重新执行真实模型或生产 profile 认证。历史报告中的“未提交/未推送/未归档”保留当次语境；当前交付事实以该基点已包含的实现为准，不以是否归档判断代码是否交付。“技术完成”只适用于已验证切片，不能替代整体场景或生产认证。
 
 | 已有资产 | 当前边界与后续责任 |
 |---|---|
 | `packages/hecate-runtime`、共享执行应用服务与 `hecate-runner` | 已有独立 wheel、共享装配及宿主；共享服务消费 `ExecutionDriver`，平台任务与 Runner 在显式启用 `controller_loop` 时装配同一无图 `AgentController`，其余既有图路径仍使用 Pregel，聊天执行仍有图专属调用。Controller 复用 `AgentTurn` 与真实动作反馈，输入修订在因果回合边界折叠且决策固定所消费的修订版本；共享版本化交付验收（声明摘要冻结、两宿主一致判定、终态同事务持久记录）已接入两宿主；Harness 语义组合（声明式 sections、配置冻结、恢复绑定及回合内守卫/投影/shaping/输出治理管线）已接入两宿主；回合输入快照（版本化模型输入随决策同事务持久、摘要绑定与恢复完整性校验）已接入两宿主 |
 | 平台 builtin、`EntryExecutionService` 与聊天路径 | 多个入口已迁移，直接工具循环与图执行仍并存；step5d/G3 收口入口、事件与兼容性，不另造一套生命周期 |
-| `packages/hecate-durable` 与平台任务控制 | step6a—6f、决策接受、受控单动作/串行动作集合及最终回答的单回合恢复已交付；成功动作结果可显式续接模型输入，账本回填已补输出治理。显式启用的 Controller 已接入共享循环、声明式输出 Schema、平台版本化验收门禁与共享交付验收记录（随终态事务持久，无平行真源）；持久输入修订与跨进程唤醒已有技术验证（修订行与唤醒 CAS/回执同事务，权威写入方唯一）。完整任务验收、Plan Revision、通用 Child Run 及生产治理仍待增量验证 |
+| `packages/hecate-durable` 与平台任务控制 | step6a—6f、决策/动作与单回合恢复、共享循环、持久输入修订和版本化交付验收已交付；两宿主已有无进展保护及验收失败后的有界续跑。平台本地已有审批/输入等待到期收敛、回执锚定计时器等待，以及单层 Agent 子调用的创建去重、可信回调、恢复和预算切片；完整目标修订、Plan Revision、通用 Child Run 与生产治理继续开放 |
 | 语言中立执行契约、Deployment/Task/Run 模型 | 已有草案、隔离互操作和登记模型；登记成功不等于部署获准执行或取得治理等级 |
 | MemoryProvider、Knowledge/RAG、Sandbox、工具 Gateway | 复用已有接口和实现；内置 Knowledge 已修复详情、文件接入/切片/Embedding/向量写入、计数与删除链路，Qdrant 与 OpenAI-compatible Embedding 配置可用。删除仍为软删除加尽力清理向量，整体服务替换、资源 ACL、删除传播、隔离及独立升级按 step7/9/16 验证 |
 | 评估、观测与 Prompt 管理 | 评估 Run/评分/报告、数据集/版本/样本、任务管理与触发、合成、Workflow 评测、标注工作流/人工及自动回灌、calibration、Prompt 优化/管理/分析及 trace REST 读取已有分段权限加固，报告页面已有查询状态修正。字段级 ACL、外部后端替换和完整证据生命周期仍待 step10/16 验证 |
 | 功能清单及生成工具、分层测试 | ADR-037、定位、架构、主 specs 与规划数据已完成目标职责对齐；继续保护历史 Feature ID 和证据，新切片按所属步骤同步，不将目标文档视为 Controller 实现 |
-| 版本评测、发布凭据与观察/控制页面 | AgentVersion 匹配、冻结评测范围/覆盖门禁、只追加发布凭据及历史面板已交付；Task/Run/动作/事件与命令回执已有观察页面，Task 取消已支持版本绑定与真实回执。Task/Run、命令回执/对账、命令/Task 提交及 workflow callback 已分段加固角色边界，Run SSE 已支持动态撤权，等待提交已读取 worker 最新 Run 投影；定时任务管理 REST 已限定 workspace 与读写角色。完整发布组合、审批页面及团队工作台仍开放 |
+| 版本评测、发布凭据与观察/控制页面 | AgentVersion 匹配、冻结评测范围/覆盖门禁、只追加发布凭据及历史面板已交付；工具模型可见契约已有版本快照与漂移诊断，不冻结运行实现或增加发布阻断。Runner 已有签名启动准入、标准归档及单宿主停机安装/切换/回退。Task/Run/动作证据、交付验收、实时事件、命令回执、受控续跑和父子关系已有观察页面，取消、补充输入及本地 ADMIN 审批决定已有真实回执；完整发布组合及团队工作台仍开放 |
+| Controller 双宿主基线采集器 | 平台与 Runner 复用数据、工具契约、核心提示、输出 Schema 和 rubric，记录正常交付、审批续跑及停止分类；已提交记录均为 `deterministic_injection`、`gate=false`，证明采集链和宿主行为，不授予真实模型质量、成本或生产认证 |
 
 历史依赖、入口和安全问题见[实施基线](platform-evolution-baseline.md)与[独立消费基线](standalone-consumption-baseline.md)；当前验收范围见[Step1～Step6 复核](step1-step6-acceptance-review.md)及[Step6 后续复核](step6-followup-review.md)。基线是历史快照，不覆盖后续交付事实。
 
@@ -223,7 +224,7 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 | G1：动作授权 | 原 MCP 角色/可信上下文旁路已修复；保留回归，扩展至主流程和已启用协议的不可旁路执行点 | step7 |
 | G2：未知副作用与恢复 | 已有安全停止、原子动作账本、真实结果回填及原生续跑；整体门槛仍未关闭。未知结果/存储不可用不盲目重试，参数冲突、旧 owner、迟到回执和各实际入口须分别验收 | step5—step7/16 |
 | G3：入口收敛 | 已有聊天引擎开关、workspace 路由及真实 HTTP 测试；入口迁移、持久事件与默认启用仍需收口，活跃 Run 保持原路由 | step5d/19 |
-| G4：用量与预算 | 可靠成本来源、reported/estimated/reconciled、取消/中断未知账、预留/结算及迟到修订仍须闭环；未知不记零，不承诺硬限制不可见的供应商账单 | step7/10 |
+| G4：用量与预算 | 本地调用预留/结算及平台 Agent 子调用预算切片已有实现；子调用模型用量跨重启保留，未知尝试保留预留，workspace 占用可独立于父唤醒结算。可靠价格/账单来源、跨能力累计成本与迟到修订的整体认证仍开放；token 计量不等于核实货币成本，未知不记零 | step7/10 |
 | G5：规划数据来源 | 元数据保护与生成/漂移检查已交付；继续执行回归，新增或变更条目须保留证据、字段所有权和严格准入 | step2 |
 
 门槛只阻断受影响能力的启用。已修复问题不重复立项；Stub、导入隔离和组件测试不能替代真实宿主或生产组合验证。
@@ -234,17 +235,17 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 
 | 步骤 | 当前结论与本次处理 |
 |---|---|
-| step1 | 基线已交付；保留真实数据流、成本及通用文件/业务样本增量，沿用现有门槛 |
+| step1 | 基线及 Controller 双宿主采集器已交付；已有双宿主记录仅为确定性注入，真实模型、成本及通用文件/业务样本增量继续开放 |
 | step2 | ADR-037、定位/架构、相关主 specs 与规划数据对齐已交付；移除整项“待同步”，后续只同步新增切片 |
-| step3 | `ExecutionDriver`、决策/动作、Controller 输入修订与版本化交付验收已有实际消费；完整目标修订、文件及通用子执行契约继续开放 |
+| step3 | 驱动、决策/动作、输入修订及交付验收已有消费；平台计时器与限定 Agent 子调用已消费持久等待/回调契约，完整目标修订、文件及跨宿主/跨执行方式契约继续开放 |
 | step4 | 身份、Deployment、Task/Run 登记沿用；登记不等于受管准入或完整目标/验收版本模型 |
-| step5 | 无图单回合与输入投影沿用；显式启用的 Controller 已接入共享自动循环、平台任务与 Runner、持久输入修订、共享版本化交付验收及 Harness 语义组合（配置冻结、恢复绑定与回合内管线）；回合输入快照已随决策持久并校验恢复，完整入口收敛仍待交付 |
-| step6 | 决策接受、模型 responder、受控派发、串行恢复及 `AgentTurn` 已交付；显式启用的 Controller 已接入持久继续位置（接受决策链）、输入等待/唤醒、持久输入修订与共享交付验收记录；共同语义的生产认证仍开放 |
-| step7 | 无图 `ToolCallExecutor` 已交付，补记账本回填的 PostTool 输出治理；保留治理 profile、旁路、预算和跨执行方式完整认证 |
+| step5 | 两宿主已有无图 Controller、输入修订、共享验收、Harness 管线/输入快照、无进展保护及有界续跑；平台另有冻结 Skill 目录和限定 Agent 子调用，Runner 不继承这些平台专属能力；完整入口收敛、局部 Plan 与组合认证继续开放 |
+| step6 | 决策/动作及多轮恢复、续跑触发持久化已交付；平台本地审批/输入等待到期收敛、回执锚定计时器等待、限定 Agent 子调用及回调恢复已交付；Plan Revision、通用 Child Run 和跨执行方式生产认证仍开放 |
+| step7 | 共享 `ToolCallExecutor` 与恢复结果输出治理已交付；平台 Agent 子调用已有工具规则交集、调用额度和持久 token 预算切片；通用资源授权、可旁路边界及完整成本认证继续开放 |
 | step8 | 继续撤销，不恢复外部 Runtime 接入任务 |
 | step9 | 内置 Knowledge 接入、检索基础与页面链路已修复；沿用 Memory/Knowledge 分段替换，已有 provider/向量 adapter 不等于完整绑定、ACL、迁移和删除认证 |
 | step10 | 复用版本匹配、证据覆盖门禁与报告页面查询状态；评估、标注、人工/自动回灌、calibration、Prompt 优化/管理/分析与 trace REST 读取已有权限切片。后端替换与完整证据生命周期仍开放；本次 Task 的共享交付验收由 step5e/6 消费，仍不等于业务效果验收 |
-| step11 | 补记最小平台发布门禁、历史凭据/UI 与版本生命周期权限；Runner 制品签名与受信发布者启动准入已交付（Ed25519 离线签名、`--artifact-trust` 严格准入、负例回归），Runner 停机状态下的签名制品安装、冷启动版本切换与回退已交付（摘要寻址版本目录、原子激活指针、跨进程互斥、durable 非终态任务阻断；仅单宿主，不支持热升级与活跃 Run 迁移），标准归档打包与安装已交付（确定性 tar.gz 只运输签名布局、有界读取校验、复用目录安装门禁；运行环境仍需预装 wheel，不构成 air-gapped 依赖分发认证），热升级与完整 manifest/生命周期仍待交付 |
+| step11 | 平台发布门禁/凭据/权限及工具契约快照诊断已交付；Runner 签名启动准入、标准归档与单宿主停机安装/切换/回退已交付。运行依赖仍需预装，完整组合 manifest、运行期撤销和生产/完全隔离网络认证继续开放；详见本步，不以冷切换宣称热升级 |
 | step12 | 企业 Team/Membership 治理仍待交付；现有协作模式不计作企业团队 |
 | step13 | 团队委派/交接/验收仍待交付；单决策动作集合的串行恢复不计作团队 Batch |
 | step14 | Task/Run、动作、事件和命令回执观察页面及 Task 取消已交付；REST 命令/Task 提交与 workflow callback 已有角色门，Run SSE 已支持动态撤权，等待提交结果已刷新 Run 投影。平台本地补充输入及 ADMIN 审批决定页面已交付，任务详情页受控续跑观察面板已交付（任务级触发历史与各 Run 最终验收分别呈现），任务详情页父子调用观察面板已交付（父侧已接受调用与当前等待摘要、子侧父任务引用，双向导航；回调消费与子任务终态、交付验收分别呈现，只读不发出命令），完整团队工作台仍待交付 |
@@ -316,9 +317,9 @@ Sandbox 是内置 Runtime 按需使用、可独立发布的执行环境能力。
 
 step11 拆为最小发布门禁和多能力组合发布：平台版本评测门禁及凭据已可独立复用，执行部署启用仍须满足 step7 对应治理；组合发布随实际启用的 step9/10 能力扩展。最小绑定记录只记录已使用的实现、配置摘要与版本，不依赖第三方 Memory 迁移完成。step16 是贯穿式质量工作包，生产支持按范围授予；step15、step17、step18 按条件启动，不阻塞基础平台的生产支持。step19 分批执行，不等待所有生态能力完成，也不一次性删除全部旧代码。
 
-**近期受管闭环路径：**复用 step2 已对齐的目标、step3 驱动接缝、step5e/6 已交付的共享多轮 Controller、持久输入修订、版本化交付验收与 Harness 语义组合（含回合内管线及持久输入快照），以及 step7 可信工具组件；无进展保护首版（显式声明、只读观测事实、持久恢复）已交付；下一步补受控续跑与完整目标修订，逐项验证 Workflow/Pregel 共同机制、局部 Plan 与双向父子组合。step5d 入口身份/事件/响应适配可并行，默认切流依赖新执行路径的恢复、治理及逐入口证据；Runner 复用同一能力。并行复用 step11 发布证据及 step14 观察/取消，补齐最小 step10/11/14 的剩余门槛与对应 step16，形成 M-A/I-Cb 的限定支持范围。I-Ca 单独验收，不作为受管闭环整体前置。
+**近期受管闭环路径：**复用 step2 目标、step3 驱动接缝、step5e/6 共享 Controller、输入修订、交付验收、Harness 管线/快照、无进展保护及有界续跑，以及 step7 可信工具组件。平台已交付 Skill 目录、等待到期/计时器、单层 Agent 子调用及持久预算，下一步补完整目标修订、局部 Plan 和 Agent→Workflow 组合，逐项验证 Workflow/Pregel 共同机制；Runner 的平台专属能力另行实施及认证。step5d 入口适配可并行，默认切流依赖新路径恢复、治理及逐入口证据。复用 step11 签名/冷切换、step14 输入/审批及观察页面，补完整发布组合、双宿主真实模型采集及对应 step16，形成 M-A/I-Cb 的限定支持范围。I-Ca 单独验收，不作为受管闭环整体前置。
 
-上述为工作包内的连续切片，不新增必做 step5f，也不先造通用执行框架。闭环认证须在已交付组件上证明模型决策被接受、动作受控派发、最小交付/验收、停止与受控续跑、持久等待及 worker 重启后继续原执行；文件任务同时验证工作区/产物版本恢复。动态 Plan、异步 Child Run 和图组合按后续切片递增授予支持。每个切片同时给出自主行为、可靠性和结果证据，不将 Harness 与持久化拆成长期不相交的建设阶段。
+上述为工作包内的连续切片，不新增必做 step5f，也不先造通用执行框架。闭环认证须在已交付组件上证明模型决策被接受、动作受控派发、最小交付/验收、停止与受控续跑、持久等待及 worker 重启后继续原执行；文件任务同时验证工作区/产物版本恢复。限定 Agent 子调用不代表动态 Plan、通用异步子执行或图组合已通过。每个切片同时给出自主行为、可靠性和结果证据，不将 Harness 与持久化拆成长期不相交的建设阶段。
 
 **独立产品交付路径：**step1 增量 → step2 边界 → step3 本地制品/调用及共同执行接缝 → step5a/5b/5c 与 step5e/6/7 的本地自主执行、恢复及授权切片 → 最小 step10/11 + 对应 step16。到此可交付限定范围的独立生产 profile。step4 与 step5d 提供平台映射；独立与受管 profile 分别验收，不以特定业务 App 决定交付先后。独立交付不以组织/团队、知识库、全部平台入口迁移或完整生态建成为前置。实际启用的可选能力须额外完成其所属 step 与符合性测试。
 
@@ -331,11 +332,12 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 - [x] 记录执行入口、依赖闭包、能力/表归属、信任拓扑与旁路；保留 G1/G2 修复及旧协议/权限/恢复样本。
 - [x] 建立 SC 场景映射、模拟库存 API、隔离数据域和版本化评测输入；区分平台保证、可选实现及业务规则，固定预期产物、禁止动作、故障注入与复位方式。
 - [x] 明确独立/受管/完整平台及网络模式、状态 owner、本地证据和外部数据流；独立基线的静态依赖核对不冒充安装验证。
+- [x] Controller 双宿主基线采集器已统一数据、工具契约、核心提示、输出 Schema 与 rubric；平台和 Runner 的正常交付、审批恢复、取消、预算耗尽及未知结果停止已有确定性记录，原始记录保留实际模型输入、动作键、回执和停止分类。
 - [ ] 补齐主流程实际使用的模型、业务 API、MCP 工具与环境的数据流、保留条件和准入负例；登记运行使用量及未核验动态依赖，启动所属 change 时指派 owner。
 - [ ] 在同一评测包上形成可靠的单 Agent 成本/结果基线，再比较多 Agent；成本来源依赖 G4，团队比较随 step12/13。业务收益保持未验证。
 - [ ] 以研究与文件交付、受控业务操作形成互补的端到端样本：前者验证 Skill、文件/产物、上下文压缩、要求修订及结果检查，后者验证审批、业务确认、未知效果与恢复。按启用能力和切片选取断言，业务规则由 fixture 提供，样本通过只证明对应支持范围。
 
-**证据与退出：**见[实施基线](platform-evolution-baseline.md)、[独立消费基线](standalone-consumption-baseline.md)和 `tests/scenarios/manifest.yaml`。每个场景必须有输入、预期断言、状态 owner、责任步骤及支持状态；实际运行证据由对应步骤补齐。安全负例、重复写入和跨租户泄露不能用平均质量分抵消。已建立的模拟库存 API 和相关 SC 名称保留为历史技术 fixture，不构成行业产品需求；通用企业任务的新增验收由所属步骤补充，不将历史测试改名或直接视为新目标已通过。
+**证据与退出：**见[实施基线](platform-evolution-baseline.md)、[独立消费基线](standalone-consumption-baseline.md)和 `tests/scenarios/manifest.yaml`。双宿主采集入口与报告边界见[操作说明](../how-to/run-controller-host-baseline.md)：当前入库记录均为确定性注入，manifest 的真实模型 track 仍为 `skipped`；审批恢复为 SQLite 持久状态上的进程内宿主重装配，不是双宿主真实模型质量或跨进程/PostgreSQL 认证；`gate=false`、成本与业务收益仍未核验。每个场景必须有输入、预期断言、状态 owner、责任步骤及支持状态；实际运行证据由对应步骤补齐。安全负例、重复写入和跨租户泄露不能用平均质量分抵消。已建立的模拟库存 API 和相关 SC 名称保留为历史技术 fixture，不构成行业产品需求；通用企业任务的新增验收由所属步骤补充，不将历史测试改名或直接视为新目标已通过。
 
 ### step2 — 更新定位、决策记录与功能归属
 
@@ -352,7 +354,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 |---|---|
 | `unified-chat-execution` | 目标已改为统一执行应用服务及语义；step3 已解耦驱动类型，step5d 继续保持旧开关、会话亲缘和放量证据，验证新 Controller 路由 |
 | `dynamic-orchestration` 与 ADR-001/007/032/036 | ADR-037 及主 specs 已固定结构化图策略与 Controller/Harness 边界，并复核 persistence/code-as-plan 前提；step5e 交付对应实现，不重复创建同义 ADR |
-| `durable-execution-contract`、`accepted-agent-decision` 与父子执行规范 | 已接受决策、动作派发、Controller 多轮恢复及持久输入修订已有实际消费；Plan Revision、通用 Child Run、计时器/子结果唤醒及跨执行方式组合仍须增量定义，明确事务及字段 owner |
+| `durable-execution-contract`、`accepted-agent-decision` 与父子执行规范 | 决策/动作、多轮恢复、输入修订及有界续跑已消费；平台已有计时器、审批/输入到期及限定 Agent 子结果唤醒，后续补 Plan Revision、跨宿主/跨执行方式 Child Run，保留各类事实的事务及字段 owner |
 | `task-run`、`agent-environment`、`sandbox-environment-mount` 与 `sandbox-provider-contract` | step2/3/5/6/7 明确目标/验收修订、产物及证据引用，分开平台 Workspace、文件工作区与环境；复核按 Agent 默认跨 Session 共享及 Agent ID volume 的适用范围，旧文件先核验归属/授权再绑定，不自动向新任务或委派开放 |
 | `engine-design.md`、Runtime `AGENTS.md` | 目标职责已对齐；step5/6 随实际实现更新状态，保持 Runtime 不依赖宿主/平台的自足约束 |
 | positioning、功能清单、roadmap 与入口支持矩阵 | step2 及对应交付步骤更新目标、依赖和认证范围；历史 Feature ID 与证据保留 |
@@ -374,7 +376,8 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 - [x] `ExecutionDriver`/`PregelExecutionDriver` 已解除共享应用服务对 PregelRuntime 的直接类型绑定，builtin/Runner 装配已迁移；服务可在阻断 Pregel 导入时由非图测试驱动执行。显式启用的 Controller 已通过 `ControllerExecutionDriver` 在平台任务与 Runner 实际消费，既有图路径保留 Pregel；此为内部驱动边界，不是外部 Runtime 插件协议。
 - [x] 已定义并由 `DecisionStep`、`AcceptedActionStep`、`AgentTurn` 实际消费 `AcceptedDecisionStore`、Run/ownership、决策及动作摘要等内部接缝，SQL 实现在 durable 包；最终回答以显式版本区分，成功动作回合提供校验后的输入投影，不泄漏到公开后端 DTO。
 - [x] Controller 继续位置由已接受决策链投影，输入修订固定因果生效回合与内容摘要，持久唤醒同事务记录修订及命令回执；`AcceptanceDeclaration` 与共享验收记录由平台和 Runner 实际消费，标准摘要固定到决策，终态记录关联执行与交付身份。
-- [ ] 在既有接缝上补齐 Controller/Workflow 共同消费、通用 Child Run、计时器/子结果唤醒契约。每类新增事实明确 owner、提交关系、版本和失败语义，按 step6 增量验证，不预建任意框架插件。
+- [x] 平台本地 Controller 已消费回执锚定计时器和单层 Agent 子调用契约：绑定原决策/动作及 Task/Run，计时器到期不伪造业务进展，子结果仅经核实回调写入专用输入修订。到期、回调、取消共享提交时复核；支持边界及证据见 step6。
+- [ ] 在上述实际消费上补 Controller/Workflow 共同语义、Runner 等宿主及通用 Child Run。每类新增事实明确 owner、提交关系、版本和失败语义，按 step6 增量验证，不预建任意框架插件。
 - [ ] 扩展完整目标/验收修订、Artifact/ArtifactVersion 和 Evidence Receipt 的引用及状态；沿用已交付的标准版本、停止原因与交付验收记录，平台及本地记录按各自 owner 提交。由 Controller/Runner 和任务查询实际消费，不先创建完整资产服务或通用验收框架。
 - [ ] 对启用文件任务的 profile 明确文件工作区绑定、权限、存储/内容版本、交付状态与环境访问引用；工作区可跨 Run 复用，恢复不依赖宿主路径或进程内对象。复用现有存储及 Sandbox 契约，step9 扩展生命周期治理。
 
@@ -405,7 +408,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 | step5b：独立发行包 | 已交付 | `hecate-runtime` wheel、依赖闭包、配置注入、兼容转发与干净安装；不反向依赖完整 Hecate |
 | step5c：独立宿主 | 预览范围已交付 | Runner 与 builtin 共享执行应用服务；公开请求/回执/事件契约、本地制品与身份校验、SC01/SC02 只读场景。固定工具计划与 Stub/endpoint 不能证明自主工具选择 |
 | step5d：平台入口收敛 | 部分完成 | HTTP/MCP/IM/评估/A2A/定时 Agent 已迁移，workspace 路由与会话亲缘、OpenAI/SSE 兼容和分层守卫已交付；剩余项如下 |
-| step5e：内置自主执行收敛与验证 | 共享多轮 Controller、持久输入修订与版本化交付验收已在平台及 Runner 显式启用路径实现 | 双路径停止/结构化输出与 Workflow 子任务契约已有证据；真实模型基线、限定断连及持久审批 worker 重启恢复已记录，延迟/成本与生产退出门槛、Runner 真实模型自主选择仍开放。Harness、通用 Plan/Child Run 和完整完成控制继续增量交付；证据与边界见下文 |
+| step5e：内置自主执行收敛与验证 | 两宿主已交付循环、输入修订、交付验收、Harness 管线/快照、无进展保护及有界续跑；平台另有 Skill 目录、计时器和限定 Agent 子调用 | 历史真实模型/重启证据沿用；新增双宿主采集记录仍为确定性注入。完整目标修订、Plan/双向图组合、Runner 平台专属能力与生产质量/成本门槛继续开放；证据与边界见下文 |
 
 **step5d 剩余项：**
 
@@ -417,7 +420,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 **step5e 操作与验收门槛：**
 
-**既有技术与真实模型证据：技术切片已交付（change `builtin-autonomous-execution`，含复核修复），登记 1.3.11h/1.3.11i。`step5e-real-model-baseline` 保留原 rubric v3 观测，新增 `zai/glm-4.5-flash` 的 v4 原始记录：停止分支正确，实测暴露引擎格式修复丢失工具上下文，确定性复现与修正后的定向补采已记录，产物和同步审批续推通过。真实 TCP RST 恢复已核对 PG 持久取消终态、首轮真实回执与正确 JSON，工具无重复；SQLite 层只授予进程内恢复证据。同用户同 Agent 的新快照才可自动恢复历史，旧归属不推断，显式客户端历史保持原语义。部分延迟仍超阈，成本未核实，不宣告整体通过；Runner 真实模型自主选择、独立 workflow 身份与生产退出门槛仍开放。详见[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)。Workflow 组合已由 `step5e-workflow-agent-continuation` 补充限定证据：步骤声明 `approval_wait` 经子任务持久化输入启用审批链，系统发起执行以 agent principal 派生键持久化引擎快照（不伪造人类用户），子任务审批拒批经核实回调与持久 outbox 重试按父流程失败策略收敛，分别覆盖仅子 worker 重启及父、子 worker 分别重启，关联/审批/回执/流程位置从 PG 恢复、产物校验通过父流程才推进。原真实模型摘要保留（gate=false）；复核真实模型在原 Run 恢复且工具仅执行一次，但最终输出非 JSON，父按 Schema 正确拒绝推进，组合成功验收仍开放。复核结果见[组合复核](../../openspec/changes/archive/2026-10-17-step5e-workflow-agent-continuation/review.md)。等待到期自动收敛仍开放。**
+**既有技术与真实模型证据：技术切片已交付（change `builtin-autonomous-execution`，含复核修复），登记 1.3.11h/1.3.11i。`step5e-real-model-baseline` 保留原 rubric v3 观测，新增 `zai/glm-4.5-flash` 的 v4 原始记录：停止分支正确，实测暴露引擎格式修复丢失工具上下文，确定性复现与修正后的定向补采已记录，产物和同步审批续推通过。真实 TCP RST 恢复已核对 PG 持久取消终态、首轮真实回执与正确 JSON，工具无重复；SQLite 层只授予进程内恢复证据。同用户同 Agent 的新快照才可自动恢复历史，旧归属不推断，显式客户端历史保持原语义。部分延迟仍超阈，成本未核实，不宣告整体通过；Runner 真实模型自主选择、独立 workflow 身份与生产退出门槛仍开放。详见[基线复核](../../openspec/changes/archive/2026-10-16-step5e-real-model-baseline/review.md)。Workflow 组合已由 `step5e-workflow-agent-continuation` 补充限定证据：步骤声明 `approval_wait` 经子任务持久化输入启用审批链，系统发起执行以 agent principal 派生键持久化引擎快照（不伪造人类用户），子任务审批拒批经核实回调与持久 outbox 重试按父流程失败策略收敛，分别覆盖仅子 worker 重启及父、子 worker 分别重启，关联/审批/回执/流程位置从 PG 恢复、产物校验通过父流程才推进。原真实模型摘要保留（gate=false）；复核真实模型在原 Run 恢复且工具仅执行一次，但最终输出非 JSON，父按 Schema 正确拒绝推进，组合成功验收仍开放。复核结果见[组合复核](../../openspec/changes/archive/2026-10-17-step5e-workflow-agent-continuation/review.md)。该历史报告未覆盖等待到期自动收敛；平台本地后续交付见 step6，不追授原组合真实模型验收。**
 
 `step5e-durable-approval-continuation` 已为显式启用持久审批的内置任务记录 PostgreSQL worker 重启续跑证据：等待与 pending 绑定持久化，合法决定后在原 Run/会话继续，原审批与稳定动作 ID 保留；覆盖停车前成功写入、消费后领取前崩溃及相同参数新动作的再次审批，模型收到真实回执。跨进程时钟锚须由在线 SQL 权威重新核验，不延长原批准期限。真实模型补采保留原记录，gate=false、成本未知。审批决定经可信服务边界注入；控制面进程重启、离线时钟信任及任意故障组合仍未认证。见[审批续跑复核](../../openspec/changes/archive/2026-10-17-step5e-durable-approval-continuation/review.md)。人工审批决定闭环已交付（`task-approval-interaction`）：平台本地等待仅 workspace ADMIN 可决定且禁止自审（身份从持久化责任链与执行输入核对，不可信即只读），权威判定经 CAS 原子迁移（并发相反决定唯一胜出），决定操作以稳定 operation_id 幂等重放/冲突，权威决定与操作审计同事务提交，恢复分阶段持久——崩溃窗口由 worker 具名恢复消费者按确定性命令补齐（不覆盖到期收敛、不延长原批准期限）；任务详情页提供白名单摘要面板与真实命令回执，通用 resume 不能生成批准事实，操作身份固定完整决定请求。真实停车→批准/拒绝→续跑/拒批收敛的端到端证据见[人工审批决定操作说明](../how-to/decide-task-approvals.md)。平台本地持久等待的 HTTP/UI 人工入口已由本切片覆盖，其余组合仍未认证。
 
@@ -428,8 +431,9 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 - [ ] 扩展已交付的声明式交付验收与完成控制：共享检查器已支持 `output_schema`、`content_contains`，区分 `passed/acceptance_failed/acceptance_unverified/not_declared`；后续依据当前目标/标准、真实结果和产物版本判断完成，并补业务确认；无进展检测首版已交付（显式声明观测范围与上限，比较动作参数与账本结果摘要等记录事实，合法等待与观测外动作不算停滞，计数随决策链恢复，停止分类 `no_progress_limit` 不标记成功）。内容包含检查和 Schema 通过不代表业务目标满足，不把合法轮询等同死循环。Goal Evaluator 可选，不能仅由模型自报成功推进 Task。
 - [x] 自动续跑记录触发原因、次数、进度依据及继续位置，沿用 Task 累计预算和原期限；评估调用本身计入用量。重启不清零，取消/撤权后不得由 evaluator 重新激活；最小状态接口可观察续跑，不将内部控制消息冒充用户新指令。声明式验收失败后的有界受控续跑已交付：显式声明 `controller.continuation`（正整数上限、版本固定）且要求同时声明验收标准，未声明时保持既有行为。两宿主复用同一策略、反馈投影与停止语义。触发事实（候选决策身份与摘要、标准与检查器绑定、失败依据、续跑次数、策略摘要与继续位置）在下一次模型调用前持久确认，同一触发只消费一次，持久提交失败不再调用模型。续跑沿用同一 Task/Run 与原决策链：已提交轮次零模型调用重放、已完成动作从账本恢复、不新增 Run 或动作键；turn 上限、累计预算、原期限与无进展保护均不清零（内部反馈不清零观测窗口）。原候选回答与接受决策不可变，反馈为内部控制消息，不生成人工输入修订、不进入冻结基础输入。验收未核验、检查器失联、未知副作用、取消、撤权、预算/期限耗尽与无进展停止均不触发续跑；策略或标准改写、同版本冲突与损坏事实显式停止待对账。最小只读观察摘要（原因、次数/上限、候选决策引用、检查结果与继续位置）随任务详情提供，GET 不触发检查、续跑或状态迁移；操作说明见[验收失败后的受控续跑](../how-to/continue-after-acceptance-failure.md)。把评估调用计入用量的通用 Goal Evaluator 与完整目标修订仍未交付。
 - [ ] 保留 TaskDAG→Pregel 作为结构化执行策略；直接行动、Todo、局部依赖计划及已发布 Workflow 可按任务选用，不强制每轮生成完整 DAG。计划修订须处理已完成、运行中、未派发和结果未知的工作，不能改 ID 绕过待对账动作。
-- [ ] 建立最小 Child Run 契约并验证 Agent 调 Agent、Agent 调 Workflow 和 Workflow 调 Agent；稳定父子身份、显式输入/产物、取消/期限、权限收窄和结果验收共同生效，不等待 step12/13 企业 Team。
-- [ ] 对子执行分别声明同步/异步调用、可重新计算/可持久恢复和单项/批量组织；同步不代表非持久，异步不自动保证恢复。允许重新计算的分析委派可以不独立 checkpoint，但其受控动作仍保留稳定身份、账本和对账约束；恢复重算可能增加模型成本。
+- [x] 平台本地 `controller.agent_children` 已交付单层 Agent→Agent：模型仅选择已声明 alias 并提交显式输入，稳定父动作身份派生子任务幂等键；父等待绑定真实接受回执，核实子终态及交付后以 `agent_child_result` 修订唤醒。创建确认丢失、父/子恢复、重复或丢失回调、父取消与期限、Schema 拒绝均有确定性证据；权限和持久预算边界见 step6/7。此切片不构成企业 Team。
+- [ ] 在既有 Workflow→Agent 与限定 Agent→Agent 上补 Agent→Workflow、跨宿主及通用双向组合；Runner 子调用、递归委派、局部 Plan 和完整批量能力未交付，不从平台单层调用继承支持。
+- [ ] 在已支持的持久异步子调用上继续扩展并声明同步/异步、可重新计算/可持久恢复和单项/批量保证；同步不代表非持久，异步不自动保证恢复。允许重新计算的分析委派可以不独立 checkpoint，但其受控动作仍保留稳定身份、账本和对账约束；恢复重算可能增加模型成本。
 - [ ] 用真实模型验证依工具反馈改变后续动作、完成开放任务和局部计划；声明 Schema 时校验输出。固定数据、模型/工具版本、rubric、延迟和成本门槛，分别保存确定性断言与真实模型质量；不要求每次生成相同行动序列。
 - [ ] 验证 Workflow 的显式条件、失败策略和产物验收，保留普通 LLM 节点；审批、双方重启及重复回调复用共同机制。现有 Coordinator 子图的内存 checkpoint、局部进度及关键事件写入失败后继续路径须改造或限制支持范围。
 - [ ] 比较新 Controller、旧直接循环和 Pregel Agent 图的质量、交互、流式、恢复及维护成本，用于兼容迁移和实施优化；目标职责不再待选。物理拆包须有具名消费和依赖证据，不提前移除 Pregel 或扩展通用引擎体系。
@@ -440,7 +444,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 ### step6 — 持久任务、控制命令与治理事件
 
-**状态：step6a—6f、决策/动作及单回合恢复已交付；共享多轮 Controller、持久输入修订与版本化交付验收已接入平台和 Runner。Plan Revision、通用 Child Run、跨执行方式共同语义与生产场景整体认证继续增量交付。**详细过程见[执行复核](step6-execution-review-report.md)、[验收复核](step1-step6-acceptance-review.md)与[后续复核](step6-followup-review.md)；新增循环/验收证据见下文。
+**状态：step6a—6f、决策/动作、多轮恢复、输入修订、版本化交付验收及有界续跑已交付；平台本地另有审批/输入等待到期、计时器等待和单层 Agent 子调用恢复。Plan Revision、通用 Child Run、跨执行方式共同语义与生产场景整体认证继续增量交付。**详细过程见[执行复核](step6-execution-review-report.md)、[验收复核](step1-step6-acceptance-review.md)与[后续复核](step6-followup-review.md)；新增证据见下文。
 
 | 切片 | 已交付及验证范围 | 保留的限制 |
 |---|---|---|
@@ -470,19 +474,26 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 - [x] `AgentController`/`ControllerExecutionDriver` 在上述组件上交付自动多轮循环；继续位置由权威决策链重建，回合上限及绝对期限不因重启重置。已接受决策不重问、已确认动作不重做，未知结果停止待对账；平台和 Runner 显式装配共享实现，等待沿用宿主持久信号。
 - [x] `DurableInputRevisionRow`、SQL store 与迁移 `020_durable_input_revision` 保存输入内容摘要、来源命令和因果回合；修订、等待消费、唤醒 CAS 与命令回执同事务提交。决策固定所见修订，跨多次等待与新进程按因果顺序恢复，历史缺失或损坏停止待对账；审批控制数据不伪装为用户输入。
 - [x] 共享版本化交付验收冻结完整声明摘要并绑定每个决策，平台与 Runner 判定一致；验收记录随终态及既有 outbox 同事务持久化。最终决策提交后终态写入前故障可恢复，同版本改写标准停止待对账；检查失败/不可用保留交付与已完成动作，无声明路径记录 `not_declared`。
+- [x] 平台本地审批及普通输入等待已有 worker 到期收敛：分别以 `approval_wait_expired`、`input_wait_expired` 失败并保留原动作/等待事实，不生成批准或输入、不重问模型。普通输入须显式声明超时，并锚定首次事务回执且不超过任务期限；审批沿用原 token/权威期限。到期、合法唤醒与取消在提交时锁内复核；身份、绑定或时间不可核验进入待对账，无 reconciler 的 profile 不承诺自动收敛。
+- [x] 平台本地 `controller.timer_wait` 已消费只读工具的版本化结构化声明，按首次持久回执计算固定唤醒时间；worker 原子消费等待并续接原 Run，崩溃不重置计时，人工输入不能提前唤醒。时间流逝不写用户修订、不清零无进展窗口、回合上限及原期限；Runner 与通用 Workflow 计时器不在本切片范围。
+- [x] 平台单层 Agent 子调用经真实 submit/dispatcher 创建，接受回执、子责任链及父等待相互核验；父沿用真实发起者，子结果验证生命周期、交付绑定和声明的输出 Schema 后写入专用持久修订。回调丢失由 worker 重放同一可信回调，父取消/期限阻止子后续派发并记录真实取消请求；损坏与未知结果待对账，人工输入不能伪造子结果。限同 workspace、builtin/in_process；不支持递归、Runner、Agent→Workflow 或子任务 Knowledge/Skill/Memory。
+- [x] 声明式验收失败后的有界续跑在两宿主持久记录不可变候选、触发去重、次数及反馈，下一次模型调用前提交；沿用原 Task/Run、决策链和资源约束，未知/未核验结果及终止条件不触发续跑，详见 step5e。
 
 证据：[决策接受](../../openspec/changes/archive/2026-10-18-step6-accepted-agent-decision/review.md)、[模型 responder](../../openspec/changes/archive/2026-10-18-step6-runtime-port-decision-responder/review.md)、[单动作派发](../../openspec/changes/archive/2026-10-18-step6-accepted-action-dispatch/verification.md)、[动作集合恢复](../../openspec/changes/archive/2026-10-17-step6-accepted-action-batch-recovery/verification.md)、[单回合组合](../../openspec/changes/archive/2026-10-18-step6-accepted-agent-turn/verification.md)、[最终回答接受与恢复](../../openspec/changes/archive/2026-10-18-step6-accepted-final-answer/verification.md)及[成功回合输入投影](../../openspec/changes/archive/2026-10-20-step6-agent-turn-feedback-projection/verification.md)。上述历史报告维持原范围；后续[循环与新进程恢复测试](../../packages/hecate-durable/tests/test_agent_controller_loop.py)、[输入修订事务测试](../../packages/hecate-durable/tests/test_input_revisions.py)、[平台验收测试](../../tests/test_execution/test_delivery_acceptance_dispatch.py)及[Runner 测试](../../packages/hecate-runner/tests/test_controller_loop.py)覆盖新增闭环。durable 故障测试默认覆盖 SQLite，配置 `DURABLE_TEST_POSTGRES_URL` 才纳入 PostgreSQL；测试实现存在不代表本次已执行该矩阵，也不替代真实模型、安装制品或生产认证。
+
+新增等待与子执行证据：[审批到期](../how-to/approval-wait-expiry.md)、[输入等待及超时](../how-to/handle-task-input-waits.md)、[计时器实现](../../src/hecate/execution/timer_wait.py)及[故障测试](../../tests/test_execution/test_timer_wait.py)、[Agent 子调用/恢复及预算测试](../../tests/test_execution/test_agent_child_run.py)。这些平台宿主测试含 SQLite 独立进程恢复及竞争分支；不能因配置 `DURABLE_TEST_POSTGRES_URL` 就视为上述测试执行了 PostgreSQL，仍须单独登记实际矩阵。Runner 不继承平台专属等待/子调用认证。
 
 **继续交付：**
 
 - [ ] 在已交付 Controller 循环与宿主衔接上补齐生产认证、未提交模型响应的重试策略及重复/未知费用记录。决策提交后才派发原动作集合，不能重问模型替换未结算动作；不记录隐藏推理。
 - [ ] 区分 PlanProposal、AcceptedPlanRevision 与由 Task/Run/Action/验收事实投影的进度；接受修订先落盘，模型自报 completed 不能提交任务成功。输出复用须核对输入、版本、权限和验收适用性，历史事实不覆盖。 非幂等操作结合稳定业务引用、目标系统幂等键和对账约束；结果未知时限制相关重规划，不承诺自动识别任意语义同义动作。
-- [ ] Child Run 创建与父调用关联可恢复，父进程重启找回仍在执行的子任务，已完成结果可重用；明确父取消/超时后的子任务处置及迟到回调，不把会话 ID 当作全部 Task/Run 身份。
-- [ ] 在已交付的输入修订与审批等待上扩展计时器、通用子执行结果及等待到期自动收敛；等待释放 worker 资源。继续验证跨执行方式的重复/并发唤醒、派发竞争和生效边界，命令回执区分已接收与已应用。
+- [ ] 在已交付的限定 Agent 子调用与 Workflow 子任务上扩展通用 Child Run，验证跨宿主/跨执行方式的创建去重、父重启找回、结果复用及取消/期限；不把会话 ID 当作全部 Task/Run 身份，不重新实现已有子任务调度。
+- [ ] 在平台本地等待实现上验证其他宿主、Workflow 共同消费及完整故障组合；保留等待类型各自的 owner 和唤醒权限。跨执行方式的重复/并发唤醒、派发竞争和生效边界继续验证，命令回执区分已接收与已应用。
 - [ ] Agent Controller 与 Pregel 执行消费同一动作、等待、所有权和恢复语义，保留各自状态及版本；图检查点不替代动作账本，超步不等于模型决策单元。复用现有本地事务、事件/outbox 和投影，明确决策、账本及事件的提交关系，不增设平行 Journal 真源或跨系统事务。
 - [ ] 在已持久化的声明/验收记录上扩展有权主体接受的目标/标准修订、生效边界与正式产物/业务证据版本；Run 结束、交付、验收和业务对账分别投影。过期版本、缺证据及必需检查失联不算通过，不因验收失败重做已确认的动作。
-- [ ] 将 Evidence Receipt 作为动作记录、业务确认和产物版本的授权查询视图；绑定稳定 Action/Artifact 身份、来源与版本，展示编号只作别名，不依赖消息位置。内容摘要说明校验对象及可重验条件，压缩/裁剪后不能假称仍持有原文；不增设独立 Receipt 真源。
-- [ ] 自动续跑的触发去重、计数及调度提交具有恢复边界，与取消、目标修订和新输入竞争时按版本判定；累计预算不得因新回合或重试 Run 清零，新增额度须另经授权。已停止的 Task 不因迟到评估重新入队。
+- [x] Action Evidence Receipt 已作为现有动作账本的授权只读视图交付，固定 Task/Run/Action 定位、读取版本及摘要校验对象，核验决策关联且不泄露原始参数/结果；不新增 Receipt 真源，不以摘要一致证明业务目标通过，详见 step14。
+- [ ] 在已有动作证据视图上扩展业务确认与正式 ArtifactVersion 的授权引用及可重验条件；压缩/裁剪后不能假称仍持有原文，展示编号不依赖消息位置。
+- [ ] 在已有有界续跑上扩展完整目标修订、新输入及通用 evaluator 的版本竞争和预算认证；累计预算不得因新回合或重试 Run 清零，新增额度须另经授权。已停止的 Task 不因迟到评估重新入队。
 
 **未完成的治理与认证：**
 
@@ -497,7 +508,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 **目标：**先完成内置执行与独立宿主必需的身份、动作授权、审批、凭据及预算闭环，与 step5e 并行。受管断连策略随 I-Cb 验证；新协议及外部 Agent 集成暂缓，先验证主流程与已有入口。
 
-**状态：本地治理切片已交付（#245，change `runtime-independent-governance`）：统一受控动作边界贯通平台与独立宿主（readonly 不豁免）、审批绑定与本地审批权威、本地 policy profile 与撤销、预算预留/结算与凭据引用、SC03 场景翻转为 implemented 并登记支持矩阵。受管授权租约 profile 切片已交付（change `managed-lease-profile`）：租约签名集扩展（policy_version/iat 参与 HMAC）、受管 profile 事实门与可信时间陈旧窗口（时钟回拨拒绝、重启重锚）、引擎本地审批绑定断连桥（不消耗租约 nonce）、重连期望配置指纹门（pull/accept 比对、证据补传不受阻）、平台事件位置唯一约束与分配冲突收敛（含历史同位修复迁移）。I-Cb 里程碑其余组成（step11 完整发布组合/执行准入、step14 审批/输入等最小交互干预、step16 断连故障集）、Sandbox 包装与旁路封闭验证、真实模型多轮验收（step5e）仍开放；交付范围与未验证项见各 change 的 support-matrix.md 与对应主 spec。**
+**状态：本地治理切片已交付（#245，change `runtime-independent-governance`）：统一受控动作边界贯通平台与独立宿主（readonly 不豁免）、审批绑定与本地审批权威、本地 policy profile 与撤销、预算预留/结算与凭据引用、SC03 场景翻转为 implemented 并登记支持矩阵。受管授权租约 profile 切片已交付（change `managed-lease-profile`）：租约签名集扩展（policy_version/iat 参与 HMAC）、受管 profile 事实门与可信时间陈旧窗口（时钟回拨拒绝、重启重锚）、引擎本地审批绑定断连桥（不消耗租约 nonce）、重连期望配置指纹门（pull/accept 比对、证据补传不受阻）、平台事件位置唯一约束与分配冲突收敛（含历史同位修复迁移）。I-Cb 的完整发布组合、断连故障集、Sandbox 包装与旁路封闭、真实模型质量/成本仍开放；step14 平台本地输入/审批已交付，其他宿主/部署组合另验。交付范围与未验证项见各 change 的 support-matrix.md 与对应主 spec。**
 
 **操作：**
 
@@ -524,9 +535,11 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 - [ ] 重连先验证宿主与当前授权、撤销和期望配置，再允许新受保护动作；历史证据按游标去重补传。过期审批、旧授权和迟到命令不能重新激活动作；未对账 Run 维持原身份/版本与待对账状态。信任根更新与退出受管模式须显式管理员流程及审计，不接受普通控制事件修改信任根。（投递、动作租约和命令恢复技术链已由 step6 验证；本项仍须完成期望配置、撤权与断连策略认证。）
 - [ ] 关键动作留存 attempt/outcome。外部动作成功但回执持久化失败时进入对账；不声称数据库事务能让外部系统达到 exactly-once。
 
-**已交付的共享执行切片：**`ToolCallExecutor` 已从 ToolWorker 提取，脱离 Graph/Worker 仍复用原工具策略、审批、hooks/middleware、账本、结果和 sandbox 路由；ToolWorker 保留兼容委托，`AcceptedActionStep` 已实际消费。双入口行为及 Runtime 自足证据见[共享工具执行复核](../../openspec/changes/archive/2026-10-18-step7-shared-tool-call-executor/verification.md)。这不等于所有入口/Child Run 已接入，审批等待信号传播也不等于完整 Controller 已实现停车与唤醒。
+**已交付的共享执行切片：**`ToolCallExecutor` 已从 ToolWorker 提取，脱离 Graph/Worker 仍复用原工具策略、审批、hooks/middleware、账本、结果和 sandbox 路由；ToolWorker 保留兼容委托，`AcceptedActionStep` 已实际消费。双入口行为及 Runtime 自足证据见[共享工具执行复核](../../openspec/changes/archive/2026-10-18-step7-shared-tool-call-executor/verification.md)。这不等于所有入口/Child Run 已通过共同治理认证；Controller 停车/唤醒已有后续实际消费，支持范围以 step5e/6 为准。
 
 - [x] 成功动作从账本回填时重新执行 PostTool chain（优先）或 legacy hook 的输出治理，BLOCK/SANITIZE 后才返回模型，治理异常保守停止；已治理的 channel/message 历史不重复治理。恢复使用稳定 invocation_id，不新增业务调用、账本领取或审批，也不改写原成功事实；无治理配置时保持原透传语义。见[恢复结果治理复核](../../openspec/changes/archive/2026-10-20-step7-replayed-tool-result-governance/verification.md)。证据包含 Worker、AcceptedActionStep 及 SQLite 双实例，真实模型、PostgreSQL 进程矩阵和原文长期保留策略仍未由该切片认证。
+- [x] 平台单层 Agent 子调用按声明的精确工具列表收窄目标冻结策略，并合并父/目标规则；任一侧拒绝或需审批的不可委派组合在接受前拒绝，参数条件继续在运行时按交集判定。跨 workspace、递归及无法表达的资源授权组合不接受；这不是通用资源委派模型。
+- [x] 子调用可声明任务总 `budget_units` 与各 target 的调用切片，声明总额时不能留下未计量 target；单位为模型 token。`DurableSliceLedger` 在子任务 durable 行按 revision CAS/派发 lease 保存模型尝试预留、结算与未知占用，跨重启不重发预算；未知用量保留完整预留，损坏事实待对账而非记零。workspace 配额在创建前按稳定调用键预留，接受拒绝才释放，已创建子任务不因提交响应异常退款；终态结算独立于父唤醒，父取消/到期后仍可重试收敛，重复回调不重复结算。父累计切片消费随可信唤醒持久提交。证据见[实现](../../src/hecate/execution/agent_child.py)、[独立结算](../../src/hecate/execution/task_control.py)与[预算故障回归](../../tests/test_execution/test_agent_child_run.py)；供应商实际账单、工具费用和全平台成本认证不由此授予。
 
 **落点：**共享执行组件在 `hecate_runtime`，本地存储在 `hecate_durable`；`enterprise/`、`tools/gateway/`、`tools/policy/`、`models/approval.py`、`ops/` 与 composition 提供平台策略和装配。
 
@@ -654,11 +667,14 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 ### step11 — 建立 Agent 登记、准入与发布闭环
 
-**状态：最小平台版本发布证据已交付，完整治理生命周期与本地安装/升级仍开放。**
+**状态：最小平台版本发布证据、工具契约快照诊断，以及 Runner 签名准入/标准归档/单宿主冷切换已交付；完整治理生命周期、组合发布与生产认证仍开放。**
 
 - [x] 评测 Run 固定 Agent ID、版本、配置摘要和快照；发布候选与回归基线按各自版本匹配，冻结样本/指标/豁免范围及数据集摘要，证据缺失与低质量分别拒绝。force 绕过须留审计，不冒充通过。
 - [x] 发布指针移动与只追加 `AgentPublicationModel` 凭据在同一事务；保存 candidate/baseline Run 身份、gate 配置/报告快照和 `passed/warn_passed/force_bypassed/gate_off` 结论。历史查询不重算门禁，旧发布不补造凭据；Studio 历史面板支持分页及证据展开。
 - [x] Agent 版本生命周期 REST 入口已校验 workspace 归属与读写角色；viewer 可读不可写，跨 workspace 隐藏为不存在，缺 workspace 的非 system 身份拒绝。受信内部兼容路径不等于其他协议入口已认证。
+- [x] 新 AgentVersion 按执行装配的 builtin 优先及 workspace 工具解析规则，冻结模型可见 `name/description/parameters`、摘要范围/格式和解析来源；版本面板区分契约一致、变化、缺失与未核验，同名换绑单独提示。历史/损坏基线不补造，未解析工具仍可提交；不调用外部 MCP/REST、不复制凭据，也不改变 content hash、既有发布门禁或凭据语义。该快照是诊断证据，不保证运行实现/权限固定；见[工具漂移说明](../how-to/check-agent-tool-drift.md)及[回归](../../tests/test_api/test_agent_versioning.py)。
+- [x] Runner 已支持离线 Ed25519 签名及 `--artifact-trust` 启动前严格准入，受信发布者与信任根来自运维配置；签名覆盖 manifest 及其所列内容摘要，未知/撤销签发者、篡改与不支持格式拒绝启动。不带该选项仍为 digest-only，不宣称发布者认证；当前只在启动时执行信任准入，运行期撤销须重启，见[签名说明](../how-to/sign-runner-artifacts.md)。
+- [x] Runner 已支持签名制品目录与确定性 tar.gz 的离线安装、摘要寻址 release、staging 校验、原子激活指针及 generation 冲突门；启动/切换共用宿主锁，按当前信任材料和完整 profile 复验。切换/回退仅支持单宿主停机与下一次冷启动，durable 模式限定已初始化的本地绝对 SQLite 绑定，非终态任务或状态不可核验阻断切换；回退不改写执行、审批、预算或已知撤销。归档有界读取且拒绝非法成员，不携带宿主身份/秘密/运行数据或执行安装脚本；依赖 wheel 仍须预装。操作与支持边界见[安装与回退](../how-to/install-runner-releases.md)。
 
 证据：[版本绑定](../../openspec/changes/archive/2026-10-17-step11-agent-version-evaluation-binding/verification.md)、[证据完整性](../../openspec/changes/archive/2026-10-17-step11-agent-evaluation-evidence-completeness/verification.md)、[发布凭据](../../openspec/changes/archive/2026-10-17-step11-agent-publication-receipt/verification.md)、[发布历史页面](../../openspec/changes/archive/2026-10-18-step11-agent-publication-history-ui/verification.md)与[版本权限边界](../../openspec/changes/archive/2026-10-18-step11-agent-version-access-boundary/verification.md)。发布凭据只固定发布时所消费的证据，不是 Runtime/工具/Memory/Knowledge 全组合 manifest；现有 rollback 创建新版本且不移动发布指针，不代表生产路由回滚已交付。
 
@@ -671,13 +687,13 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 **操作：**
 
 - [ ] 增加生命周期：draft、pending_review、approved、active、suspended、retired；绑定负责人、用途、数据范围和治理等级。
-- [ ] 复用 AgentVersion/WorkflowVersion/SkillVersion，创建发布清单，固定 Runtime adapter、能力快照、Memory/Knowledge binding、工具 schema、凭据引用及评估证据。
+- [ ] 在已有版本、工具契约诊断及 Runner 制品上创建完整组合发布清单，固定 Runtime adapter、能力快照、Memory/Knowledge binding、工具 schema、凭据引用及评估证据；诊断快照不代替执行绑定或准入门禁。
 - [ ] 发布清单分别固定每个已绑定能力的契约、adapter、服务实现及必要的数据格式版本；准入只验证本次组合，不能把一个组合的测试结果自动继承给同供应商的其他版本或其他部署形态。
 - [ ] 涉及知识检索的发布组合另固定完整 Knowledge 服务版本，或组件化 pipeline 的 Loader/Parser、Chunker、Embedding、VectorStore/全文索引、Retriever、Reranker 和可选图检索版本；同时固定索引快照、来源/ACL 水位与引用能力。组件缺失时只记录实际启用项。变更 Embedding/维度、索引或权限传播语义须重新构建/验证相关索引及运行评测，不把普通配置切换当作已完成迁移。
 - [ ] 支持代码、图形及语义作为创作入口；对发布型 Workflow 先澄清关键条件、审批主体和失败策略，校验生成定义并按风险评审后固定版本。保留源语义、生成配置与制品摘要的关联；运行内 Plan Revision 仅属于该 Run，不自动成为发布资产，不能改写既有业务授权。
 - [ ] 为 Agent Engineering 固定从源配置到发布制品的可复现记录：源版本/摘要、构建输入、依赖与 adapter 版本、契约/安全/评测测试结果、制品摘要；允许调用企业 CI/CD，平台只消费签名或可验证的构建/测试回执。
-- [ ] 增加本地安装/升级流程：校验 manifest schema、内容摘要、签名/签发者、后端与状态格式兼容、所需能力和权限，再 staging、健康验证、原子切换新任务路由。任一步失败保持旧版本，禁止带明文凭据、路径穿越或未批准安装脚本的制品；运行中任务保留原版本与配置。
-- [ ] 离线交付以标准归档或 OCI 镜像及可验证 manifest 提供执行定义和必要 adapter/依赖清单，信任根、签名密钥轮换及撤销材料由受控运维流程交付；模型权重/外部服务不假定可随包分发。完全隔离网络另验证依赖齐备、许可和无外部解析请求，不能把仅无控制面启动标成 air-gapped 认证。
+- [ ] 在已有单宿主冷切换上补实际运行健康、状态格式迁移/兼容及生产升级演练；需要在线切流、远程激活或多宿主时单独实施。当前不迁移活跃 Run、不支持共享数据库切换；不能以静态 profile 校验冒充运行健康，活跃任务仍固定原版本与配置。
+- [ ] 在已交付标准归档上补必要 adapter/依赖分发、信任材料轮换/新鲜度及完全隔离网络认证；OCI 按实际需求选择。模型权重/外部服务不假定可随包分发；单独验证依赖齐备、许可及无外部解析请求，不能把离线制品运输或无控制面启动标成 air-gapped 认证。
 - [ ] 制品版本回退不回退业务数据、审批消费、Action 回执或已知撤销；状态格式不兼容时先 drain/备份/迁移并验证，再激活，不能自动执行破坏性 downgrade。离线撤销材料存在新鲜度上限，过期后的可用能力依 step7 profile 明确收窄。
 - [ ] 发布清单和准入门禁是平台治理契约；Agent 目录、镜像/制品仓库、CI/CD、评估器和部署控制器可由 Hecate 默认实现，也可接入企业现有服务，不为满足“闭环”重复建设完整 ALM/市场。
 - [ ] 策略版本用于复现，但授权仍叠加当前硬拒绝和撤销状态；不能让旧发布清单保留已取消的访问权。
@@ -741,11 +757,13 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 ### step14 — 建设人类观察与干预工作台
 
-**状态：平台最小观察、命令回执及 Task 取消页面已交付，Task/Run、命令回执/对账读取和 REST 命令/Task 提交、workflow callback 写入已有角色边界；Run SSE 已支持连接中的动态撤权，等待提交结果已刷新 Run 投影。平台本地补充输入及 ADMIN 审批决定页面已交付，完整团队工作台仍待交付。**
+**状态：Task/Run、动作及证据、交付验收、实时事件、命令回执、受控续跑与父子关系观察页面已交付；取消、平台本地补充输入及 ADMIN 审批决定已有真实回执。Task/Run/控制入口已分段加固角色边界，Run SSE 支持连接中的动态撤权；完整目标/计划、预算、产物及团队工作台继续开放。**
 
 - [x] `GET /api/runs/{run_id}/actions` 提供归属校验后的账本白名单视图，恢复状态与已记录 outcome 分列，不支持与无结果分开；查询不派发、不修复动作。
 - [x] `GET /api/runs/{run_id}/action-evidence` 在完整 Task/Run 归属与 VIEWER 门槛下提供单个动作的证据回执：已记录事实、摘要算法与校验对象、本次核验结论（一致／不匹配／无法复核／不支持）以及经完整性与派发身份校验的决策引用，分别呈现缺结果、结果未知、不支持查询与查询失败；摘要一致只证明保存内容相同，不表示业务目标通过，intent/claim 不单独证明动作已执行。回执不携带原始参数、结果正文、session、claim token 或存储地址；账本 outcome 是最新记录，回执标明本次读取版本。动作页支持选择、刷新与复制含 Task/Run/Action 的稳定定位链接，切换 Run/动作时丢弃迟到响应，不串用旧数据。验证范围与未认证项见[操作说明](../how-to/inspect-action-evidence.md)。
-- [x] `/ops-center/tasks` 及详情页消费 Task/Run/动作查询，支持分页、Run 切换与手动刷新；事件时间线消费持久游标分页，显式显示 gap，分页耗尽不推断 Run 完成。观察区维持查询语义；详情页另有取消操作，审批及实时订阅页面仍待交付。
+- [x] `/ops-center/tasks` 及详情页消费 Task/Run/动作查询，支持分页、Run 切换与手动刷新；事件时间线消费持久游标分页及真实 SSE，显式显示 gap，断线按游标续接且隔离迟到响应。分页耗尽或流断开不推断 Run 完成，观察读取不触发执行命令。
+- [x] Run 交付面板展示已持久化的交付/验收记录，历史无记录、不支持及查询失败分开；不在 GET 重算验收或用当前配置补历史。Task 级续跑面板展示触发原因、次数/上限、候选决策及失败检查，与选中 Run 的最终交付验收分别呈现；均只读。
+- [x] 父子调用面板消费 Task 详情的已接受次数、当前等待/回调消费及子侧父引用，合法本地引用支持双向导航，各目标页面独立授权。当前摘要不承诺调用历史、子任务状态或预算，不能从 callback consumed 推断任务成功；见[父子观察说明](../how-to/observe-parent-child-tasks.md)。
 - [x] `GET /api/tasks/{task_id}/commands` 已支持完整 Task issuer 引用、归属校验、分页和命令回执白名单；列表读取不触发懒过期，不把 requested 改成 expired/applied。Task 详情已有 `TaskCommandsPanel`，按 Task 分页/刷新，展示真实状态、完整引用和可选字段；切换 Run 保留 Task 命令视图，切换 Task 隔离分页及迟到响应，不轮询、不发出写命令。
 - [x] Task 列表/详情/Run 列表、Run 详情/动作/事件/SSE 在业务查询、账本/事件读取或建流前校验 active workspace、资源可见性及 VIEWER 门槛；跨域、缺失或软删除资源不可区分。REST commands/cancel 写入先校验 Task 可见性及 EDITOR，再访问命令存储或处理幂等回放；降权后不能借旧命令绕过，不以 wake token 代替审批。
 - [x] 命令列表、单条回执和 pending reconciliation 读取已加入 VIEWER 门槛；单条回执先用不推进状态的查询核对可见性，拒绝不触发懒过期、清扫或 relay。授权读取保持既有语义：列表保留已记录状态，单条读取可懒过期，对账仅处理当前 workspace。
@@ -754,7 +772,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 - [x] 已建立的 Run SSE 定期用短会话重验原 Bearer 身份、workspace、角色及 Run/父 Task 存活；空闲时同样复验，读取/relay/发送在检查到期时先验证，失败以仅含状态码的 SSE error 结束且不再转发。已有真实 TCP 撤权与客户端 RST 关闭回归；复验有界但不承诺即时撤权，已在途发送不能撤回。
 - [x] `POST /api/tasks/{task_id}/workflow-callback` 先要求 active workspace、父 Task 可见与 EDITOR，再处理幂等回放、子事实验证、等待消费和回执写入；降权后旧 token/命令不能旁路，内部可信调用仍经服务消费原有已核实回调语义。
 
-证据：[动作查询](../../openspec/changes/archive/2026-10-18-step14-run-action-query/verification.md)、[Task/Run 页面](../../openspec/changes/archive/2026-10-18-step14-task-run-observation-ui/verification.md)、[事件时间线](../../openspec/changes/archive/2026-10-18-step14-run-event-timeline-ui/tasks.md)、[命令查询](../../openspec/changes/archive/2026-10-18-step14-task-command-query/verification.md)、[命令回执页面](../../openspec/changes/archive/2026-10-18-step14-task-command-receipts-ui/verification.md)、[Run 读取边界](../../openspec/changes/archive/2026-10-20-step14-run-observation-read-access-boundary/verification.md)、[Task 读取边界](../../openspec/changes/archive/2026-10-22-step14-task-observation-read-access-boundary/verification.md)及[命令写边界](../../openspec/changes/archive/2026-10-20-step14-task-command-write-access-boundary/verification.md)；新增切片见[控制观察边界](../../tests/test_api/test_control_observation_access_boundary.py)、[Task 提交及等待结果](../../tests/test_api/test_task_submission_access_boundary.py)、[取消操作说明](../how-to/task-cancellation.md)、[取消页面测试](../../web/src/__tests__/task-detail-cancel.test.tsx)、[SSE 撤权测试](../../tests/test_api/test_run_stream_revocation.py)与[workflow callback 边界测试](../../tests/test_api/test_workflow_callback_access_boundary.py)。这些切片不代表所有控制入口授权完成；后续在现有页面/API 上扩展审批、输入与接管。
+证据：[动作查询](../../openspec/changes/archive/2026-10-18-step14-run-action-query/verification.md)、[Task/Run 页面](../../openspec/changes/archive/2026-10-18-step14-task-run-observation-ui/verification.md)、[事件时间线](../../openspec/changes/archive/2026-10-18-step14-run-event-timeline-ui/tasks.md)、[命令查询](../../openspec/changes/archive/2026-10-18-step14-task-command-query/verification.md)、[命令回执页面](../../openspec/changes/archive/2026-10-18-step14-task-command-receipts-ui/verification.md)、[Run 读取边界](../../openspec/changes/archive/2026-10-20-step14-run-observation-read-access-boundary/verification.md)、[Task 读取边界](../../openspec/changes/archive/2026-10-22-step14-task-observation-read-access-boundary/verification.md)及[命令写边界](../../openspec/changes/archive/2026-10-20-step14-task-command-write-access-boundary/verification.md)；新增切片见[控制观察边界](../../tests/test_api/test_control_observation_access_boundary.py)、[Task 提交及等待结果](../../tests/test_api/test_task_submission_access_boundary.py)、[取消操作说明](../how-to/task-cancellation.md)、[取消页面测试](../../web/src/__tests__/task-detail-cancel.test.tsx)、[SSE 撤权测试](../../tests/test_api/test_run_stream_revocation.py)与[workflow callback 边界测试](../../tests/test_api/test_workflow_callback_access_boundary.py)。这些切片不代表所有控制入口授权完成；平台本地输入/审批沿用已有闭环，后续扩展其他宿主及接管。
 
 **独立消费关联：**step6/7 即提供最小状态查询、审批/输入和控制命令接口，独立 App 可以实现自己的界面；I-Ca 验证本地审批，I-Cb 验证平台最小视图，本步再提供完整团队工作台。后端/宿主始终校验当前权限、参数和状态版本；前端按钮不能直接写审批表或把 requested 显示为 applied。未连接控制面的部署，其实时观察与干预只能由本地授权客户端完成，中心不虚报实时可控。
 
@@ -766,8 +784,8 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 **操作：**
 
-- [ ] 在已交付的 Task/Run/动作/事件及命令回执页面上增加产物、预算及待审批视图；团队工作台与委派关系随 step12/13 扩展。复用现有 trace/回放链接，不重建任务列表或重复分析平台。
-- [ ] 在最小 Task/Run 视图中区分目标/标准版本、已接受计划、真实动作/子执行进度、停止/等待原因、交付和验收状态；模型 Todo 不能冒充完成事实。展示自动续跑原因及累计用量、未核验或待对账结果；修改要求显示接受和生效边界，旧验收不冒充新目标通过，修订计划与取消已派发动作分别回执。
+- [ ] 在已有交付验收、父子关系及本地审批面板上扩展正式产物、累计预算和其他宿主待审批视图；企业团队与委派关系随 step12/13 扩展。复用现有 trace/回放链接，不重建任务列表或重复分析平台。
+- [ ] 在已有 Run 验收、Task 续跑和父子摘要上补完整目标/标准修订、已接受计划、子执行历史及累计用量；模型 Todo 不能冒充完成事实，未核验/待对账保持显式。修改要求显示接受和生效边界，旧验收不冒充新目标通过，修订计划与取消已派发动作分别回执。
 - [ ] 已有取消、补充输入和平台本地 ADMIN 审批决定及真实回执；继续扩展请求暂停、重新分派和接管页面；持久命令显示请求中、已确认、已应用或不支持，不把 API 已支持等同页面已交付。
 - [ ] 本地工作台和审批流只是默认客户端/实现；审批可委托外部 ITSM/工作流，但必须用带版本和身份的回调更新统一命令状态，且回调认证、幂等与审计由平台契约约束。
 - [ ] 将取消页面已交付的 revision/稳定命令 ID 规则推广到其他干预，命令携带 expected task/run revision，防止人类对过期页面操作；重复点击采用幂等键。
@@ -803,7 +821,7 @@ step11 拆为最小发布门禁和多能力组合发布：平台版本评测门�
 
 ### step16 — 验证生产部署、恢复与符合性
 
-**状态：已有安装、入口、受管宿主、Controller 多轮/输入修订/交付验收及访问权限的分段实现与回归证据；完整生产 profile 继续验收。**复用 step5—step7、step10/14 的支持矩阵与验证记录，区分组件/进程故障、真实入口、安装制品和生产组合；新增循环故障测试具有 SQLite/PostgreSQL 条件矩阵，实际执行范围须单独登记。SSE 动态撤权已有真实 TCP 测试，取消页面已有版本/幂等/回执回归；这些证据不自动关闭 G2/G3，也不替代真实模型质量、断连组合、旁路、负载或独立升级认证。
+**状态：已有安装、入口、受管宿主、Controller/Harness/有界续跑、平台等待到期/计时器/Agent 子调用预算、Runner 签名/归档/冷切换及访问权限的分段实现与回归证据；完整生产 profile 继续验收。**复用各步骤支持矩阵，区分组件/进程故障、真实入口、安装制品和生产组合。部分 durable 循环测试具备条件性 PostgreSQL 矩阵，平台新增等待/子调用的 SQLite 进程测试不自动继承它；双宿主采集器的确定性记录也不授予真实模型认证。SSE 动态撤权已有真实 TCP 测试，页面已有版本/幂等/回执回归；这些证据不自动关闭 G2/G3/G4，也不替代断连组合、旁路、负载或独立升级认证。
 
 **目标：**把前述契约变成经故障和多租户验证的生产能力。
 
@@ -1028,7 +1046,7 @@ step2 为每个候选留一条决策记录：Feature ID、代码/数据 owner、
 
 I-C 是 I-Ca 与 I-Cb 的集合，两者按实际前置和部署 profile 分别验收，独立生产支持不作为受管闭环的整体前置。I-E/I-F/I-G 按自身依赖推进。I-F 只依赖最小发布门禁、已认证的必要后端及实际使用的数据边界，不依赖所有可选提供方完成。I-Ca 由 App 或测试客户端消费本地 command/approval API，I-Cb 提供平台最小视图，I-F 再扩团队观察界面。独立生产支持与完整平台能力是分别验收的交付范围。
 
-新增工作复用已交付的 step2 方向对齐、step3 驱动接缝、step5e/6 多轮 Controller/输入修订/共享交付验收及 step7 可信动作，按“Harness 与完成控制增量 → 图执行共同机制与局部计划/Child Run → 入口及宿主切流 → 发布/干预剩余门槛与符合性”拆分；真实模型质量与恢复/治理验证贯穿各切片，step11 发布证据与 step14 观察/取消并行复用，不重新立项。文件任务的工作区/产物恢复随首次启用交付，不等待 I-E 的完整服务替换。入口契约修复可并行，已有技术交付按证据复用。每个 change 指派实现与验收 owner，引用实际平台验证场景及其 ID，记录迁移、故障、回退及未支持能力。授权边界、存储迁移和生产放量分别评审，不把全部迭代放入同一 change。
+新增工作复用已有 Controller/Harness、输入修订、共享验收、有界续跑及可信动作；平台专属等待/子调用与 Runner 签名/冷切换按自身范围复用。近期切片为完整目标修订与局部 Plan、Agent→Workflow/跨宿主共同机制、逐入口切流及完整发布/符合性，真实模型采集与恢复/治理验证贯穿实施。step14 本地输入/审批及观察页面不重复立项，继续补正式产物、预算和接管。文件任务的工作区/产物恢复随首次启用交付，不等待 I-E 完整服务替换。每个 change 指派实现与验收 owner，引用实际场景及其 ID，记录迁移、故障、回退和未支持能力；授权边界、存储迁移和生产放量分别评审，不把全部迭代放入同一 change。
 
 ### 阶段能力门槛
 
@@ -1058,7 +1076,9 @@ I-C 是 I-Ca 与 I-Cb 的集合，两者按实际前置和部署 profile 分别�
 | 同一决策的部分动作完成 | 新进程识别已完成、未开始及结果未知的动作，复用真实结果；未知副作用先对账，不能整批重试 | step6/7、step16 |
 | 动态 Plan 修订 | 提案与已接受版本分离，进度来自执行/验收事实；运行中子任务被找回，取消有回执，已完成产物重新检查适用性；换 ID 不绕过未知副作用 | step5e/6/7 |
 | Child Run 创建确认丢失或父进程重启 | 同一父调用找回已有子执行，正在其他 worker 执行的任务不重复创建；已完成结果可重用，权限与父取消/期限策略仍有效 | step5e/6/7 |
+| 限定 Agent 子调用的权限与预算 | 模型只能选择已声明 alias；子工具受父/目标规则交集约束，跨域/递归/不可表达的委派拒绝。声明 token 切片后，模型尝试预留/结算跨重启保留，未知占用不退款；父取消或到期后 workspace 占用仍能独立收敛，回调重投不重复结算 | step6/7；当前限平台本地单层 Agent→Agent，其他组合另验 |
 | 新输入、唤醒与动作派发竞争 | 重复输入/计时器/回调不重复推进，等待可跨进程恢复并释放 worker；补充信息具有明确生效边界，不能无回执改写已接受动作 | step6、step14/16 |
+| 平台本地等待到期及计时器恢复 | 审批/输入到期保持真实失败分类，不伪造批准/回答；计时器只接受已记录只读动作的结构化声明，固定首次回执锚且不能手工提前唤醒。重启不延长期限，到期、取消与合法唤醒提交时复核；未启用 reconciler 不承诺自动收敛 | step6；Runner/通用 Workflow 不自动继承 |
 | Context 压缩后重启 | 模型上下文可压缩，已接受决策、动作事实与恢复位置不丢失；不使用 Memory 摘要推断副作用 | step5e/6、step16 |
 | Run 正常结束但交付/验收未满足 | 执行终态、交付、验收和业务效果分列；缺产物、部分成功或必需检查失联不直接提交 Task 成功，保留成果且不重做已确认动作 | step5e/6/7、step10 |
 | 目标修订与旧验收迟到 | 有权主体接受目标/标准版本；模型不能降低门槛；旧结论绑定旧目标/产物，迟到回调不覆盖当前验收 | step3/6/7、step14/16 |
@@ -1101,6 +1121,7 @@ I-C 是 I-Ca 与 I-Cb 的集合，两者按实际前置和部署 profile 分别�
 | 观测系统中断 | 核心治理证据仍保存，trace 丢失被标记 | step6—step7；外部替换扩展在 step10 |
 | 供应商 trace 延迟、用量缺失或修订 | 平台授权/网关回执仍完整；用量标记为估算或未核实，不能视为最终账单 | step10 |
 | 评估结果针对旧 AgentVersion 或缺少必须样本 | 最小发布门禁即拒绝；接入外部 evaluator 后执行相同规则 | step11 最小切片；step10 扩展 |
+| 版本工具契约变化、同名换绑或历史无快照 | 分开报告契约摘要与解析来源变化，缺失/损坏/不支持的基线为未核验且不补造；诊断对象仍为被查版本，不随草稿工具列表改变，不因诊断一致宣称运行实现或权限固定 | step11 诊断已交付；执行绑定/发布阻断另验 |
 | 发布回滚时仍有活跃 Run | 只改变新任务路由，活跃绑定不被改写 | step11 |
 | 跨 Team/workspace 读取 Artifact/Memory | 没有显式授权则拒绝 | step12—step13 |
 | 新增任务协作者后使用发起者私人 Connector | 拒绝，或经过独立的团队授权绑定后再开放 | step12—step14 |
