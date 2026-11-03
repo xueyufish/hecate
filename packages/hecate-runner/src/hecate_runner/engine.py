@@ -20,6 +20,7 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -64,6 +65,7 @@ from .durable import (
 from .evidence import OUTCOME_FAILED, EvidenceStore
 from .managed import MANAGED_ISSUER, LeaseGate, LeaseRefusedError, ManagedIdentity
 from .profile import BUILTIN_TOOL_SCHEMAS, Profile, ProfileError, _check_local_schema_refs
+from .runtime_trust import REVOCATION_CATEGORY, REVOCATION_STATUS, RevocationRefusal, RuntimeTrustRevokedError
 
 # step7 2.5: dispatch outcome status → governance error category. The four
 # failure classes stay distinguishable in evidence; unknown outcomes never
@@ -119,9 +121,10 @@ class ModelNodeWorker(Worker):
     outside this preview.
     """
 
-    def __init__(self, profile: Profile) -> None:
+    def __init__(self, profile: Profile, *, before_call: Callable[[], None] | None = None) -> None:
         super().__init__()
         self._profile = profile
+        self._before_call = before_call
 
     async def execute(
         self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
@@ -136,6 +139,8 @@ class ModelNodeWorker(Worker):
             if config.model_auth_env:
                 headers["Authorization"] = f"Bearer {os.environ[config.model_auth_env]}"
             async with httpx.AsyncClient(timeout=30.0) as client:
+                if self._before_call is not None:
+                    self._before_call()
                 response = await client.post(
                     config.model_endpoint,
                     json={"prompt": prompt, "tools": list(config.tool_allowlist)},
@@ -147,6 +152,8 @@ class ModelNodeWorker(Worker):
                     raise ValueError("model endpoint must return an object with string content")
                 content = payload["content"]
                 usage = payload.get("usage")
+        elif self._before_call is not None:
+            self._before_call()
         return WorkerResult(
             node_id=node_id,
             channel_updates={
@@ -209,6 +216,7 @@ class RunState:
     wait_request: dict | None = None
     wait_token: str | None = None
     dispatch_denied: bool = False
+    trust_refusal: RevocationRefusal | None = None
     model_invocation_id: str | None = None
     # Delivery-acceptance outcome of a controller final answer: content,
     # acceptance record and (when checks withheld success) the error facts.
@@ -243,12 +251,17 @@ class ExecutionEngine:
         approval_finder: Any = None,
         budget_gate: Any = None,
         governance_service: Any = None,
+        trust_guard: Any = None,
     ) -> None:
         # ``tool_dispatch`` signature: (tool_name, arguments, principal, domains).
         self._profile = profile
         self._evidence = evidence
         self._tool_dispatch = tool_dispatch
         self._durable = durable
+        # Runtime trust re-check (opt-in): re-reads the operator's artifact
+        # trust policy before every new model request and real tool
+        # dispatch. None = startup-only admission, the default posture.
+        self._trust_guard = trust_guard
         # Managed execution identity: present only in the managed assembly;
         # ``resume_managed`` refuses to drive managed tasks without it.
         self._managed_identity = managed_identity
@@ -478,7 +491,13 @@ class ExecutionEngine:
             outcome = {"status": "schema_invalid", "detail": schema_detail}
             self.record_tool_result(state, tool_name, outcome)
             return outcome
-        if arguments.get("domain") not in state.domains:
+        trust_refusal = self._trust_refusal(state, f"tool:{tool_name}")
+        if trust_refusal is not None:
+            # Runtime revocation: refused after ledger arbitration (a decided
+            # action still replays from the ledger above, never re-executes)
+            # and BEFORE the business call, so no new side effect is issued.
+            outcome = trust_refusal
+        elif arguments.get("domain") not in state.domains:
             outcome = {"status": "authorization", "detail": "requested domain is outside the trusted identity scope"}
         else:
             try:
@@ -541,6 +560,92 @@ class ExecutionEngine:
                 state.needs_reconciliation = True
         self.record_tool_result(state, tool_name, outcome)
         return outcome
+
+    def _trust_revocation(self, state: RunState, call_site: str) -> RuntimeTrustRevokedError | None:
+        """Runtime artifact-trust re-check for one new call; ``None`` = proceed.
+
+        Records evidence correlating the run, the frozen artifact facts and
+        the reason (never secret material) and marks the run denied. Only
+        calls that have not been issued are constrained; recovery replay of
+        already-decided actions never reaches here.
+        """
+
+        if self._trust_guard is None:
+            return None
+        try:
+            self._trust_guard.require()
+        except RuntimeTrustRevokedError as exc:
+            state.dispatch_denied = True
+            state.trust_refusal = exc.refusal
+            state.error = f"artifact trust refused: {exc.refusal.reason}"
+            state.result = {
+                "status": "failed",
+                "error_category": REVOCATION_CATEGORY,
+                "error": state.error,
+                "artifact_trust": {
+                    **exc.refusal.evidence(),
+                    "version": 1,
+                    "call_site": call_site,
+                    "execution_definition": self._definition_digest,
+                    "task_ref": {"issuer": state.task_ref.issuer_domain, "id": state.task_ref.id}
+                    if state.task_ref is not None
+                    else None,
+                    "run_ref": {"issuer": state.run_ref.issuer_domain, "id": state.run_ref.id}
+                    if state.run_ref is not None
+                    else None,
+                },
+            }
+            try:
+                self._evidence.append(
+                    "artifact_trust",
+                    state.principal,
+                    state.run_id,
+                    "denied",
+                    {**exc.refusal.evidence(), "call_site": call_site},
+                )
+            except Exception:  # noqa: BLE001 - evidence failure cannot erase a known refusal
+                state.needs_reconciliation = True
+                logger.warning("Cannot retain artifact trust refusal for run %s", state.run_id, exc_info=True)
+            return exc
+        return None
+
+    def _require_model_trust(self, state: RunState, call_site: str) -> None:
+        revoked = self._trust_revocation(state, call_site)
+        if revoked is not None:
+            raise revoked
+
+    async def _release_unissued_model_budget(self, state: RunState) -> None:
+        """Release a known unissued request without fabricating unknown usage."""
+
+        from hecate_governance.usage import ReleaseStatus
+
+        key = state.model_invocation_id
+        if self._budget_gate is None or key is None:
+            return
+        try:
+            status = await self._budget_gate._ledger.release(key)
+            if status not in (ReleaseStatus.RELEASED, ReleaseStatus.NO_RESERVATION):
+                state.needs_reconciliation = True
+                return
+            state.model_invocation_id = None
+        except Exception:  # noqa: BLE001 - retain the reservation until it can be reconciled
+            state.needs_reconciliation = True
+            logger.warning("Cannot release unissued model reservation for run %s", state.run_id, exc_info=True)
+
+    def _trust_refusal(self, state: RunState, call_site: str) -> dict | None:
+        """Tool-dispatch form of the re-check: an authorization outcome.
+
+        Converges on the existing authorization semantics (policy_denied
+        category) so a revoked artifact can never read as success.
+        """
+
+        revoked = self._trust_revocation(state, call_site)
+        if revoked is None:
+            return None
+        return {
+            "status": REVOCATION_STATUS,
+            "detail": f"artifact trust revoked before this call: {revoked.refusal.reason}",
+        }
 
     async def _lease_refusal(
         self, state: RunState, tool_name: str, arguments: dict, *, invocation_id: str | None = None
@@ -1382,7 +1487,8 @@ class ExecutionEngine:
                 if state.dispatch_denied:
                     final_status = "failed"
                 if result.state.value == "failed":
-                    state.error = "execution failed; inspect local service logs"
+                    if state.trust_refusal is None:
+                        state.error = "execution failed; inspect local service logs"
                     logger.warning("Runner execution %s failed: %s", run_id, result.error)
             except RuntimeScheduleCancelledError:
                 final_status = "unknown"
@@ -1774,6 +1880,16 @@ class ExecutionEngine:
                 # an input-required outcome was durably recorded; the shared
                 # park flow commits the wait and releases the worker.
                 return
+            if state.trust_refusal is not None:
+                state.needs_reconciliation |= bool(result.detail.get("requires_reconciliation"))
+                state.status = "unknown" if state.needs_reconciliation else "failed"
+                state.result = {
+                    **(state.result or {}),
+                    "status": state.status,
+                    "error_category": REVOCATION_CATEGORY,
+                    "error": state.error,
+                }
+                return
             if result.state.value == "failed":
                 state.needs_reconciliation = bool(result.detail.get("requires_reconciliation"))
                 state.status = "unknown" if state.needs_reconciliation else "failed"
@@ -2124,6 +2240,12 @@ class _ControllerModelPort:
 
     async def llm_invoke_structured(self, messages: list[dict], config: dict):
         """Reserve and settle every fresh model attempt through the host budget."""
+        # Runtime trust re-check runs BEFORE budget reservation so a revoked
+        # artifact never consumes budget and the check never depends on a
+        # budget gate being configured.
+        revoked = self._engine._trust_revocation(self._state, "model:controller")
+        if revoked is not None:
+            raise revoked
         refusal = await self._engine._reserve_model_budget(self._state)
         if refusal is not None:
             raise refusal.error or RuntimeError("model budget reservation refused")
@@ -2148,6 +2270,9 @@ class _ControllerModelPort:
                 )
                 if settled.status is SettleStatus.CONFLICT:
                     raise RuntimeError("model usage settlement failed")
+        except RuntimeTrustRevokedError:
+            await self._engine._release_unissued_model_budget(self._state)
+            raise
         except BaseException:
             if gate is not None:
                 from hecate_governance.usage import UsageRecord, UsageStatus
@@ -2165,6 +2290,7 @@ class _ControllerModelPort:
             if backend.model_auth_env:
                 headers["Authorization"] = f"Bearer {os.environ[backend.model_auth_env]}"
             async with httpx.AsyncClient(timeout=30.0) as client:
+                self._engine._require_model_trust(self._state, "model:controller")
                 response = await client.post(
                     backend.model_endpoint,
                     json={"messages": messages, "tools": config.get("tools") or []},
@@ -2189,6 +2315,7 @@ class _ControllerModelPort:
                 **({"usage": usage} if usage is not None else {}),
             }
             return
+        self._engine._require_model_trust(self._state, "model:controller")
         joined = _json.dumps(messages[-1], ensure_ascii=False) if messages else ""
         yield {"content": f"stub controller answer for {joined[:200]}", "tool_calls": None}
 
@@ -2235,10 +2362,19 @@ class _FanOutWorker(Worker):
         if self._state.cancel_requested:
             raise CooperativeCancellationError
         if node_id == "model":
+            # Runtime trust re-check BEFORE budget reservation: a revoked
+            # artifact never consumes budget, and the refusal converges on
+            # the graph's error path with the policy_denied category.
+            revoked = self._engine._trust_revocation(self._state, "model:graph")
+            if revoked is not None:
+                return WorkerResult(node_id=node_id, error=revoked)
             refusal = await self._engine._reserve_model_budget(self._state)
             if refusal is not None:
                 return refusal
-            worker: Worker = ModelNodeWorker(self._engine._profile)
+            worker: Worker = ModelNodeWorker(
+                self._engine._profile,
+                before_call=lambda: self._engine._require_model_trust(self._state, "model:graph"),
+            )
         else:
             worker = ReadToolNodeWorker(
                 lambda arguments, _tool=node_config["tool_name"], _state=self._state: self._engine._dispatch_tool(
@@ -2265,6 +2401,9 @@ class _FanOutWorker(Worker):
                 if outcome.status is SettleStatus.CONFLICT:
                     raise RuntimeError("model usage settlement failed")
             return result
+        except RuntimeTrustRevokedError as exc:
+            await self._engine._release_unissued_model_budget(self._state)
+            return WorkerResult(node_id=node_id, error=exc)
         except BaseException:
             if gate is not None:
                 await gate.settle(UsageRecord(key, 0, UsageStatus.UNKNOWN, "model call interrupted"))

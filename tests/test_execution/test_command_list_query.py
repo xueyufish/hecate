@@ -227,12 +227,18 @@ async def test_service_list_is_observed_read_only(records):
     def capture(_connection, _cursor, statement, _parameters, _context, _executemany):
         statements.append(" ".join(statement.upper().split()))
 
-    event.listen(store.engine, "before_cursor_execute", capture)
+    # The pagination queries run on the store's autocommit read engine;
+    # observe both engines so the statements are captured wherever they
+    # land and the read-only assertion covers the whole store.
+    engines = [store.engine, store._read_engine]  # noqa: SLF001
+    for engine in engines:
+        event.listen(engine, "before_cursor_execute", capture)
     try:
         for offset in range(2):
             await _service(records).list_task_commands(DEFAULT_WORKSPACE_ID, records["task"].id, limit=1, offset=offset)
     finally:
-        event.remove(store.engine, "before_cursor_execute", capture)
+        for engine in engines:
+            event.remove(engine, "before_cursor_execute", capture)
     assert all(statement.startswith(("SELECT", "BEGIN")) for statement in statements)
     counts = [statement for statement in statements if "COUNT(" in statement]
     pages = [statement for statement in statements if "LIMIT" in statement]

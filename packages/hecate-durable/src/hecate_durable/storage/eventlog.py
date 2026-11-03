@@ -112,11 +112,16 @@ class SqlEventLog:
         self,
         session_factory: Callable[[], Session],
         *,
+        read_session_factory: Callable[[], Session] | None = None,
         source: str,
         actor_id: str | None = None,
         clock: Callable[[], str],
     ) -> None:
         self._session_factory = session_factory
+        # Cursor reads and lookups take no writer lock on SQLite-backed
+        # stores (the store passes its autocommit read factory); callers
+        # that share one factory keep the previous behavior.
+        self._read_session_factory = read_session_factory or session_factory
         self._source = source
         self._actor_id = actor_id
         self._clock = clock
@@ -267,11 +272,11 @@ class SqlEventLog:
         raise RuntimeError("unreachable")  # pragma: no cover
 
     def _find_by_event_id(self, event_id: str) -> EventRow | None:
-        with self._session_factory() as session:
+        with self._read_session_factory() as session:
             return session.execute(select(EventRow).where(EventRow.event_id == event_id)).scalar_one_or_none()
 
     def _find_by_position(self, envelope: EventEnvelope) -> EventRow | None:
-        with self._session_factory() as session:
+        with self._read_session_factory() as session:
             return session.execute(
                 select(EventRow).where(
                     EventRow.run_issuer == envelope.run_ref.issuer_domain,
@@ -294,7 +299,7 @@ class SqlEventLog:
 
         if cursor < 0 or limit < 1:
             raise ValueError("cursor must be non-negative and limit must be positive")
-        with self._session_factory() as session:
+        with self._read_session_factory() as session:
             rows = (
                 session.execute(
                     select(EventRow)
@@ -346,7 +351,7 @@ class SqlEventLog:
 
     def latest(self, run_ref: BackendRef, *, event_types: tuple[str, ...]) -> EventEnvelope | None:
         """Read the latest matching fact in this source's complete Run scope."""
-        with self._session_factory() as session:
+        with self._read_session_factory() as session:
             row = session.execute(
                 select(EventRow)
                 .where(

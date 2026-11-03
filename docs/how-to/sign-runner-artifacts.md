@@ -118,9 +118,55 @@ publisher authentication.
 Rotation: add the new key under a fresh `key_id` to the policy, re-sign the
 artifact with the new key, restart the host. Revocation: remove the key from
 the policy, list its `key_id` in `revoked_key_ids`, or set the publisher's
-`revoked` flag, then restart. An already-running host keeps serving until it
-is restarted — restart is the enforcement point, and that limitation is
-explicit rather than implied.
+`revoked` flag, then restart. By default an already-running host keeps
+serving until it is restarted — restart is the enforcement point, and that
+limitation is explicit rather than implied.
+
+## Revoke trust while the host is serving
+
+Opt in to runtime re-checking to make a revocation stop new work without a
+restart:
+
+```bash
+hecate-runner --profile profile --artifact-trust artifact-trust.json --artifact-trust-recheck
+```
+
+The flag requires `--artifact-trust`. At startup the host freezes the
+admitted artifact facts — manifest digest, publisher, key id and the key's
+public bytes — from the policy it was admitted against. Before every NEW
+model request and real tool dispatch it re-reads `artifact-trust.json` from
+disk and refuses the call when the publisher or key has been removed or
+revoked, when the same key id now carries a different public key, or when
+the file is missing, unreadable or malformed (there is no fallback to the
+previously cached trust). The serving line shows
+`trust-recheck=per-call policy=<path>`; without the flag it shows
+`trust-recheck=startup-only`.
+
+Read the re-check with these boundaries:
+
+- A refusal converges on the existing authorization failure (category
+  `policy_denied`), never on an acceptance success, and records evidence
+  correlating the run, the artifact digest, the publisher and key id and
+  the reason — never key material.
+- Explicit identity revocations, including removal or replacement of the
+  admitted key, are sticky for the process: restoring the policy does not
+  resurrect trust. Recovery is a restart and a fresh admission. An unusable
+  policy refuses the current call; a valid repair can authorize later calls
+  if no explicit revocation was observed. No protection against policy
+  rollback across restarts is claimed.
+- Only calls that have not been issued are constrained; nothing is
+  claimed about in-flight requests. Completed actions and their receipts
+  are never rewritten, decided actions still replay from the ledger
+  without a new business call, and a resumed run re-checks before any new
+  call. The re-check runs before budget reservation and again at model
+  dispatch, and does not depend on a budget being configured. Revocation
+  during reservation releases that known-unissued request's reservation;
+  a failed release stays pending reconciliation, without inventing usage.
+- Queries, cancellation and the admin shutdown stay available, and the
+  host version lock is not released — switching versions still requires a
+  stopped host.
+- The running definition keeps using its startup-verified snapshot; a
+  policy re-read never reloads the artifact.
 
 ## What the signature covers — and what it does not
 

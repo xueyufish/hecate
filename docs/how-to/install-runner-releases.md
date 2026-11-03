@@ -145,5 +145,9 @@ remote activation, remote databases and multiple hosts sharing one durable
 database. The host mutex coordinates one installation; it does not discover
 other installations or external clients writing the same database. Shared
 database layouts are outside this support scope. Static profile checks are
-not runtime health or production certification. Startup-time trust only: a
-running host does not re-check the trust policy until restart.
+not runtime health or production certification. Trust is startup-time by
+default — a running host does not re-check the policy until restart — unless
+`--artifact-trust-recheck` is set, which re-reads the policy before every
+new model request and tool dispatch (see
+[Sign runner artifacts](sign-runner-artifacts.md)); revocation never
+releases a serving host's version lock.

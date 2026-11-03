@@ -90,7 +90,12 @@ or tool. Without the flag the loader performs digest verification only, and
 neither a digest pass nor a present `signature_ref` is publisher
 authentication. The signature covers the manifest and its listed files;
 `runner.json`, `identity.json` and the trust policy remain operator-owned
-host configuration. See
+host configuration. Admission is startup-time by default; the opt-in
+`--artifact-trust-recheck` re-reads the policy before every new model
+request and real tool dispatch so a revoked publisher or key stops new
+calls while serving (sticky for the process, no rollback protection across
+restarts, in-flight requests untouched, queries and shutdown still
+available). See
 [Sign runner artifacts](../../docs/how-to/sign-runner-artifacts.md) for the
 full workflow, rotation and revocation semantics.
 

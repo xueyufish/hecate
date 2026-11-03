@@ -5,7 +5,9 @@ IMMEDIATE) so CAS paths serialize deterministically. Read-only lookups run
 on a separate autocommit engine and take no lock at all: a held writer
 transaction — a dispatch loop's commit window — must never block a
 concurrent read. Before the read engine existed, that convoy surfaced as
-``database is locked`` after the full busy timeout under parallel CI.
+``database is locked`` after the full busy timeout under parallel CI
+(first on ``get_task_state``, then on ``run_for_task``/``read_events`` as
+each remaining read path was reached).
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ def test_reads_do_not_block_behind_a_held_writer_transaction(tmp_path: Path) -> 
     store = SqlDurableStore(f"sqlite:///{tmp_path / 'db.sqlite'}", source="test")
     store.create_schema()
     task_ref = BackendRef(kind=RefKind.TASK, issuer_domain="hecate", id=str(uuid.uuid4()))
+    run_ref = BackendRef(kind=RefKind.RUN, issuer_domain="hecate", id=str(uuid.uuid4()))
 
     # A raw DBAPI connection holds the WAL writer lock exactly the way a
     # write transaction does; nothing is committed, so every other writer
@@ -29,12 +32,28 @@ def test_reads_do_not_block_behind_a_held_writer_transaction(tmp_path: Path) -> 
     holder = sqlite3.connect(tmp_path / "db.sqlite", timeout=5)
     try:
         holder.execute("BEGIN IMMEDIATE")
-        # All three read paths must return without touching the writer
-        # lock — previously each of these waited for the full busy timeout
-        # and then failed with `database is locked`.
+        # Every pure-read path must return without touching the writer lock.
+        # run_for_task and read_events are the paths CI hit under parallel
+        # load after the first four methods were converted; the rest pin the
+        # whole read surface so a future method cannot silently regress onto
+        # the write engine.
         assert store.get_task_state(task_ref) is None
         assert store.get_task_input(task_ref) is None
         assert store.list_tasks() == []
+        assert store.run_for_task(task_ref) is None
+        assert store.task_for_run(run_ref) is None
+        assert store.read_events(run_ref).events == []
+        assert store.list_run_actions(run_ref) == []
+        assert store.list_accepted_actions(run_ref) == []
+        assert store.count_accepted_decisions(run_ref) == 0
+        assert store.get(str(uuid.uuid4())) is None
+        assert store.list_pending_commands(str(uuid.uuid4())) == []
+        commands_page = store.list_task_commands(str(uuid.uuid4()), task_ref, 10, 0)
+        assert commands_page[0] == []
+        assert store.event_runs_for_task(task_ref) == []
+        assert store.action_result(f"{uuid.uuid4()}:t", task_ref) is None
+        assert store.submission_received_at(run_ref) is None
+        assert store.wait_now() is not None
     finally:
         holder.rollback()
         holder.close()

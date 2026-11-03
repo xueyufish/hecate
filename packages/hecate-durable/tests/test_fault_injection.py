@@ -239,12 +239,17 @@ def test_storage_failure_recovery_reports_store_unavailable(store: SqlDurableSto
     verdict_ok = store.recovery("run-1:reserve")
     assert verdict_ok.state is ActionLedgerState.CLAIMED
 
+    # Total storage failure takes down both engines: recovery reads on the
+    # autocommit read factory, writes on the BEGIN IMMEDIATE factory.
     real_factory = store._session_factory  # noqa: SLF001
+    real_read_factory = store._read_session_factory  # noqa: SLF001
     store._session_factory = _BrokenSessionFactory()  # noqa: SLF001
+    store._read_session_factory = _BrokenSessionFactory()  # noqa: SLF001
     try:
         verdict = store.recovery("run-1:reserve")
     finally:
         store._session_factory = real_factory  # noqa: SLF001
+        store._read_session_factory = real_read_factory  # noqa: SLF001
     assert verdict.state is ActionLedgerState.STORE_UNAVAILABLE
 
 
