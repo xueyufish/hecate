@@ -124,6 +124,30 @@ def _expired(expires_at: str | None) -> bool:
     return deadline <= datetime.now(UTC)
 
 
+def _same_command_request(existing: ControlCommandRecord, candidate: ControlCommandRecord) -> bool:
+    """One command identity, one intent.
+
+    Compare caller-owned intent, as the normal replay gate does. Receipt
+    state, server-selected Run and effect metadata can advance while a
+    concurrent submitter is still recording its request.
+    """
+
+    fields = (
+        "command_id",
+        "kind",
+        "issuer",
+        "task_ref",
+        "expires_at",
+        "expected_revision",
+        "payload",
+        "payload_schema_ref",
+        "detail_ns",
+    )
+    return all(getattr(existing, key) == getattr(candidate, key) for key in fields) and (
+        existing.extra.get("workspace_id") == candidate.extra.get("workspace_id")
+    )
+
+
 # Strong references for fire-and-forget dispatch triggers (an unreferenced
 # task can be garbage-collected mid-execution).
 _background_tasks: set[asyncio.Task[None]] = set()
@@ -1088,7 +1112,22 @@ class TaskControlService:
             extra={"workspace_id": str(workspace_id)},
             detail_ns=dict(detail_ns) if detail_ns else {},
         )
-        record = await asyncio.to_thread(self._recorder.record, record)
+        try:
+            record = await asyncio.to_thread(self._recorder.record, record)
+        except ValueError:
+            # The recorder keeps one content per command id. When a concurrent
+            # submitter of this same request recorded it first, its receipt
+            # may already contain an applied effect or later delivery state.
+            # The immutable request still matches. A second apply
+            # here would race the single-use wake and let the loser misreport
+            # — or park — a healthy parent, so surface the in-flight receipt.
+            concurrent = await asyncio.to_thread(self._recorder.get, record.command_id)
+            if concurrent is None or not _same_command_request(concurrent, record):
+                raise
+            await self._db.commit()
+            return CommandIssueResult(
+                record=concurrent, detail="command recorded concurrently; replaying its current receipt"
+            )
         # Close this session's write transaction before the recorder's own
         # transaction runs — the seam store never shares a transaction with
         # the application session (one independent session per transaction).

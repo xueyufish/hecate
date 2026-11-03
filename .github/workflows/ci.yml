@@ -180,9 +180,8 @@ jobs:
           DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres
         run: python scripts/dev.py test tests/test_migrations/test_upgrade_drift.py -v
 
-  # step6d continuation acceptance: the hang/resume + receipt-loss scenarios
-  # need a real multi-connection database (SQLite's single-writer semantics
-  # serialize them away on local runs).
+  # step6d continuation acceptance: run hang/resume and receipt-loss scenarios
+  # on PostgreSQL as well, including its row-lock and transaction semantics.
   step6-continuation-pg:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -226,6 +225,12 @@ jobs:
           # step5e continuation: workflow parent-child approval/restart combo.
           python scripts/dev.py test tests/test_execution/test_workflow_approval_combo.py -q --timeout=240 --timeout-method=thread -p no:cacheprovider
           python scripts/dev.py test tests/scenarios/test_workflow_approval_restart.py -q --timeout=600 --timeout-method=thread -p no:cacheprovider
+          # Agent child calls: the shared scenarios on the PostgreSQL tier (the
+          # independent-process helpers bind through the child environment),
+          # then the cross-process concurrency/fault matrix — lease takeover,
+          # quota race, slice CAS, death windows, held holds, callback races.
+          python scripts/dev.py test tests/test_execution/test_agent_child_run.py -q --timeout=180 --timeout-method=thread -p no:cacheprovider
+          python scripts/dev.py test tests/test_execution/test_agent_child_postgres_matrix.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with

@@ -366,9 +366,9 @@ HARNESS_ORG = _uuid_mod.UUID("00000000-0000-0000-0000-0000000000a1")
 HARNESS_OWNER = _uuid_mod.UUID("00000000-0000-0000-0000-0000000000a2")
 
 # PostgreSQL for the concurrency-tier acceptance (hang/resume, receipt loss).
-# SQLite stays the default local tier; the concurrent dispatch scenarios need
-# a real multi-connection database (SQLite's single-writer semantics
-# serialize them away). One schema per test keeps PG runs isolated.
+# SQLite stays the default local tier; PostgreSQL additionally exercises real
+# row locks. The search path excludes public so pre-existing tables cannot
+# make create_all skip the tables owned by an isolated test schema.
 HARNESS_POSTGRES_URL = os.environ.get("HECATE_STEP6_POSTGRES_URL")
 
 
@@ -380,7 +380,7 @@ def _harness_schema_name(tmp_path) -> str:
 
 def _pg_url_with_schema(url: str, schema: str) -> str:
     sep = "&" if "?" in url else "?"
-    return f"{url}{sep}options=-csearch_path%3D{schema},public"
+    return f"{url}{sep}options=-csearch_path%3D{schema}"
 
 
 @_pytest_asyncio.fixture
@@ -412,14 +412,22 @@ async def harness(tmp_path):
         # same call is fine, so the sync-psycopg store stays.
         from sqlalchemy import text as _text
 
+        # Real-engine tests import these stores inside their test body, after
+        # fixture setup. Register their tables before creating the schema.
+        from hecate.studio.event_state.models import EventModel  # noqa: F401
+        from hecate.studio.session_state.models import SessionStateModel  # noqa: F401
+
         schema = _harness_schema_name(tmp_path)
         async_url = pg_url.replace("+psycopg", "+asyncpg")
         async_admin = _create_async_engine(async_url)
         async with async_admin.begin() as conn:
             await conn.execute(_text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+        # Dispose the admin pool now: one connection leaked per test makes
+        # the session-scoped loop's close() hang on the Windows proactor.
+        await async_admin.dispose()
         async_engine = _create_async_engine(
             async_url,
-            connect_args={"server_settings": {"search_path": f"{schema},public"}},
+            connect_args={"server_settings": {"search_path": schema}},
         )
         store = SqlDurableStore(_pg_url_with_schema(pg_url, schema), source="platform")
     else:
@@ -510,6 +518,11 @@ async def harness(tmp_path):
         "agent_id": agent_id,
         "clock": clock,
         "pg": pg_url is not None,
+        # Connection facts for independent worker processes: the UNMASKED
+        # store URL (``str(url)`` hides the password) and the test schema.
+        # Pass them through the child environment, never through argv.
+        "durable_dsn": store.engine.url.render_as_string(hide_password=False),
+        "schema": schema,
     }
 
     lease_module._default_clock = original_default

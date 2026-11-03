@@ -1633,6 +1633,8 @@ class PlatformTaskDispatcher:
             )
         if context.platform_run_id is None:
             raise ValueError("controller tasks require the platform run stamped at submission")
+        if agent_child_tool_map is not None:
+            await agent_child_tool_map[DELEGATE_AGENT_TOOL_NAME].recover_submission_receipts(run_ref, lease)
         controller_run = RunRef(issuer_domain=PLATFORM_ISSUER, run_id=context.platform_run_id)
         ownership = (
             DecisionOwnership(lease_key=lease.lease_key, fence_token=lease.fencing_token, holder=lease.holder)
