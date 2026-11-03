@@ -424,3 +424,44 @@ of the task's own deadline.
   The declaration's exact `allowed_tools` narrowing alone cannot express the
   parent's resource scope. Runner rejects platform child declarations and
   external task input cannot set the internal `agent_child_parent` stamp.
+- **PostgreSQL concurrency has its own matrix** — SQLite retains its own
+  process-recovery and concurrency regression evidence. PostgreSQL row-lock
+  and transaction behavior is verified separately:
+  `tests/test_execution/test_agent_child_postgres_matrix.py` runs the
+  competing executors as INDEPENDENT PROCESSES against `HECATE_STEP6_POSTGRES_URL`
+  (skip, not pass, without it). The worker helpers bind their database through
+  the child ENVIRONMENT (`_agent_child_db`), never argv: `str(engine.url)`
+  masks the password, so an argv URL cannot authenticate a PostgreSQL child.
+- **Stale executors are fenced, and the fence is observable** — a hung
+  child executor's dispatch lease expires, the takeover requeues the task,
+  and the hung executor's late write is refused with `presented fencing
+  token N is stale ...; the write is rejected`. Its unsettled slice entry
+  stays an unknown charge; the workspace hold settles as `unknown` (kept
+  open, never charged as zero). A recovered child blocked at its dispatch
+  entry by a cancelled parent is `failed` with `parent_cancelled` — the
+  queued-at-cancel case is the one that becomes `cancelled`.
+- **Concurrent deterministic callbacks must see "in flight", not a conflict** —
+  the reconcilers reissue `agent-child-callback-<call>-<token>` with a fresh
+  `issued_at` per submission. The recorder's one-content-per-id guard counts
+  the timestamp, so a racing reissue raised "already recorded with different
+  content" and the reconciler parked a HEALTHY parent for reconciliation.
+  `issue_command` now detects its own concurrent recording (same intent,
+  different stamp) and reports the current receipt. Effect metadata and
+  receipt state may already have advanced; request identity still binds
+  workspace, task, issuer, kind, payload, revision, expiry and callback data.
+  An in-flight command can be retried without applying a completed one again.
+- **Matrix scope is explicit** — provider responses and the `web_search`
+  test effect are doubles. Two independent quota contenders are observed
+  waiting on the real PostgreSQL row lock; slice writers synchronize after
+  reading the same revision. Lease takeover waits for the stale process's
+  model request before starting the successor and releases that model only
+  after takeover completes. Deadline convergence uses an injected expiry
+  clock; it does not certify physical clock skew or real-model quality.
+- **Lost submission acceptance needs host evidence** — a created child whose
+  caller died before settling `delegate_agent` is recovered from the immutable
+  accepted action, exact submission association and verified child input,
+  target and responsibility chain. The current parent dispatch lease fences
+  confirmation in the ledger transaction, with an `action_outcome_confirmed`
+  event. Rewritten input or mismatched identity stays in reconciliation.
+  This confirms an existing submission; it neither creates another child nor
+  relaxes replay policy for unresolved idempotent or external business writes.

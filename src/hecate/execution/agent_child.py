@@ -341,9 +341,6 @@ async def verify_child_call(
 ) -> dict[str, Any]:
     """Verify a wait against its actual acceptance receipt and submitted child facts."""
     import asyncio
-    from datetime import UTC, datetime
-
-    from hecate.contracts.execution.references import BackendRef, RefKind
 
     run_ref = await asyncio.to_thread(store.run_for_task, parent_ref)
     if run_ref is None or contract.get("run_id") != run_ref.id:
@@ -378,6 +375,16 @@ async def verify_child_call(
         )
     ):
         raise ValueError("agent child wait does not match its acceptance receipt")
+    return await _verify_submitted_child(store, parent_ref, contract, wait=wait)
+
+
+async def _verify_submitted_child(
+    store: Any, parent_ref: Any, contract: dict[str, Any], *, wait: Any = None
+) -> dict[str, Any]:
+    from datetime import UTC, datetime
+
+    from hecate.contracts.execution.references import BackendRef, RefKind
+
     raw = contract["child_task_ref"]
     child_ref = BackendRef.from_dict(raw)
     if child_ref.kind is not RefKind.TASK or child_ref.issuer_domain != parent_ref.issuer_domain:
@@ -833,9 +840,10 @@ class AgentChildDelegateTool:
     under the idempotency key ``agent-child:<parent task>:<call id>`` — the
     calling action's stable execution id. A crash anywhere around the
     acceptance re-derives the same child: a settled acceptance action
-    replays its recorded envelope without re-running the tool, and an
-    unresolved one re-executes into the idempotent submit, which returns
-    the original child instead of minting another.
+    replays its recorded envelope without re-running the tool. If the
+    child was committed before acceptance was recorded, the host confirms
+    its submitted facts under the current dispatch lease. An unestablished
+    outcome retains the normal reconciliation policy.
 
     Refusals (unknown alias, schema violation, bound exhausted, another
     call already accepted in this dispatch) are structured, model-visible
@@ -1008,6 +1016,116 @@ class AgentChildDelegateTool:
                 **({"budget_units": target["budget_units"]} if target.get("budget_units") else {}),
             },
         }
+
+    async def recover_submission_receipts(self, run_ref: Any, lease: Any) -> None:
+        """Confirm a created child when its caller died before recording acceptance.
+
+        Only an immutable accepted action, its exact idempotent submission
+        association and matching child facts can establish this outcome.
+        Unconfirmed or unknown business writes retain normal reconciliation.
+        """
+        if lease is None:
+            return
+        from hecate_durable.contracts.durable import ActionOutcome, ActionOutcomeRecord
+        from hecate_durable.runtime_hook import SqlAcceptedDecisionStore
+        from hecate_durable.storage.models import AcceptedDecisionRow
+        from hecate_runtime.accepted_action_step import execution_id_for_action
+        from hecate_runtime.accepted_decision import RunRef
+        from sqlalchemy import select
+
+        rows = await asyncio.to_thread(self._store.list_run_actions, run_ref)
+        pending = {
+            row["action_key"]: row
+            for row in rows
+            if (row.get("intent") or {}).get("action_name") == DELEGATE_AGENT_TOOL_NAME
+            and row.get("last_outcome") is None
+        }
+        if not pending:
+            return
+        decision_store = SqlAcceptedDecisionStore(self._store)
+        decision_run = RunRef(issuer_domain=run_ref.issuer_domain, run_id=run_ref.id)
+
+        def decisions():
+            with self._store.session_factory() as db:
+                steps = list(
+                    db.scalars(
+                        select(AcceptedDecisionRow.decision_step_id).where(
+                            AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                            AcceptedDecisionRow.run_id == run_ref.id,
+                        )
+                    )
+                )
+            return [decision_store.lookup_sync(decision_run, step) for step in steps]
+
+        records = await asyncio.to_thread(decisions)
+        children = await asyncio.to_thread(self._store.list_tasks)
+        for record in records:
+            if record is None:
+                continue
+            for action in record.actions:
+                call_id = execution_id_for_action(decision_run, record.decision_step_id, action.action_key)
+                row = pending.get(call_id)
+                if row is None or action.tool != DELEGATE_AGENT_TOOL_NAME:
+                    continue
+                digest = tool_arguments_digest(action.arguments)
+                if (row.get("intent") or {}).get("arguments_digest") != digest:
+                    raise ValueError("agent child recovery arguments differ from the accepted action")
+                matches = []
+                for child in children:
+                    payload = await asyncio.to_thread(self._store.get_task_input, child.task_ref) or {}
+                    stamp = agent_child_stamp(payload.get("agent_child_parent"))
+                    if (
+                        stamp
+                        and stamp.get("task_ref") == self._parent_ref.to_dict()
+                        and stamp.get("call_id") == call_id
+                    ):
+                        matches.append((child.task_ref, payload, stamp))
+                if not matches:
+                    continue
+                if len(matches) != 1:
+                    raise ValueError("agent child recovery found multiple submissions for one call")
+                child_ref, payload, stamp = matches[0]
+                child_run = await asyncio.to_thread(self._store.run_for_task, child_ref)
+                association = await asyncio.to_thread(self._store.submission_for_run, child_run) if child_run else None
+                if (
+                    association is None
+                    or association.task_ref != child_ref
+                    or association.key.key != f"agent-child:{self._parent_ref.id}:{call_id}"
+                    or association.key.workspace != self._workspace_id
+                    or association.key.subject != (self._initiator_user_id or "anonymous")
+                    or stamp.get("parent_agent_id") != str(self._parent_agent_id)
+                ):
+                    raise ValueError("agent child recovery submission identity is invalid")
+                alias = action.arguments.get("alias")
+                target = self._policy["targets"].get(alias)
+                if target is None:
+                    raise ValueError("agent child recovery target is not declared")
+                call = {
+                    "call_id": call_id,
+                    "alias": alias,
+                    "child_task_ref": child_ref.to_dict(),
+                    "target": {"agent_id": target["agent_id"], "deployment_id": payload.get("deployment_id")},
+                    "input_digest": input_digest_of(action.arguments.get("input")),
+                    **({"budget_units": target["budget_units"]} if target.get("budget_units") else {}),
+                }
+                await _verify_submitted_child(
+                    self._store,
+                    self._parent_ref,
+                    {
+                        **call,
+                        "arguments_digest": digest,
+                        "output_schema": target.get("output_schema"),
+                    },
+                )
+                result = {"status": AGENT_CHILD_ENVELOPE_STATUS, "call": call}
+                await asyncio.to_thread(
+                    self._store.record_outcome_ex,
+                    ActionOutcomeRecord(
+                        action_key=call_id, outcome=ActionOutcome.SUCCEEDED, result_digest=tool_arguments_digest(result)
+                    ),
+                    result_payload=result,
+                    lease=lease,
+                )
 
     def _policy_workspace(self) -> Any:
         import uuid as _uuid
