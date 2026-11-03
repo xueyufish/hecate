@@ -1297,6 +1297,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         *,
         claim_token: int | None = None,
         result_payload: Any = None,
+        lease: LeaseHandle | None = None,
     ) -> None:
         """Record the real outcome; ``claim_token`` enables late-receipt fencing.
 
@@ -1305,18 +1306,60 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         rejected — the authoritative outcome stays untouched and the late
         receipt is journaled as an event for reconciliation. Without a token
         this is the seam-level single-writer write.
+
+        A dispatch ``lease`` instead confirms an unfinished idempotent action
+        from host-owned facts. Platform Agent child recovery consumes this
+        path; it never grants a retry of an unknown external effect.
         """
 
+        if lease is not None and claim_token is not None:
+            raise ValueError("choose a claim token or a host confirmation lease")
         if claim_token is not None:
             self._record_outcome_fenced(outcome, claim_token=claim_token, result_payload=result_payload)
             return
         with self._session() as session, session.begin():
+            if lease is not None:
+                self.leases.assert_valid(session, lease)
             intent = session.execute(
                 select(ActionIntentRow).where(ActionIntentRow.action_key == outcome.action_key).with_for_update()
             ).scalar_one_or_none()
             if intent is None:
                 raise KeyError(f"action {outcome.action_key!r} has no recorded intent")
+            if lease is not None:
+                from hecate_durable.storage.lease import task_dispatch_lease_key
+
+                task_ref, run_ref = _intent_linkage(intent)
+                task = session.get(TaskStateRow, (task_ref.issuer_domain, task_ref.id)) if task_ref else None
+                if (
+                    task_ref is None
+                    or run_ref is None
+                    or lease.lease_key != task_dispatch_lease_key(task_ref.issuer_domain, task_ref.id)
+                    or intent.side_effect_class != ToolSideEffectClass.IDEMPOTENT_WRITE.value
+                    or outcome.outcome is not ActionOutcome.SUCCEEDED
+                    or task is None
+                    or task.lifecycle_state != TaskLifecycleState.RUNNING.value
+                    or (task.run_issuer, task.run_id) != (intent.run_issuer, intent.run_id)
+                ):
+                    raise ValueError("host confirmation is not bound to this idempotent action's dispatch lease")
+                previous = session.get(ActionOutcomeRow, outcome.action_key)
+                if previous is not None:
+                    if previous.outcome == outcome.outcome.value and previous.result_digest == outcome.result_digest:
+                        return
+                    raise ValueError("host confirmation cannot replace an established action outcome")
             self._write_outcome(session, intent, outcome, result_payload)
+            if lease is not None:
+                self.events.emit(
+                    session,
+                    task_ref=task_ref,
+                    run_ref=run_ref,
+                    event_type="action_outcome_confirmed",
+                    payload={
+                        "action_key": outcome.action_key,
+                        "holder": lease.holder,
+                        "fencing_token": lease.fencing_token,
+                        "result_digest": outcome.result_digest,
+                    },
+                )
 
     def _record_outcome_fenced(self, outcome: ActionOutcomeRecord, *, claim_token: int, result_payload: Any) -> None:
         fenced = False

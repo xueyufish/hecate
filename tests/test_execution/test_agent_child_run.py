@@ -294,38 +294,54 @@ async def test_created_child_prevents_refunding_a_submission_error(harness, llm_
     assert all(not row.released and not row.settled for row in await _child_holds(harness, parent))
 
 
-async def test_budget_reservations_survive_an_abrupt_process_exit(harness, llm_stub):
+async def _run_child_process(harness, module: str, *args: str, timeout: float = 60) -> Any:
+    """Run a ``python -m`` helper against the harness database in a fresh interpreter.
+
+    The database binds through the child environment (``_agent_child_db``):
+    ``str(engine.url)`` masks the password, so argv could never carry a
+    PostgreSQL DSN, and argv is visible host-wide anyway.
+    """
+
     import subprocess
     import sys
     from pathlib import Path
 
+    from tests.test_execution._agent_child_db import child_environment
+
+    return await asyncio.to_thread(
+        subprocess.run,
+        [sys.executable, "-m", module, *args],
+        cwd=Path(__file__).resolve().parents[2],
+        env=child_environment(harness),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+async def test_budget_reservations_survive_an_abrupt_process_exit(harness, llm_stub):
     from hecate_governance.usage import ReservationStatus
 
     from hecate.execution.agent_child import DurableSliceLedger
 
     _, child, _ = await _budget_child(harness)
     harness["store"].apply_task_state(child, TaskLifecycleState.RUNNING)
-    command = [
-        sys.executable,
-        "-m",
-        "tests.test_execution._agent_child_budget_process",
-        str(harness["store"].engine.url),
-        child.id,
-    ]
-    completed = await asyncio.to_thread(
-        subprocess.run,
-        command,
-        cwd=Path(__file__).resolve().parents[2],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    completed = await _run_child_process(harness, "tests.test_execution._agent_child_budget_process", child.id, "die")
     assert completed.returncode == 73, completed.stderr
     ledger = DurableSliceLedger(store=harness["store"], task_ref=child, allocation=10)
     summary = await ledger.snapshot()
     assert summary["used"] == 8 and summary["unknown_count"] == 1
     assert (await ledger.reserve("retry", 3)).status is ReservationStatus.INSUFFICIENT
+
+    # The refusal holds from a THIRD interpreter too: the surviving facts,
+    # not this process's memory, deny the retry before any model request.
+    probe = await _run_child_process(harness, "tests.test_execution._agent_child_budget_process", child.id, "probe")
+    assert probe.returncode == 0, probe.stderr
+    report = json.loads(probe.stdout)
+    assert report["backend"] == ("postgresql" if harness["pg"] else "sqlite")
+    assert report["used"] == 8 and report["unknown_count"] == 1
+    assert report["retry_status"] == "insufficient"
 
 
 async def test_parent_deadline_still_closes_the_cancelled_child_hold(harness, llm_stub):
@@ -936,6 +952,205 @@ async def test_duplicate_and_forged_callbacks_consume_exactly_once(harness, llm_
     assert harness["store"].get_task_state(parent.task_ref).lifecycle_state.value == "succeeded"
 
 
+async def test_concurrent_callback_recording_does_not_park_a_healthy_parent(harness, llm_stub, monkeypatch) -> None:
+    """Two reconcilers reissue the same deterministic callback at once.
+
+    The recorder keeps one content per command id and the two submissions
+    differ only in ``issued_at``. The second must see an in-flight command
+    — never a "different content" conflict that parks a parent whose child
+    succeeded cleanly. The next pass applies the recorded command once.
+    """
+
+    from dataclasses import replace
+
+    from hecate.execution.agent_child_wake import AgentChildRunReconciler
+
+    target_id = await _add_agent(harness, "worker-agent")
+    parent = await _submit_parent(harness, _declaration_of(harness, target_id))
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    child_ref, _stamp = _children_of(harness, parent.task_ref)[0]
+
+    async def silent_callback(self, db, context, outcome, *, retry_errors=False):
+        return None
+
+    monkeypatch.setattr(
+        "hecate.execution.task_dispatcher.PlatformTaskDispatcher._issue_agent_child_callback", silent_callback
+    )
+    assert await worker.dispatch_once(child_ref) is True
+
+    store = harness["store"]
+    real_record = store.record
+    raced = 0
+
+    def record_after_a_concurrent_submitter(command):
+        nonlocal raced
+        if raced == 0 and command.command_id.startswith("agent-child-callback-"):
+            raced += 1
+            # The other reconciler's submission of the SAME command, stamped
+            # a moment earlier, lands first.
+            real_record(replace(command, issued_at="2026-01-01T00:00:00+00:00"))
+        return real_record(command)
+
+    monkeypatch.setattr(store, "record", record_after_a_concurrent_submitter)
+    await AgentChildRunReconciler(store, harness["session_factory"]).converge_once()
+    assert raced == 1
+    record = await asyncio.to_thread(store.get_task_state, parent.task_ref)
+    assert record.lifecycle_state is TaskLifecycleState.WAITING_INPUT, record.extra
+    assert await asyncio.to_thread(store.list_input_revisions, parent.task_ref) == []
+
+    # The next pass retries from the recorded command and applies it once.
+    monkeypatch.setattr(store, "record", real_record)
+    assert await AgentChildRunReconciler(store, harness["session_factory"]).converge_once() == 1
+    record = await asyncio.to_thread(store.get_task_state, parent.task_ref)
+    assert record.lifecycle_state is TaskLifecycleState.QUEUED, record.extra
+    revisions = await asyncio.to_thread(store.list_input_revisions, parent.task_ref)
+    assert [row["source"] for row in revisions] == ["agent_child_result"]
+    assert await worker.dispatch_once(parent.task_ref) is True
+    assert (await asyncio.to_thread(store.get_task_state, parent.task_ref)).lifecycle_state.value == "succeeded"
+
+
+@pytest.mark.parametrize("already_recorded", [False, True])
+async def test_concurrent_command_already_applied_replays_its_receipt(harness, monkeypatch, already_recorded):
+    """A winner can commit the effect before the loser's record/get boundary."""
+    from dataclasses import replace
+
+    from hecate.contracts.execution.durable import ControlCommandRecord
+
+    target = await _add_agent(harness, "race-worker")
+    parent = await _submit_parent(harness, _declaration_of(harness, target))
+    store = harness["store"]
+    command_id = "completed-concurrent-cancel"
+    run = await asyncio.to_thread(store.run_for_task, parent.task_ref)
+    initial = ControlCommandRecord(
+        command_id=command_id,
+        kind=ControlCommandKind.CANCEL,
+        issuer="race",
+        task_ref=parent.task_ref,
+        run_ref=run,
+        issued_at="2026-01-01T00:00:00+00:00",
+        state=CommandState.REQUESTED,
+        extra={"workspace_id": str(WS)},
+    )
+    real_record = store.record
+    if already_recorded:
+        await asyncio.to_thread(real_record, initial)
+    raced = False
+
+    def apply_winner_before_record(command):
+        nonlocal raced
+        if command.command_id == command_id and not raced:
+            raced = True
+            if not already_recorded:
+                real_record(replace(command, issued_at=initial.issued_at))
+            current = store.get_task_state(parent.task_ref)
+            store.apply_task_state(
+                parent.task_ref,
+                TaskLifecycleState.CANCELLED,
+                expected_revision=current.revision,
+                applied_command_id=command_id,
+                event_run_ref=run,
+            )
+        return real_record(command)
+
+    monkeypatch.setattr(store, "record", apply_winner_before_record)
+    async with harness["session_factory"]() as db:
+        result = await _service_of(harness, db).issue_command(
+            workspace_id=WS,
+            task_id=uuid.UUID(parent.task_ref.id),
+            kind=ControlCommandKind.CANCEL,
+            issuer="race",
+            command_id=command_id,
+        )
+    assert result.record.state is CommandState.APPLIED
+    assert "effect_run_ref" in result.record.extra
+    assert (await asyncio.to_thread(store.get_task_state, parent.task_ref)).revision == 1
+
+
+@pytest.mark.parametrize("changed", ["issuer", "workspace", "revision", "payload"])
+async def test_concurrent_command_with_different_intent_is_not_replayed(harness, monkeypatch, changed):
+    """A competing insertion cannot use receipt replay to replace caller intent."""
+    from dataclasses import replace
+
+    target = await _add_agent(harness, "race-worker")
+    parent = await _submit_parent(harness, _declaration_of(harness, target))
+    store = harness["store"]
+    real_record = store.record
+
+    def conflicting_insert(command):
+        changes = {
+            "issuer": {"issuer": "another-issuer"},
+            "workspace": {"extra": {"workspace_id": str(uuid.uuid4())}},
+            "revision": {"expected_revision": 999},
+            "payload": {"payload": {"different": True}, "payload_schema_ref": "urn:test:other"},
+        }
+        real_record(replace(command, **changes[changed]))
+        return real_record(command)
+
+    monkeypatch.setattr(store, "record", conflicting_insert)
+    async with harness["session_factory"]() as db:
+        with pytest.raises(ValueError, match="different content"):
+            await _service_of(harness, db).issue_command(
+                workspace_id=WS,
+                task_id=uuid.UUID(parent.task_ref.id),
+                kind=ControlCommandKind.CANCEL,
+                issuer="race",
+                command_id="conflicting-insertion",
+            )
+    assert (await asyncio.to_thread(store.get_task_state, parent.task_ref)).lifecycle_state is TaskLifecycleState.QUEUED
+
+
+@pytest.mark.parametrize("authority", ["foreign-task", "stale", "existing-unknown", "non-idempotent"])
+async def test_host_confirmation_rejects_invalid_authority_or_unknown_outcome(harness, authority):
+    """Child-submission confirmation cannot bypass the existing ledger fences."""
+    from hecate_durable.contracts.durable import ActionIntent, ActionOutcome, ActionOutcomeRecord, ToolSideEffectClass
+    from hecate_durable.storage.lease import StaleFenceError, task_dispatch_lease_key
+
+    target = await _add_agent(harness, "confirmation-worker")
+    parent = await _submit_parent(harness, _declaration_of(harness, target))
+    store = harness["store"]
+    run = await asyncio.to_thread(store.run_for_task, parent.task_ref)
+    await asyncio.to_thread(store.apply_task_state, parent.task_ref, TaskLifecycleState.RUNNING)
+    key = f"confirmation-{uuid.uuid4()}"
+    await asyncio.to_thread(
+        store.record_intent_ex,
+        ActionIntent(
+            action_key=key,
+            action_name="delegate_agent",
+            arguments_digest="a" * 64,
+            side_effect_class=(
+                ToolSideEffectClass.NON_IDEMPOTENT_WRITE
+                if authority == "non-idempotent"
+                else ToolSideEffectClass.IDEMPOTENT_WRITE
+            ),
+        ),
+        task_ref=parent.task_ref,
+        run_ref=run,
+    )
+    lease_key = task_dispatch_lease_key(
+        parent.task_ref.issuer_domain, str(uuid.uuid4()) if authority == "foreign-task" else parent.task_ref.id
+    )
+    lease = await asyncio.to_thread(store.leases.acquire, lease_key, "confirmation-test", 60)
+    if authority == "stale":
+        await asyncio.to_thread(store.leases.release, lease_key, lease.holder, fencing_token=lease.fencing_token)
+    elif authority == "existing-unknown":
+        await asyncio.to_thread(
+            store.record_outcome_ex, ActionOutcomeRecord(action_key=key, outcome=ActionOutcome.UNKNOWN)
+        )
+    with pytest.raises((ValueError, StaleFenceError)):
+        await asyncio.to_thread(
+            store.record_outcome_ex,
+            ActionOutcomeRecord(action_key=key, outcome=ActionOutcome.SUCCEEDED, result_digest="b" * 64),
+            result_payload={"status": "agent_child_accepted"},
+            lease=lease,
+        )
+    final = await asyncio.to_thread(store.get_run_action, run, key)
+    if authority == "existing-unknown":
+        assert final["last_outcome"]["outcome"] == "unknown"
+    else:
+        assert final.get("last_outcome") is None
+
+
 async def test_refusals_carry_no_side_effects(harness, llm_stub) -> None:
     """Unknown aliases, schema violations and exhausted bounds refuse as data."""
 
@@ -1256,10 +1471,6 @@ async def test_budget_slice_bounds_the_child_and_accumulates_on_the_parent(harne
 async def test_restart_in_an_independent_process_recovers_the_lost_callback(harness, llm_stub, monkeypatch) -> None:
     """A fresh interpreter converges the same parent-child facts, no duplicates."""
 
-    import subprocess
-    import sys
-    from pathlib import Path
-
     target_id = await _add_agent(harness, "worker-agent")
     parent = await _submit_parent(harness, _declaration_of(harness, target_id))
     worker = _worker_of(harness)
@@ -1275,24 +1486,12 @@ async def test_restart_in_an_independent_process_recovers_the_lost_callback(harn
     assert await worker.dispatch_once(child_ref) is True
     assert harness["store"].get_task_state(child_ref).lifecycle_state.value == "succeeded"
 
-    command = [
-        sys.executable,
-        "-m",
-        "tests.test_execution._agent_child_process",
-        str(harness["store"].engine.url),
-        parent.task_ref.id,
-    ]
-    completed = await asyncio.to_thread(
-        subprocess.run,
-        command,
-        cwd=Path(__file__).resolve().parents[2],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
+    completed = await _run_child_process(
+        harness, "tests.test_execution._agent_child_process", parent.task_ref.id, timeout=120
     )
     assert completed.returncode == 0, completed.stderr
     report = json.loads(completed.stdout)
+    assert report["backend"] == ("postgresql" if harness["pg"] else "sqlite")
     assert report["recovered"] == 1
     assert report["state_after_recovery"] == "queued"
     assert report["dispatched"] is True
