@@ -205,7 +205,13 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         else:
             self._read_engine = self.engine
             self._read_session_factory = self._session_factory
-        self.events = SqlEventLog(self._session_factory, source=source, actor_id=actor_id, clock=self._clock)
+        self.events = SqlEventLog(
+            self._session_factory,
+            read_session_factory=self._read_session_factory,
+            source=source,
+            actor_id=actor_id,
+            clock=self._clock,
+        )
         self.leases = LeaseManager(self._session_factory, clock=lease_clock)
 
     @staticmethod
@@ -859,7 +865,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
         from .models import AcceptedDecisionRow, InputRevisionRow
 
-        with self._session() as session:
+        with self._read_session() as session:
             rows = (
                 session.execute(
                     select(InputRevisionRow)
@@ -947,7 +953,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         from .models import AcceptedDecisionRow
 
         require_kind(run_ref, RefKind.RUN)
-        with self._session() as session:
+        with self._read_session() as session:
             return int(
                 session.execute(
                     select(func.count()).where(
@@ -1102,14 +1108,14 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         return record
 
     def get(self, command_id: str) -> ControlCommandRecord | None:
-        with self._session() as session:
+        with self._read_session() as session:
             row = session.get(CommandRow, command_id)
             return None if row is None else _command_of(row)
 
     def list_pending_commands(self, workspace_id: str) -> list[ControlCommandRecord]:
         """Workspace-scoped ``requested`` receipts (lazy-expiry sweep input)."""
 
-        with self._session() as session:
+        with self._read_session() as session:
             rows = (
                 session.execute(
                     select(CommandRow).where(
@@ -1142,7 +1148,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         )
         # Preserve the contract's ordering over the stored ISO string.
         order = (CommandRow.issued_at.desc(), CommandRow.command_id.desc())
-        with self._session() as session:
+        with self._read_session() as session:
             total = int(session.execute(select(func.count()).select_from(CommandRow).where(*scope)).scalar_one())
             rows = (
                 session.execute(select(CommandRow).where(*scope).order_by(*order).limit(limit).offset(offset))
@@ -1428,7 +1434,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
             return ActionRecovery(action_key=action_key, state=ActionLedgerState.STORE_UNAVAILABLE)
 
     def _recovery(self, action_key: str) -> ActionRecovery:
-        with self._session() as session:
+        with self._read_session() as session:
             intent = session.get(ActionIntentRow, action_key)
             if intent is None:
                 return ActionRecovery(action_key=action_key, state=ActionLedgerState.NEVER_STARTED)
@@ -1480,7 +1486,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def wait_now(self) -> datetime:
         """Read the SQL clock, refusing an unverifiable local clock divergence."""
-        with self._session() as session:
+        with self._read_session() as session:
             return self._wait_now(session, self._clock())
 
     def _wait_now(self, session: Session, local_raw: str) -> datetime:
@@ -1520,7 +1526,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         """
         from hecate_durable.storage.models import EventRow
 
-        with self._session() as session:
+        with self._read_session() as session:
             intent = session.get(ActionIntentRow, action_key)
             outcome = session.get(ActionOutcomeRow, action_key)
             if (
@@ -1557,7 +1563,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def action_result(self, action_key: str, task_ref: BackendRef) -> Any:
         """Read the real result of an action owned by this logical task."""
-        with self._session() as session:
+        with self._read_session() as session:
             row = session.execute(
                 select(ActionOutcomeRow.result_payload)
                 .join(ActionIntentRow, ActionIntentRow.action_key == ActionOutcomeRow.action_key)
@@ -1576,7 +1582,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         the host's action-recovery API is built on.
         """
 
-        with self._session() as session:
+        with self._read_session() as session:
             rows = (
                 session.execute(
                     select(ActionIntentRow)
@@ -1619,7 +1625,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
         if not action_key:
             return None
-        with self._session() as session:
+        with self._read_session() as session:
             row = session.execute(
                 select(ActionIntentRow).where(
                     ActionIntentRow.action_key == action_key,
@@ -1659,7 +1665,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         from .models import AcceptedDecisionRow
 
         require_kind(run_ref, RefKind.RUN)
-        with self._session() as session:
+        with self._read_session() as session:
             rows = (
                 session.execute(
                     select(AcceptedDecisionRow)
@@ -1692,7 +1698,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def submission_received_at(self, run_ref: BackendRef) -> str | None:
         """Return the original receipt time, independent of later Task updates."""
-        with self._session() as session:
+        with self._read_session() as session:
             return session.execute(
                 select(SubmissionRow.created_at).where(
                     SubmissionRow.run_issuer == run_ref.issuer_domain,
@@ -1704,7 +1710,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         """List historical event streams, including attempts no longer current."""
         from hecate_durable.storage.models import EventRow
 
-        with self._session() as session:
+        with self._read_session() as session:
             rows = session.execute(
                 select(EventRow.run_issuer, EventRow.run_id)
                 .where(
@@ -1749,7 +1755,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def run_for_task(self, task_ref: BackendRef) -> BackendRef | None:
         """The run linked to a task at submission time, when known."""
 
-        with self._session() as session:
+        with self._read_session() as session:
             row = session.get(TaskStateRow, (task_ref.issuer_domain, task_ref.id))
             if row is None or row.run_issuer is None or row.run_id is None:
                 return None
@@ -1758,7 +1764,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def task_for_run(self, run_ref: BackendRef) -> BackendRef | None:
         """Reverse lookup: the task owning a run (host-facing query API)."""
 
-        with self._session() as session:
+        with self._read_session() as session:
             row = (
                 session.execute(
                     select(TaskStateRow).where(
@@ -1776,7 +1782,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def submission_for_run(self, run_ref: BackendRef) -> SubmissionAssociation | None:
         """Return the idempotent submission that created a backend run."""
 
-        with self._session() as session:
+        with self._read_session() as session:
             row = (
                 session.execute(
                     select(SubmissionRow).where(
