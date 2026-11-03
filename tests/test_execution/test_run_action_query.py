@@ -344,7 +344,10 @@ async def test_success_denial_and_failure_leave_existing_facts_unchanged(records
     def capture(_connection, _cursor, statement, _parameters, _context, _executemany):
         statements.append(statement.lstrip().split()[0].upper())
 
-    engines = [db.bind.sync_engine, store.engine]
+    # Pure reads run on the store's autocommit read engine; observe both
+    # engines so the query is captured wherever it lands and any write on
+    # either engine still shows up in the captured statements.
+    engines = [db.bind.sync_engine, store.engine, store._read_engine]  # noqa: SLF001
     for engine in engines:
         event.listen(engine, "before_cursor_execute", capture)
     try:
