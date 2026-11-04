@@ -1822,6 +1822,12 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 return None
             return _task_ref(row.task_issuer, row.task_id)
 
+    def submission_for_key(self, key: str) -> SubmissionAssociation | None:
+        """Read the committed association for a stable submission identity."""
+        with self._read_session() as session:
+            row = session.get(SubmissionRow, key)
+            return None if row is None else _association_of(row)
+
     def submission_for_run(self, run_ref: BackendRef) -> SubmissionAssociation | None:
         """Return the idempotent submission that created a backend run."""
 

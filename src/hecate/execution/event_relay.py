@@ -106,6 +106,22 @@ class PlatformOutboxProjector:
             # Projection dedup must not acknowledge an undelivered callback:
             # a crash may occur after committing the read model but before
             # waking the parent. The outbox retries both using persisted facts.
+            if event_type == "task_state" and workspace_id is not None:
+                state = payload.get("state")
+                if state in {"cancelled", "reconciliation_required"}:
+                    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+                    await db.commit()
+                    service = PlatformTaskDispatcher(self._store, self._session_factory)._task_control(db)
+                    if state == "reconciliation_required":
+                        await service.converge_workflow_step_reconciliation(
+                            workspace_id=workspace_id, child_ref=envelope.task_ref
+                        )
+                    else:
+                        current = await asyncio.to_thread(self._store.get_task_state, envelope.task_ref)
+                        await service._cancel_pending_workflow_child(
+                            envelope.task_ref, current, workspace_id, retry_errors=True
+                        )
             if event_type == "run_terminal":
                 await db.commit()
                 task_input = await asyncio.to_thread(self._store.get_task_input, envelope.task_ref) or {}

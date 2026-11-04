@@ -231,6 +231,12 @@ jobs:
           # quota race, slice CAS, death windows, held holds, callback races.
           python scripts/dev.py test tests/test_execution/test_agent_child_run.py -q --timeout=180 --timeout-method=thread -p no:cacheprovider
           python scripts/dev.py test tests/test_execution/test_agent_child_postgres_matrix.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
+          # Workflow controller steps: the cross-process slice — worker death
+          # between the step terminal and its verified callback, two
+          # processes racing that callback behind a ready-file barrier, and
+          # a cancel request recorded on a step another process is running.
+          # (test_workflow_controller_steps.py is the SQLite contract tier.)
+          python scripts/dev.py test tests/test_execution/test_workflow_controller_postgres.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with

@@ -42,6 +42,7 @@ from hecate.contracts.execution.durable import (
     ControlCommandRecord,
     IdempotencyConflictError,
     IdempotencyKey,
+    InvalidCommandTransitionError,
     InvalidTaskTransitionError,
     SubmissionAssociation,
     TaskLifecycleState,
@@ -295,6 +296,7 @@ class TaskControlService:
         wait: bool = False,
         stream: bool = False,
         _verified_agent_child: bool = False,
+        _verified_workflow_step: bool = False,
     ) -> SubmitResult:
         """Idempotently submit one task; the durable worker dispatches it."""
         if not goal or not goal.strip():
@@ -302,6 +304,16 @@ class TaskControlService:
         messages = input.get("messages")
         if not isinstance(messages, list) or not messages:
             raise TaskControlValidationError("input.messages must be a non-empty list")
+        if not _verified_workflow_step and any(
+            input.get(key) is not None for key in ("workflow_parent", "workflow_step")
+        ):
+            raise TaskControlValidationError("workflow_parent and workflow_step are reserved for the host adapter")
+        if not _verified_workflow_step and idempotency_key and idempotency_key.startswith("workflow:"):
+            raise TaskControlValidationError("workflow submission keys are reserved for the host adapter")
+        workflow_step = input.get("workflow_step")
+        workflow_controller_step = (
+            _verified_workflow_step and isinstance(workflow_step, dict) and workflow_step.get("mode") == "controller"
+        )
         if input.get("controller_loop") is True:
             from hecate_runtime.agent_controller import ControllerLimits
             from hecate_runtime.agent_harness import validate_harness_declaration
@@ -447,7 +459,9 @@ class TaskControlService:
             from hecate.execution.workflow_child import WorkflowChildTaskAdapter
 
             try:
-                WorkflowChildTaskAdapter.plan(input)
+                plan = WorkflowChildTaskAdapter.plan(input)
+                if plan is not None and plan.has_controller_steps and not hasattr(self._store, "submission_for_key"):
+                    raise ValueError("controller workflow steps require the platform SQL durable store")
             except ValueError as exc:
                 raise TaskControlValidationError(f"invalid workflow payload: {exc}") from exc
         persisted_input = {
@@ -467,7 +481,8 @@ class TaskControlService:
             # durable surface.
             "workflow": input.get("workflow"),
             "workflow_parent": input.get("workflow_parent"),
-            "workflow_step": input.get("workflow_step"),
+            "workflow_step": workflow_step,
+            **({"workflow_controller_step": True} if workflow_controller_step else {}),
             # Persistent Agent child call: the child carries its parent's
             # stamp (task ref, call identity, frozen target narrowing) the
             # same durable way workflow children carry theirs.
@@ -546,7 +561,8 @@ class TaskControlService:
         if wait:
             await self._dispatch_now(t_ref)
             return await self._submit_wait_result(t_ref, r_ref, workspace_id)
-        _spawn_background(self._dispatch_task(t_ref))
+        if not workflow_controller_step:
+            _spawn_background(self._dispatch_task(t_ref))
         return SubmitResult(
             task_ref=t_ref,
             run_ref=r_ref,
@@ -1042,6 +1058,20 @@ class TaskControlService:
     # control commands
     # ------------------------------------------------------------------
 
+    async def _transition_rejected(self, command_id: str) -> Any:
+        """Record REJECTED unless another delivery already settled the command.
+
+        Deterministic callback ids race: a concurrent submission of the SAME
+        command may have applied (or settled) the shared row between this
+        attempt's gate check and its own bookkeeping. A terminal receipt
+        stands — this loser claims nothing and reports the settled record.
+        """
+
+        try:
+            return await asyncio.to_thread(self._recorder.transition, command_id, CommandState.REJECTED)
+        except InvalidCommandTransitionError:
+            return await asyncio.to_thread(self._recorder.get, command_id)
+
     async def issue_command(
         self,
         *,
@@ -1148,7 +1178,7 @@ class TaskControlService:
                 expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
                 return CommandIssueResult(record=expired, detail="command expired before host delivery")
             if kind is ControlCommandKind.PAUSE:
-                rejected = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                rejected: Any = await self._transition_rejected(record.command_id)
                 return CommandIssueResult(record=rejected, detail="managed runner declares no pause capability")
             return CommandIssueResult(record=record, detail="command persisted for managed host delivery")
 
@@ -1157,7 +1187,7 @@ class TaskControlService:
             return CommandIssueResult(record=expired, detail="command expired before execution")
         current = await asyncio.to_thread(self._store.get_task_state, t_ref)
         if record.expected_revision is not None and (current is None or current.revision != record.expected_revision):
-            rejected = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            rejected = await self._transition_rejected(record.command_id)
             return CommandIssueResult(record=rejected, detail="expected task revision no longer matches")
         if kind is ControlCommandKind.CANCEL:
             detail = await self._request_cancel(t_ref, record, workspace_id)
@@ -1179,7 +1209,7 @@ class TaskControlService:
             # pause: builtin deployments declare no pause capability —
             # reject explicitly, never fake success.
             await self._db.commit()
-            record = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            record = await self._transition_rejected(record.command_id)
             detail = "builtin deployments declare no pause capability"
         refreshed = await asyncio.to_thread(self._recorder.get, record.command_id)
         return CommandIssueResult(record=refreshed or record, detail=detail)
@@ -1327,6 +1357,16 @@ class TaskControlService:
             )
         child_summary = {**(facts or result_summary or {}), "child_task_id": str(child.id), "child_state": child_state}
         merged_payload = {**verified_payload, "child_outcome": child_summary}
+        # A controller step's workspace hold settles here — the verified
+        # callback is the settlement authority, exactly as for Agent child
+        # calls: whoever drives the callback (terminal path, outbox relay or
+        # a recovery process) cannot bypass it. Idempotent per step identity;
+        # budget-less (chat) steps are a no-op.
+        budget, _changed = await self.settle_workflow_step_budget(
+            workspace_id=workspace_id, child_task_id=child_task_id
+        )
+        if budget is not None:
+            child_summary["budget"] = budget
         return await self.issue_command(
             workspace_id=workspace_id,
             task_id=task_id,
@@ -1659,6 +1699,226 @@ class TaskControlService:
             await self._db.commit()
         return outcome.status is not SettleStatus.IDEMPOTENT_CONFIRMED
 
+    async def reserve_workflow_step_budget(
+        self, *, workspace_id: uuid.UUID, parent_task_id: uuid.UUID, step_index: int, units: int
+    ) -> Any:
+        """Hold one workflow step's declared slice on the workspace quota.
+
+        Called before the step child is submitted, so a refused call leaves
+        no child and no hold. Same workspace ledger, same token scale as the
+        Agent child path — never a parallel budget authority.
+        """
+
+        from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
+
+        ledger = QuotaBudgetLedger(
+            self._db,
+            workspace_id=workspace_id,
+            session_factory=self._session_factory,
+            unit_scale=MODEL_TOKEN_UNIT_SCALE,
+        )
+        outcome = await ledger.reserve(f"workflow-step:{parent_task_id}:{step_index}", units)
+        if self._session_factory is None:
+            await self._db.commit()
+        return outcome
+
+    async def release_workflow_step_budget(
+        self, *, workspace_id: uuid.UUID, parent_task_id: uuid.UUID, step_index: int
+    ) -> Any:
+        """Release a proven-unexecuted step hold (unknown holds stay held)."""
+
+        from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
+
+        ledger = QuotaBudgetLedger(
+            self._db,
+            workspace_id=workspace_id,
+            session_factory=self._session_factory,
+            unit_scale=MODEL_TOKEN_UNIT_SCALE,
+        )
+        outcome = await ledger.release(f"workflow-step:{parent_task_id}:{step_index}")
+        if self._session_factory is None:
+            await self._db.commit()
+        return outcome
+
+    async def settle_workflow_step_budget(
+        self, *, workspace_id: uuid.UUID, child_task_id: uuid.UUID
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Settle a terminal controller step's metering from its durable slice.
+
+        The child's ``workflow_parent`` stamp (written at submission) binds
+        parent, step and slice allocation — the same trusted-slice source the
+        Agent child path settles from, never the result's self-reported
+        numbers. Idempotent per step identity.
+        """
+
+        from hecate.execution.agent_child import derive_slice_usage
+
+        child_ref = task_ref_of(child_task_id)
+        payload = await asyncio.to_thread(self._store.get_task_input, child_ref) or {}
+        stamp = payload.get("workflow_parent")
+        step = payload.get("workflow_step")
+        if (
+            payload.get("workflow_controller_step") is not True
+            or not isinstance(stamp, dict)
+            or not isinstance(step, dict)
+        ):
+            return None, False
+        raw_ref = stamp.get("task_ref")
+        allocated = step.get("budget_units")
+        if not isinstance(raw_ref, dict) or isinstance(allocated, bool) or not isinstance(allocated, int):
+            return None, False
+        await self._get_task(workspace_id, child_task_id)
+        if payload.get("workspace_id") != str(workspace_id):
+            raise TaskControlValidationError("workflow step budget belongs to another workspace")
+        child = await asyncio.to_thread(self._store.get_task_state, child_ref)
+        if child is None or child.lifecycle_state not in {
+            TaskLifecycleState.SUCCEEDED,
+            TaskLifecycleState.FAILED,
+            TaskLifecycleState.CANCELLED,
+            TaskLifecycleState.RECONCILIATION_REQUIRED,
+        }:
+            return None, False
+        block = (child.extra or {}).get("budget_slice")
+        if block is None and child.lifecycle_state is TaskLifecycleState.CANCELLED and child.revision == 1:
+            # Initial submission is revision zero; only a pre-dispatch cancel
+            # can be terminal at revision one. No model request was possible.
+            block = {"allocated": allocated, "entries": {}}
+        budget = derive_slice_usage(block, allocated=allocated)
+        if budget is None:
+            return None, False
+        changed = await self._settle_workflow_step_reservation(
+            workspace_id=workspace_id,
+            parent_task_id=str(raw_ref.get("id")),
+            step_index=int(stamp.get("step_index")),
+            budget=budget,
+        )
+        return budget, changed
+
+    async def _settle_workflow_step_reservation(
+        self, *, workspace_id: uuid.UUID, parent_task_id: str, step_index: int, budget: dict[str, Any]
+    ) -> bool:
+        """Settle one step's workspace hold to its trusted used figure.
+
+        Identical semantics to the Agent child settlement: actual/estimated
+        figures settle (revisions merge the delta), unknown usage keeps its
+        hold (never charged as zero), a proven-zero call releases.
+        """
+
+        from hecate_governance.usage import UsageRecord, UsageStatus
+
+        from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
+
+        usage_status = {
+            "actual": UsageStatus.ACTUAL,
+            "estimated": UsageStatus.ESTIMATED,
+            "unknown": UsageStatus.UNKNOWN,
+        }.get(budget.get("status"), UsageStatus.UNVERIFIED)
+        ledger = QuotaBudgetLedger(
+            self._db,
+            workspace_id=workspace_id,
+            session_factory=self._session_factory,
+            unit_scale=MODEL_TOKEN_UNIT_SCALE,
+        )
+        key = f"workflow-step:{parent_task_id}:{step_index}"
+        previous = await ledger.usage_for(key)
+        if previous is not None and previous.status is UsageStatus.UNKNOWN and usage_status is UsageStatus.UNKNOWN:
+            return False
+        outcome = await ledger.settle(
+            UsageRecord(invocation_id=key, units=int(budget.get("used") or 0), status=usage_status)
+        )
+        from hecate_governance.usage import SettleStatus
+
+        if outcome.status is SettleStatus.CONFLICT:
+            raise TaskControlValidationError("workflow step budget settlement requires reconciliation")
+        if self._session_factory is None:
+            await self._db.commit()
+        return outcome.status is not SettleStatus.IDEMPOTENT_CONFIRMED
+
+    async def _cancel_pending_workflow_child(
+        self, t_ref: BackendRef, current: Any, workspace_id: uuid.UUID, *, retry_errors: bool = False
+    ) -> None:
+        """Persist a cancel request for the child an unconsumed workflow wait holds.
+
+        Mirror of the Agent child propagation: a cancel request is not a
+        stop fact — the child converges through its own dispatch rules, an
+        already-terminal child's cancel is rejected honestly, and failures
+        never undo the parent's committed cancel.
+        """
+
+        wait = (current.extra or {}).get("wait") if current else None
+        if not isinstance(wait, dict) or wait.get("consumed"):
+            return
+        raw_child = (wait.get("contract_ref") or {}).get("await_task_ref")
+        if not isinstance(raw_child, dict) or not isinstance(raw_child.get("id"), str) or not raw_child["id"]:
+            return
+        try:
+            child_ref = task_ref_of(uuid.UUID(raw_child["id"]))
+            payload = await asyncio.to_thread(self._store.get_task_input, child_ref) or {}
+            stamp = payload.get("workflow_parent") or {}
+            if (
+                payload.get("workflow_controller_step") is not True
+                or payload.get("workspace_id") != str(workspace_id)
+                or stamp.get("task_ref") != t_ref.to_dict()
+                or stamp.get("step_index") != (wait.get("contract_ref") or {}).get("step_index")
+                or child_ref.to_dict() != raw_child
+            ):
+                return
+            receipt = await self.issue_command(
+                workspace_id=workspace_id,
+                task_id=uuid.UUID(raw_child["id"]),
+                kind=ControlCommandKind.CANCEL,
+                issuer="workflow-parent-cancel",
+                command_id=f"workflow-cancel:{t_ref.id}:{raw_child['id']}",
+            )
+            logger.info(
+                "workflow child %s cancel request for parent %s: %s",
+                raw_child["id"],
+                t_ref.id,
+                receipt.record.state.value,
+            )
+        except Exception:  # noqa: BLE001 — propagation must not un-commit the parent's cancel
+            if retry_errors:
+                raise
+            logger.warning("task %s workflow child cancel request failed", t_ref.id, exc_info=True)
+
+    async def converge_workflow_step_reconciliation(self, *, workspace_id: uuid.UUID, child_ref: BackendRef) -> None:
+        """Converge a bound parent when its controller step needs reconciliation."""
+        payload = await asyncio.to_thread(self._store.get_task_input, child_ref) or {}
+        stamp = payload.get("workflow_parent") or {}
+        if payload.get("workflow_controller_step") is not True or payload.get("workspace_id") != str(workspace_id):
+            return
+        parent_ref = BackendRef.from_dict(stamp["task_ref"])
+        child = await asyncio.to_thread(self._store.get_task_state, child_ref)
+        if child is None or child.lifecycle_state is not TaskLifecycleState.RECONCILIATION_REQUIRED:
+            return
+        await self.settle_workflow_step_budget(workspace_id=workspace_id, child_task_id=uuid.UUID(child_ref.id))
+        parent = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+        if parent is None or parent.lifecycle_state is not TaskLifecycleState.WAITING_INPUT:
+            return
+        wait = parent.extra.get("wait") or {}
+        contract = wait.get("contract_ref") or {}
+        if wait.get("consumed") or contract.get("await_task_ref") != child_ref.to_dict():
+            return
+        if contract.get("step_index") != stamp.get("step_index"):
+            return
+        await self._db.commit()
+        try:
+            await asyncio.to_thread(
+                self._store.apply_task_state,
+                parent_ref,
+                TaskLifecycleState.RECONCILIATION_REQUIRED,
+                expected_revision=parent.revision,
+                extra_update={
+                    "wait": {**wait, "consumed": True},
+                    "reconciliation_reason": "workflow controller step requires reconciliation",
+                    "workflow_reconciliation_child": child_ref.to_dict(),
+                },
+            )
+        except (InvalidTaskTransitionError, ValueError):
+            fresh = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+            if fresh is not None and fresh.lifecycle_state is TaskLifecycleState.WAITING_INPUT:
+                raise
+
     async def _reject_callback(
         self, command_id: str, task: Any, reason: str, *, issuer: str, callback_digest: str
     ) -> CommandIssueResult:
@@ -1674,9 +1934,22 @@ class TaskControlService:
             extra={"workspace_id": str(task.workspace_id)},
             detail_ns={"callback_digest": callback_digest},
         )
-        record = await asyncio.to_thread(self._recorder.record, record)
+        try:
+            record = await asyncio.to_thread(self._recorder.record, record)
+        except ValueError:
+            existing = await asyncio.to_thread(self._recorder.get, command_id)
+            if (
+                existing is None
+                or existing.task_ref != t_ref
+                or existing.issuer != issuer
+                or existing.extra.get("workspace_id") != str(task.workspace_id)
+                or existing.detail_ns.get("callback_digest") != callback_digest
+            ):
+                raise
+            await self._db.commit()
+            return CommandIssueResult(record=existing, detail="replaying the concurrent callback receipt")
         await self._db.commit()
-        rejected = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+        rejected: Any = await self._transition_rejected(record.command_id)
         return CommandIssueResult(record=rejected or record, detail=reason)
 
     async def _wake_waiting(
@@ -1696,30 +1969,30 @@ class TaskControlService:
         current = await asyncio.to_thread(self._store.get_task_state, t_ref)
         wait = (current.extra or {}).get("wait") or {} if current else {}
         if state != expected_state.value:
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return f"task is {state}, not waiting for {expected_state.value}; wake rejected"
         # The token rides detail_ns (caller metadata, no payload schema
         # required); any provided input payload follows the envelope rule.
         token = str((record.detail_ns or {}).get("wait_token") or "")
         if not token or token != str(wait.get("wait_token")):
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return "wake token missing or wrong; rejected"
         if wait.get("consumed"):
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return "wake token already consumed; rejected"
         if wait.get("wake_kind") == "timer":
             # A timer wait wakes only through its own expiry convergence; no
             # caller command may consume the token or shortcut the clock.
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return "timer waits reject manual wake; expiry is the only wake"
         if wait.get("wake_kind") == "agent_child" and not verified_agent_child_callback:
             # An Agent child wait consumes only through the verified
             # callback that checked the child's own terminal facts; a
             # caller's provide_input can never fabricate a child result.
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return "agent child waits reject manual wake; use the verified callback"
         if _expired(wait.get("wait_expires_at")):
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return "wake token expired; rejected"
         contract_ref = wait.get("contract_ref")
         contract_ref = contract_ref if isinstance(contract_ref, dict) else {}
@@ -1732,7 +2005,7 @@ class TaskControlService:
             # trusted callback invocation after verification of child
             # facts; caller metadata carries no such authority. A human
             # input form must never advance it.
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return "workflow child waits reject provide_input; use the verified callback"
         wake_payload = dict(payload)
         approval_deadline: str | None = None
@@ -1742,7 +2015,7 @@ class TaskControlService:
             if gate.action == "refuse":
                 # Token stays unconsumed: the wait remains resumable by a
                 # later real decision until its own deadline.
-                await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                await self._transition_rejected(record.command_id)
                 return gate.detail
             if gate.action == "reject_terminal":
                 applied = await self._apply_approval_rejected(t_ref, record, current, wait, gate, workspace_id)
@@ -1771,12 +2044,12 @@ class TaskControlService:
 
                 result = wake_payload.get("agent_child_result")
                 if not isinstance(result, dict) or not result.get("call_id"):
-                    await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                    await self._transition_rejected(record.command_id)
                     return "agent child result facts are missing from the verified callback"
                 run_for_task = getattr(self._store, "run_for_task", None)
                 linkage = await asyncio.to_thread(run_for_task, t_ref) if run_for_task else None
                 if linkage is None:
-                    await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                    await self._transition_rejected(record.command_id)
                     return "controller task has no run linkage; child result revision rejected"
                 input_revision = {
                     "source": AGENT_CHILD_RESULT_SOURCE,
@@ -1800,13 +2073,13 @@ class TaskControlService:
                 contract = human_input_contract(contract_ref.get("contract"))
                 fields = contract["fields"] if contract is not None else []
                 if any(field not in revision_content for field in fields):
-                    await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                    await self._transition_rejected(record.command_id)
                     return "provided input does not satisfy the wait contract"
                 if revision_content:
                     run_for_task = getattr(self._store, "run_for_task", None)
                     linkage = await asyncio.to_thread(run_for_task, t_ref) if run_for_task else None
                     if linkage is None:
-                        await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                        await self._transition_rejected(record.command_id)
                         return "controller task has no run linkage; input revision rejected"
                     input_revision = {
                         "source": "provide_input",
@@ -1835,13 +2108,24 @@ class TaskControlService:
             callbacks = dict((current.extra or {}).get("_workflow_callbacks") or {})
             index = str(wake_payload["step_index"])
             if index in callbacks:
-                await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                await self._transition_rejected(record.command_id)
                 return "workflow step callback already applied; rejected"
             callbacks[index] = {
                 "child_task_id": (wake_payload.get("child_outcome") or {}).get("child_task_id"),
                 "applied_fact_id": record.command_id,
             }
             extra_update["_workflow_callbacks"] = callbacks
+            # A controller step's trusted slice figure accumulates on the
+            # parent: later steps and restarts never regain the spent
+            # budget. The declared step slice binds the delta — steps
+            # without a declaration stay unmetered.
+            steps = ((base_input.get("workflow") or {}).get("steps")) or []
+            step = steps[int(wake_payload["step_index"])] if int(wake_payload["step_index"]) < len(steps) else {}
+            child_budget = (wake_payload.get("child_outcome") or {}).get("budget") or {}
+            if isinstance(step.get("budget_units"), int) and isinstance(child_budget.get("used"), int):
+                extra_update["workflow_budget_used"] = int(
+                    (current.extra or {}).get("workflow_budget_used") or 0
+                ) + int(child_budget["used"])
         wait_run = await asyncio.to_thread(self._store.run_for_task, t_ref) if hasattr(self._store, "engine") else None
         try:
             await asyncio.to_thread(
@@ -1870,7 +2154,7 @@ class TaskControlService:
                 **({"applied_command_id": record.command_id} if hasattr(self._store, "engine") else {}),
             )
         except (InvalidTaskTransitionError, ValueError):
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return "task moved on concurrently; wake rejected"
         applied = (
             await asyncio.to_thread(self._recorder.get, record.command_id)
@@ -2038,7 +2322,7 @@ class TaskControlService:
             )
         except (InvalidTaskTransitionError, ValueError):
             logger.warning("task %s approval-rejected terminal skipped (moved concurrently)", t_ref.id)
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return False
         if not hasattr(self._store, "engine"):
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
@@ -2073,7 +2357,7 @@ class TaskControlService:
             TaskLifecycleState.FAILED.value,
             TaskLifecycleState.CANCELLED.value,
         ):
-            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            await self._transition_rejected(record.command_id)
             return f"task already terminal ({state}); cancel rejected"
         if state in (
             TaskLifecycleState.QUEUED.value,
@@ -2084,11 +2368,23 @@ class TaskControlService:
             # on the lifecycle revision makes the cancel real. A dispatch
             # that raced the cancel loses its claim and skips.
             current = await asyncio.to_thread(self._store.get_task_state, t_ref)
+            terminal_fields: dict[str, Any] = {}
+            if hasattr(self._store, "engine"):
+                payload = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
+                if payload.get("workflow_controller_step") is True:
+                    run_ref = await asyncio.to_thread(self._store.run_for_task, t_ref)
+                    outcome = {"status": "cancelled", "content": "", "error": "workflow step cancelled"}
+                    terminal_fields = {
+                        "extra_update": {"result": outcome},
+                        "event_run_ref": run_ref,
+                        "terminal_payload": outcome,
+                    }
             try:
                 await asyncio.to_thread(
                     self._store.apply_task_state,
                     t_ref,
                     TaskLifecycleState.CANCELLED,
+                    **terminal_fields,
                     expected_revision=(
                         record.expected_revision
                         if record.expected_revision is not None
@@ -2106,6 +2402,12 @@ class TaskControlService:
                 else await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
             )
             await self._cancel_pending_agent_child(t_ref, current, workspace_id)
+            await self._cancel_pending_workflow_child(t_ref, current, workspace_id)
+            if terminal_fields:
+                try:
+                    await self.settle_workflow_step_budget(workspace_id=workspace_id, child_task_id=uuid.UUID(t_ref.id))
+                except Exception:  # noqa: BLE001 — the terminal outbox retries settlement
+                    logger.warning("task %s workflow cancel settlement deferred", t_ref.id, exc_info=True)
             return f"cancel applied before dispatch (receipt {applied.state.value})"
         await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REQUESTED)
         return _CANCEL_RUNNING_NOTE
