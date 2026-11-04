@@ -289,25 +289,22 @@ jobs:
         run: pip install uv
       - name: Check execution stack compatibility matrix
         run: python scripts/check_execution_stack_matrix.py
-      - name: Build hecate-runtime wheel (non-editable artifact)
-        run: uv build --package hecate-runtime
-      - name: Build hecate-governance wheel (non-editable artifact)
-        run: uv build --package hecate-governance
-      - name: Build hecate-durable wheel (non-editable artifact)
-        run: uv build --package hecate-durable
-      - name: Build hecate-runner wheel (non-editable artifact)
-        run: uv build --package hecate-runner
-      - name: Install wheels into a clean venv (no repo source path)
+      - name: Prepare offline wheelhouse delivery
+        run: python scripts/runner_env_prepare.py --target "$RUNNER_TEMP/offline_delivery"
+      - name: Install the verified wheelhouse with networking disabled
         run: |
-          python -m venv "$RUNNER_TEMP/clean_venv"
-          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl dist/hecate_governance-*.whl dist/hecate_durable-*.whl dist/hecate_runner-*.whl
+          digest=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["manifest_sha256"])' "$RUNNER_TEMP/offline_delivery/environment.json")
+          sudo unshare --net -- runuser -u "$(id -un)" -- "$(command -v python)" -I scripts/runner_env_install.py \
+            --delivery "$RUNNER_TEMP/offline_delivery" --expected-manifest-sha256 "$digest" --target "$RUNNER_TEMP/clean_venv"
       - name: Assert no full-hecate dependency leaked in
+        working-directory: /tmp
         run: |
-          installed=$("$RUNNER_TEMP/clean_venv/bin/python" -m pip list --format freeze | grep -ixE 'hecate==.*' || true)
-          if [ -n "$installed" ]; then
-            echo "::error::clean venv contains the full hecate application: $installed"
-            exit 1
-          fi
+          "$RUNNER_TEMP/clean_venv/bin/python" -I - <<'PY'
+          from importlib.metadata import distributions
+          from importlib.util import find_spec
+          assert all(dist.metadata["Name"].lower() != "hecate" for dist in distributions())
+          assert find_spec("hecate") is None
+          PY
       - name: Assert the durable core is importable standalone
         working-directory: /tmp
         run: |

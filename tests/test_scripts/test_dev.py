@@ -111,7 +111,16 @@ def test_typecheck_and_pytest_propagate_failures_without_expanding_scope(monkeyp
 
     monkeypatch.setattr(dev, "_run", run)
     assert dev.run_check("types") == 5
-    assert calls[-1][-3:] == ["src/", "packages/", "scripts/dev.py"]
+    # The type-check scope is pinned in full: the sources, the workspace
+    # packages, and every standalone operator script. A new script joins
+    # this list deliberately or fails here.
+    assert calls[-1][-5:] == [
+        "src/",
+        "packages/",
+        "scripts/dev.py",
+        "scripts/runner_env_prepare.py",
+        "scripts/runner_env_install.py",
+    ]
     assert dev.run_tests(["tests/test_scripts/test_dev.py", "-k", "case with spaces"]) == 5
     assert calls[-1][-3:] == ["tests/test_scripts/test_dev.py", "-k", "case with spaces"]
     calls.clear()
