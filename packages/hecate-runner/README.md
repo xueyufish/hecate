@@ -41,6 +41,12 @@ uv build --package hecate-runner
 pip install dist/hecate_runner-*.whl   # pulls hecate-runtime and hecate-durable — never the full hecate app
 ```
 
+For machines without network access, prepare a hash-pinned wheelhouse
+delivery on a build machine and install it offline (`--no-index
+--require-hashes`, every wheel digest-checked against a verifiable
+manifest); see
+[Deliver the Runner environment offline](../../docs/how-to/deploy-runner-environment.md).
+
 The wheel carries the authoritative execution-contract JSON Schema snapshot in
 `hecate_runner/_contract_schemas`. The source of truth remains
 `src/hecate/contracts/schemas`; run
