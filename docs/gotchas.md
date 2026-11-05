@@ -465,3 +465,59 @@ of the task's own deadline.
   event. Rewritten input or mismatched identity stays in reconciliation.
   This confirms an existing submission; it neither creates another child nor
   relaxes replay policy for unresolved idempotent or external business writes.
+
+## Workflow explicit controller steps
+
+- **`mode: "controller"` runs a step as a REAL same-agent controller child** —
+  the sequential workflow adapter (`workflow.steps`) accepts an explicit
+  `mode: "controller"` (omitting it, or `chat`, keeps the historical
+  single-turn execution). The step child carries
+  `controller_loop: true` plus a controller block DERIVED from the
+  validated step fields (`max_turns`, `deadline`) — a step cannot declare
+  `agent_children` or its own `controller` block, so the workflow slice
+  never mints further children and the model never widens its contract.
+  The child rides the durable controller chain: accepted decisions replay
+  after a crash, settled actions never re-execute, and `approval_wait`,
+  `output_schema`, `artifact` and `on_failure` keep their existing
+  semantics on the new mode. Only the host adapter may stamp the parent
+  and step fields. A controller step retains the initiating identity and
+  waits for its parent's matching durable wait before starting model work.
+- **Budget and deadline declarations**
+  `workflow.budget_units` (total) requires every controller step to
+  declare its `budget_units` slice, and the slices must sum under the
+  total (validated at submission). Each step's workspace hold is taken
+  under `workflow-step:<parent>:<index>` BEFORE the child exists (a
+  refusal leaves no child and no orphan hold; the reserve is idempotent
+  per step identity), settles from the child's durable slice ledger at
+  its verified callback (unknown usage stays held, proven-zero
+  settles as zero), and accumulates into the parent's `workflow_budget_used`.
+  An interruption after reservation but before child submission can leave
+  an open hold if the parent reaches its deadline before resubmission.
+  This recovery window still needs a fenced cleanup path.
+  Terminal settlement still runs when a cancelled parent cannot wake.
+  The workflow deadline gates advances and caps each controller step's
+  own deadline and approval or input wait. Refusals
+  are distinguishable (`failure_source`: `budget` / `deadline` vs
+  `execution` / `validation`).
+- **Parent cancel records a cancel request on the held step child** —
+  cancelling (or converging) a parent parked on `await_task_ref`
+  persists a real CANCEL command (`workflow-cancel:<parent>:<child>`) for
+  the bound controller child. The durable state event lets the outbox
+  retry propagation if the request process dies after the parent commit.
+  A QUEUED child
+  is cancelled inline, a RUNNING child stops cooperatively through its
+  own dispatch rules, and a late verified callback cannot re-activate
+  the terminal parent.
+- **Lost step callbacks recover through the outbox, racing safely** — a
+  child that reached terminal with its callback lost is recovered by the
+  relay's redelivery of `_issue_child_callback` (the same verified
+  `submit_workflow_callback` path, idempotent per parent+step via the
+  `_workflow_callbacks` receipt and the single-use wait token). A child
+  that needs reconciliation parks its bound parent through the durable
+  state event, without creating a successful callback.
+  `tests/test_execution/test_workflow_controller_postgres.py` proves the
+  death window, the two-process callback race (a ready-file barrier puts
+  both racers at the boundary before either fires) and the cross-process
+  cancel propagation against `HECATE_STEP6_POSTGRES_URL` — skips, not
+  passes, without it; `test_workflow_controller_steps.py` holds the
+  SQLite contract tier.

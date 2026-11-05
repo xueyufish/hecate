@@ -169,6 +169,7 @@ class TestWorkflowRouting:
             }
             workspace_id = __import__("uuid").uuid4()
             agent_id = __import__("uuid").uuid4()
+            user_id = None  # the real context dataclass carries the initiator
 
         outcome = await TaskDispatcher._execute_workflow(
             dispatcher, None, _Ctx(), task_ref=BackendRef(RefKind.TASK, "iss", "parent"), lease=None
@@ -223,6 +224,7 @@ class TestWorkflowRouting:
             }
             workspace_id = __import__("uuid").uuid4()
             agent_id = __import__("uuid").uuid4()
+            user_id = None  # the real context dataclass carries the initiator
 
         import pytest
 
@@ -256,6 +258,7 @@ class TestWorkflowRouting:
             }
             workspace_id = __import__("uuid").uuid4()
             agent_id = __import__("uuid").uuid4()
+            user_id = None  # the real context dataclass carries the initiator
 
         outcome = await TaskDispatcher._execute_workflow(
             dispatcher, None, _Ctx(), task_ref=BackendRef(RefKind.TASK, "iss", "p"), lease=None

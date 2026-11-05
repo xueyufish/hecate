@@ -349,6 +349,7 @@ class _DispatchContext:
     workflow_plan: WorkflowPlan | None = None
     workflow_parent: dict[str, Any] | None = None
     workflow_step: dict[str, Any] | None = None
+    workflow_controller_step: bool = False
     # step5e: durable approval wait opt-in from the task input payload.
     approval_wait: bool = False
     # Agent-controller loop opt-in: the durable decision chain is the
@@ -429,6 +430,47 @@ class PlatformTaskDispatcher:
         task = await registry.get_task(context.task_id, context.workspace_id)
         runs = await registry.list_runs_for_task(context.task_id, context.workspace_id)
         latest = runs[-1] if runs else None
+
+        if context.workflow_controller_step and latest is not None:
+            parent_stamp = context.workflow_parent or {}
+            parent_ref = BackendRef.from_dict(parent_stamp["task_ref"])
+            parent_state = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+            parent_wait = (parent_state.extra.get("wait") or {}) if parent_state else {}
+            contract = parent_wait.get("contract_ref") or {}
+            bound = (
+                parent_state is not None
+                and parent_state.lifecycle_state is TaskLifecycleState.WAITING_INPUT
+                and not parent_wait.get("consumed")
+                and contract.get("await_task_ref") == task_ref.to_dict()
+                and contract.get("step_index") == parent_stamp.get("step_index")
+            )
+            if not bound:
+                if parent_state is not None and parent_state.lifecycle_state in {
+                    TaskLifecycleState.RUNNING,
+                    TaskLifecycleState.QUEUED,
+                }:
+                    # A different worker may see the child before the
+                    # parent's wait commits. Don't start model work yet.
+                    await db.commit()
+                    await asyncio.to_thread(
+                        self._store.apply_task_state,
+                        task_ref,
+                        TaskLifecycleState.QUEUED,
+                        expected_revision=record.revision + 1,
+                        lease=lease,
+                    )
+                else:
+                    await self._finish(
+                        db,
+                        task_ref,
+                        run_row_ref(latest),
+                        context,
+                        {"status": "cancelled", "content": "", "error": "workflow parent no longer holds this step"},
+                        run=latest,
+                        expected_revision=record.revision + 1,
+                        lease=lease,
+                    )
+                return
 
         if context.agent_child_parent is not None and latest is not None:
             # Recheck the parent before spending model usage. Cancellation
@@ -557,7 +599,10 @@ class PlatformTaskDispatcher:
 
         if record.revision == 0 and latest is not None and not (latest.projection or {}):
             run = latest  # the attempt minted at submit; never executed
-        elif context.controller_loop and latest is not None:
+        elif latest is not None and (
+            context.controller_loop
+            or (context.workflow_plan is not None and context.workflow_plan.has_controller_steps)
+        ):
             # The controller's continuation position is the durable
             # accepted-decision chain keyed by the task's stable run, not a
             # Pregel engine session: re-dispatches (crash recovery, retry,
@@ -834,6 +879,10 @@ class PlatformTaskDispatcher:
         plan = context.workflow_plan
         if plan is None:  # unreachable: the caller branches on the plan
             return {"status": "failed", "content": "", "error": "workflow plan missing"}
+        if plan.has_controller_steps and await asyncio.to_thread(
+            self._requested_cancel, task_ref, context.workspace_id
+        ):
+            return {"status": "cancelled", "content": "", "error": "workflow cancel requested"}
         provided = context.provided or {}
         done_index = provided.get("step_index")
         if done_index is not None:
@@ -865,18 +914,85 @@ class PlatformTaskDispatcher:
         next_index = 0 if done_index is None else int(done_index) + 1
         if next_index >= len(plan.steps):
             return {"status": "succeeded", "content": f"workflow completed {len(plan.steps)} step(s)"}
+        if plan.deadline is not None:
+            deadline = WorkflowChildTaskAdapter._parse_deadline(plan.deadline)
+            now = datetime.now(UTC)
+            if deadline is None or now >= deadline:
+                # The declared workflow deadline gates every advance: a
+                # deadline reached after a step converged never dispatches
+                # the next one.
+                detail = f"workflow deadline reached before step {next_index}"
+                if plan.on_failure == "await":
+                    return {"status": "awaiting_reconciliation", "content": detail, "failure_source": "deadline"}
+                return {"status": "failed", "content": "", "error": detail, "failure_source": "deadline"}
         service = self._task_control(db)
-        child_ref = await WorkflowChildTaskAdapter.submit_step(
-            service,
-            context.workspace_id,
-            context.agent_id,
-            task_ref,
-            plan.steps[next_index],
-            next_index,
-        )
+        step = plan.steps[next_index]
+        step_budget = step.get("budget_units")
+        lookup = getattr(self._store, "submission_for_key", None) if step.get("mode") == "controller" else None
+        submission_key = WorkflowChildTaskAdapter.submission_key(task_ref, next_index)
+        existing = await asyncio.to_thread(lookup, submission_key) if lookup else None
+        if existing is None and isinstance(step_budget, int) and not isinstance(step_budget, bool) and step_budget > 0:
+            # The step's workspace hold is taken BEFORE the child exists, so
+            # a refusal leaves neither. The reserve is idempotent per step
+            # identity: a dispatcher crash between reserve and submit
+            # replays the same hold instead of minting a second one.
+            from hecate_governance.usage import ReservationStatus
+
+            reserved = await service.reserve_workflow_step_budget(
+                workspace_id=context.workspace_id,
+                parent_task_id=uuid.UUID(task_ref.id),
+                step_index=next_index,
+                units=step_budget,
+            )
+            if reserved.status is not ReservationStatus.RESERVED:
+                detail = (
+                    f"workflow step {next_index} refused: the workspace budget has no headroom for its declared slice"
+                )
+                if plan.on_failure == "await":
+                    return {"status": "awaiting_reconciliation", "content": detail, "failure_source": "budget"}
+                return {"status": "failed", "content": "", "error": detail, "failure_source": "budget"}
+        try:
+            child_ref = await WorkflowChildTaskAdapter.submit_step(
+                service,
+                context.workspace_id,
+                context.agent_id,
+                task_ref,
+                step,
+                next_index,
+                initiator_user_id=str(context.user_id) if context.user_id else None,
+                workflow_deadline=plan.deadline,
+            )
+        except Exception:
+            if isinstance(step_budget, int) and not isinstance(step_budget, bool) and step_budget > 0:
+                try:
+                    # Submission can fail after the durable child commits.
+                    # Only the absence of its association proves there is
+                    # no child whose spend still needs this hold.
+                    if lookup is not None and await asyncio.to_thread(lookup, submission_key) is None:
+                        await service.release_workflow_step_budget(
+                            workspace_id=context.workspace_id,
+                            parent_task_id=uuid.UUID(task_ref.id),
+                            step_index=next_index,
+                        )
+                except Exception:  # noqa: BLE001 — the submission failure is the primary error
+                    logger.warning(
+                        "workflow step %s hold release after failed submit failed", next_index, exc_info=True
+                    )
+            raise
         raise TaskWaitingSignalError(
             ControlCommandKind.PROVIDE_INPUT,
             {"await_task_ref": child_ref.to_dict(), "step_index": next_index},
+        )
+
+    def _requested_cancel(self, task_ref: BackendRef, workspace_id: uuid.UUID) -> Any:
+        commands, _total = self._store.list_task_commands(str(workspace_id), task_ref, 20, 0)
+        return next(
+            (
+                command
+                for command in commands
+                if command.kind is ControlCommandKind.CANCEL and command.state is CommandState.REQUESTED
+            ),
+            None,
         )
 
     def _task_control(self, db: AsyncSession) -> Any:
@@ -914,6 +1030,7 @@ class PlatformTaskDispatcher:
             return
         try:
             parent_ref = BackendRef(RefKind.TASK, str(raw_ref.get("issuer_domain")), str(raw_ref.get("id")))
+            service = self._task_control(db)
             state = await asyncio.to_thread(self._store.get_task_state, parent_ref)
             wait = (state.extra or {}).get("wait") or {} if state else {}
             token = str(wait.get("wait_token") or "")
@@ -924,8 +1041,12 @@ class PlatformTaskDispatcher:
                 or (wait.get("contract_ref") or {}).get("await_task_ref")
                 != BackendRef(RefKind.TASK, PLATFORM_ISSUER, str(context.task_id)).to_dict()
             ):
+                if context.workflow_controller_step:
+                    # Settlement is independent of whether the parent can wake.
+                    await service.settle_workflow_step_budget(
+                        workspace_id=context.workspace_id, child_task_id=context.task_id
+                    )
                 return
-            service = self._task_control(db)
             receipt = await service.submit_workflow_callback(
                 workspace_id=context.workspace_id,
                 task_id=uuid.UUID(parent_ref.id),
@@ -1062,6 +1183,7 @@ class PlatformTaskDispatcher:
             workflow_plan=WorkflowChildTaskAdapter.plan(payload),
             workflow_parent=(payload["workflow_parent"] if isinstance(payload.get("workflow_parent"), dict) else None),
             workflow_step=payload.get("workflow_step"),
+            workflow_controller_step=payload.get("workflow_controller_step") is True,
             agent_child_parent=agent_child_stamp(payload.get("agent_child_parent")),
             approval_wait=payload.get("approval_wait") is True,
             controller_loop=payload.get("controller_loop") is True,
@@ -1565,31 +1687,38 @@ class PlatformTaskDispatcher:
         slice_budget: Any = None
         slice_ledger: Any = None
         child_call_budget = 0
+        slice_allocation = 0
         if context.agent_child_parent is not None:
-            # The declared call slice bounds the child's metered model
-            # usage: every controller turn reserves and settles against
-            # this gate (actual usage settles, unknown usage holds — the
-            # same semantics the platform budget gate applies).
-            per_call = context.agent_child_parent.get("budget_units")
-            if isinstance(per_call, int) and per_call > 0:
-                from hecate_governance.usage import BudgetGate
+            slice_allocation = context.agent_child_parent.get("budget_units")
+        elif context.workflow_controller_step and context.workflow_step is not None:
+            # A controller workflow step's declared slice bounds the same
+            # metered model usage on the SAME durable slice ledger: a
+            # recovered step dispatch re-seeds its spent and unknown budget.
+            slice_allocation = context.workflow_step.get("budget_units")
+        if isinstance(slice_allocation, int) and not isinstance(slice_allocation, bool) and slice_allocation > 0:
+            # The declared slice bounds the child's metered model usage:
+            # every controller turn reserves and settles against this gate
+            # (actual usage settles, unknown usage holds — the same
+            # semantics the platform budget gate applies).
+            per_call = slice_allocation
+            from hecate_governance.usage import BudgetGate
 
-                from hecate.execution.agent_child import DurableSliceLedger
+            from hecate.execution.agent_child import DurableSliceLedger
 
-                # The slice ledger persists on the child's durable row: a
-                # recovered dispatch re-seeds its spent and unknown budget,
-                # so a fresh dispatch can never mint a new slice.
-                slice_ledger = DurableSliceLedger(
-                    store=self._store,
-                    task_ref=task_ref,
-                    allocation=per_call,
-                    lease=lease,
-                    on_revision_advance=lambda rev: (
-                        live_revision.__setitem__("value", rev) if live_revision is not None else None
-                    ),
-                )
-                slice_budget = BudgetGate(slice_ledger)
-                child_call_budget = per_call
+            # The slice ledger persists on the child's durable row: a
+            # recovered dispatch re-seeds its spent and unknown budget,
+            # so a fresh dispatch can never mint a new slice.
+            slice_ledger = DurableSliceLedger(
+                store=self._store,
+                task_ref=task_ref,
+                allocation=per_call,
+                lease=lease,
+                on_revision_advance=lambda rev: (
+                    live_revision.__setitem__("value", rev) if live_revision is not None else None
+                ),
+            )
+            slice_budget = BudgetGate(slice_ledger)
+            child_call_budget = per_call
         governance_for_port = None
         if slice_budget is not None:
             from hecate.core.composition.governance import build_platform_governance
@@ -1892,35 +2021,32 @@ class PlatformTaskDispatcher:
         controller = AgentController(AgentTurn(store, first_responder, executor), source)
 
         def _parent_still_active() -> bool:
-            raw = (context.agent_child_parent or {}).get("task_ref") or {}
+            raw = (context.agent_child_parent or context.workflow_parent or {}).get("task_ref") or {}
             parent_state = self._store.get_task_state(
                 BackendRef(RefKind.TASK, str(raw.get("issuer_domain")), str(raw.get("id")))
             )
             # The parent is normally WAITING while the child runs; only a
             # terminal (or cancelled) parent stops new child work.
-            return parent_state is None or parent_state.lifecycle_state not in {
+            if parent_state is None:
+                return not context.workflow_controller_step
+            return parent_state.lifecycle_state not in {
                 TaskLifecycleState.CANCELLED,
                 TaskLifecycleState.SUCCEEDED,
                 TaskLifecycleState.FAILED,
                 TaskLifecycleState.RECONCILIATION_REQUIRED,
             }
 
-        def _pending_cancel() -> bool:
-            commands, _total = self._store.list_task_commands(str(context.workspace_id), task_ref, 20, 0)
-            return any(
-                command.kind is ControlCommandKind.CANCEL and command.state is CommandState.REQUESTED
-                for command in commands
-            )
-
         def should_cancel() -> bool:
             current = self._store.get_task_state(task_ref)
             if current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING:
                 return True
-            if context.agent_child_parent is not None and not _parent_still_active():
+            if (
+                context.agent_child_parent is not None or context.workflow_controller_step
+            ) and not _parent_still_active():
                 # The parent's terminal bounds the child mid-run: no new
                 # model calls or actions after the parent stopped.
                 return True
-            return _pending_cancel()
+            return self._requested_cancel(task_ref, context.workspace_id) is not None
 
         def observe(event: dict[str, Any]) -> Any:
             # A recorded input request, a verified timer declaration or an
@@ -2052,6 +2178,8 @@ class PlatformTaskDispatcher:
                     final_decision_step_id=outcome.final_decision_step_id,
                     final_decision_digest=outcome.final_decision_digest,
                 )
+                if context.workflow_controller_step and evaluated["status"] == "succeeded":
+                    evaluated["artifacts"] = self._child_result(evaluated, context)["artifacts"]
                 last_delivery = {"content": evaluated["content"], "acceptance": evaluated["acceptance"]}
                 if evaluated.get("status") == "succeeded" or continuation_policy is None:
                     evaluated = await self._attach_slice_budget(evaluated, slice_ledger, child_call_budget)
@@ -2389,6 +2517,15 @@ class PlatformTaskDispatcher:
                 )
                 logger.warning("task %s input wait parked for reconciliation: %s", task_ref.id, exc)
                 return
+        if (
+            context.workflow_controller_step
+            and context.controller_deadline
+            and (target is TaskLifecycleState.WAITING_APPROVAL or plain_human_input_wait(wait.contract_ref))
+        ):
+            deadline = datetime.fromisoformat(context.controller_deadline)
+            expires_at = (
+                min(deadline, datetime.fromisoformat(expires_at)).isoformat() if expires_at else deadline.isoformat()
+            )
         if context.approval_wait and target is TaskLifecycleState.WAITING_APPROVAL:
             await TaskRunRegistry(db).finalize_run(
                 uuid.UUID(run_ref.id), context.workspace_id, state="failed", error_category="waiting_approval"
@@ -2413,6 +2550,11 @@ class PlatformTaskDispatcher:
         )
         logger.info("task %s parked in %s (token issued)", task_ref.id, target.value)
         if context.workflow_plan is not None:
+            if context.workflow_plan.has_controller_steps:
+                cancel = await asyncio.to_thread(self._requested_cancel, task_ref, context.workspace_id)
+                if cancel is not None:
+                    await self._task_control(db)._request_cancel(task_ref, cancel, context.workspace_id)
+                    return
             await self._wake_finished_child(db, task_ref, context, wait, token)
 
     @staticmethod
@@ -2757,7 +2899,14 @@ class PlatformTaskDispatcher:
             return
         child_ref = BackendRef(RefKind.TASK, str(raw.get("issuer_domain")), str(raw.get("id")))
         child = await asyncio.to_thread(self._store.get_task_state, child_ref)
-        if child is None or child.lifecycle_state.value not in _RUN_PROJECTION_TERMINAL:
+        if child is None:
+            return
+        if child.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED:
+            await self._task_control(db).converge_workflow_step_reconciliation(
+                workspace_id=context.workspace_id, child_ref=child_ref
+            )
+            return
+        if child.lifecycle_state.value not in _RUN_PROJECTION_TERMINAL:
             return
         try:
             await self._task_control(db).submit_workflow_callback(
@@ -2792,6 +2941,14 @@ class PlatformTaskDispatcher:
         # Stream-mode executions leave uncommitted event rows on this
         # session; close them before the seam store's own transaction.
         await db.commit()
+        workflow_controller = context.workflow_controller_step or (
+            context.workflow_plan is not None and context.workflow_plan.has_controller_steps
+        )
+        cancel = (
+            await asyncio.to_thread(self._requested_cancel, task_ref, context.workspace_id)
+            if workflow_controller and terminal is TaskLifecycleState.CANCELLED
+            else None
+        )
         await asyncio.to_thread(
             self._store.apply_task_state,
             task_ref,
@@ -2802,6 +2959,7 @@ class PlatformTaskDispatcher:
             **(
                 {
                     "event_run_ref": r_ref,
+                    **({"applied_command_id": cancel.command_id} if cancel is not None else {}),
                     **(
                         {"terminal_payload": outcome}
                         if terminal is not TaskLifecycleState.RECONCILIATION_REQUIRED
