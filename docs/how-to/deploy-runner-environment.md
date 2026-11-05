@@ -66,6 +66,51 @@ Start it with the new interpreter.
 /path/new-venv/bin/python -m hecate_runner --profile <profile> ...
 ```
 
+## Bind the environment to a signed artifact
+
+After verifying the install, the installer writes `hecate-install-receipt.json`
+in the venv root. It records the delivery digest, the Python target, the
+installed distribution names and versions, and a digest of the resolved
+venv path. The receipt digest covers those fields. If you change the
+install path, reinstall there and generate a new composition.
+
+Compose the deployment manifest that binds one signed artifact to this
+environment:
+
+```bash
+/path/new-venv/bin/hecate-runner-deployment generate \
+  --artifact-sha256 <signed manifest sha256> \
+  --publisher-ref <publisher> \
+  --environment-manifest /path/offline-delivery/environment.json \
+  --receipt /path/new-venv/hecate-install-receipt.json \
+  --out deployment.json
+```
+
+Move `deployment.json`'s `deployment_sha256` to the serving machine over
+an independent trusted channel, then start the release-managed host with
+the composition:
+
+```bash
+/path/new-venv/bin/python -I -m hecate_runner --host <host> \
+  --artifact-trust artifact-trust.json \
+  --deployment-manifest deployment.json \
+  --expected-deployment-sha256 <digest-from-your-channel>
+```
+
+Composed startup requires isolated Python mode (`-I`) in the installed
+venv. Before serving, Runner compares the active artifact with the
+composition under the current publisher policy. It then verifies the
+receipt against the current venv path and Python target and checks that
+the visible distribution set matches the receipt. A refusal releases the
+host lock and preserves the active selection and execution data. Use
+the composition that matches the selected release after a rollback.
+
+Keep the interpreter and venv under operator control. This check relies
+on the installer's receipt and distribution metadata at startup.
+Installed file contents and changes while serving are outside its scope.
+Existing `--host` starts without the composition flags retain their
+current behavior.
+
 ## Release scope
 
 - The wheelhouse is frozen at preparation time. Rebuild it from the

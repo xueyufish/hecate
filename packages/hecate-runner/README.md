@@ -44,7 +44,10 @@ pip install dist/hecate_runner-*.whl   # pulls hecate-runtime and hecate-durable
 For machines without network access, prepare a hash-pinned wheelhouse
 delivery on a build machine and install it offline (`--no-index
 --require-hashes`, every wheel digest-checked against a verifiable
-manifest); see
+manifest); the installer writes an install receipt, and a release-managed
+host can check at cold start with `--deployment-manifest` that
+the active signed artifact and the running environment match the
+composed deployment; see
 [Deliver the Runner environment offline](../../docs/how-to/deploy-runner-environment.md).
 
 The wheel carries the authoritative execution-contract JSON Schema snapshot in

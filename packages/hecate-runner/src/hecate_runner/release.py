@@ -49,6 +49,7 @@ from .artifact_signing import (
     resolve_signature_path,
     verify_artifact_admission,
 )
+from .deployment import DeploymentManifest
 from .profile import Profile, ProfileError, load_profile
 
 ACTIVE_POINTER_NAME = "active.json"
@@ -586,12 +587,20 @@ def rollback_release(host_dir: Path, policy: ArtifactTrustPolicy, *, expected_ge
         return _verify_and_point(host_dir, active.previous, policy, active)
 
 
-def load_host_selection(host_dir: Path, policy: ArtifactTrustPolicy) -> tuple[Profile, HostLock]:
+def load_host_selection(
+    host_dir: Path,
+    policy: ArtifactTrustPolicy,
+    *,
+    deployment: DeploymentManifest | None = None,
+) -> tuple[Profile, HostLock]:
     """Startup path for a release-managed host.
 
     Acquires the host lock (held for the runner's lifetime) and loads the
     committed selection under the CURRENT trust policy — the pointer alone
-    never authorizes a start.
+    never authorizes a start. With a ``deployment`` composition supplied,
+    the binding is additionally verified against the selected artifact and
+    the running interpreter's install receipt and package set; every
+    refusal releases the lock and leaves the pointer untouched.
     """
 
     host_dir = require_initialized_host(host_dir)
@@ -608,6 +617,24 @@ def load_host_selection(host_dir: Path, policy: ArtifactTrustPolicy) -> tuple[Pr
         _require_release_identity(profile, active.manifest_sha256)
         database = _check_database_binding(profile, active)
         ensure_durable_state_quiescent(database, require_quiescence=False)
+        if deployment is not None:
+            if not sys.flags.isolated or sys.prefix == sys.base_prefix:
+                raise ReleaseError("deployment verification requires the offline venv Python in isolated mode (-I)")
+            from .deployment import DeploymentError, verify_deployment
+
+            admission = profile.artifact_admission
+            if admission is None:
+                raise ReleaseError("deployment verification requires strict artifact admission (--artifact-trust)")
+            try:
+                verify_deployment(
+                    deployment,
+                    active_artifact_manifest_sha256=active.manifest_sha256,
+                    admitted_publisher_ref=admission.publisher_ref,
+                    admitted_artifact_manifest_sha256=admission.manifest_sha256,
+                    venv_root=Path(sys.prefix),
+                )
+            except DeploymentError as exc:
+                raise ReleaseError(f"deployment verification failed: {exc}") from exc
     except Exception:
         lock.release()
         raise

@@ -69,6 +69,19 @@ def main(argv: list[str] | None = None) -> int:
         "(requires --artifact-trust; without it admission stays startup-only)",
     )
     parser.add_argument(
+        "--deployment-manifest",
+        type=Path,
+        default=None,
+        help="deployment composition binding the active release to a verified offline "
+        "environment (--host only; requires --expected-deployment-sha256)",
+    )
+    parser.add_argument(
+        "--expected-deployment-sha256",
+        default=None,
+        dest="expected_deployment_sha256",
+        help="deployment digest received over an independent trusted channel",
+    )
+    parser.add_argument(
         "--business-api",
         default=None,
         help="base URL of the business App's HTTP API (default: value from runner.json 'business_api_base')",
@@ -91,6 +104,28 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    deployment = None
+    if args.deployment_manifest is not None or args.expected_deployment_sha256 is not None:
+        if args.host is None:
+            print(
+                "hecate-runner: --deployment-manifest composes the host's active release; use --host",
+                file=sys.stderr,
+            )
+            return 2
+        if args.deployment_manifest is None or args.expected_deployment_sha256 is None:
+            print(
+                "hecate-runner: --deployment-manifest and --expected-deployment-sha256 are required together",
+                file=sys.stderr,
+            )
+            return 2
+        from .deployment import DeploymentError, load_deployment_manifest
+
+        try:
+            deployment = load_deployment_manifest(args.deployment_manifest, args.expected_deployment_sha256)
+        except DeploymentError as exc:
+            print(f"hecate-runner: deployment manifest error: {exc}", file=sys.stderr)
+            return 2
+
     host_lock = None
     profile: Profile
     if args.host is not None:
@@ -102,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         try:
-            profile, host_lock = load_host_selection(args.host, artifact_trust)
+            profile, host_lock = load_host_selection(args.host, artifact_trust, deployment=deployment)
         except (ProfileError, ReleaseError) as exc:
             print(f"hecate-runner: host startup error: {exc}", file=sys.stderr)
             return 2
