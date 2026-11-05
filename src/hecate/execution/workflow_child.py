@@ -255,8 +255,16 @@ class WorkflowChildTaskAdapter:
         *,
         initiator_user_id: str | None = None,
         workflow_deadline: str | None = None,
+        dispatch_lease: Any = None,
     ) -> BackendRef:
-        """Submit a real child task under its inherited execution authority."""
+        """Submit a real child task under its inherited execution authority.
+
+        ``dispatch_lease`` fences the child's CREATION on the parent's live
+        dispatch lease and step state inside the submission transaction: a
+        stale executor or a closed step is refused instead of minting a child
+        nobody will drive. An idempotent replay of an already-committed
+        submission still resolves to the original child.
+        """
         from uuid import UUID
 
         controller_step = step.get("mode") == CONTROLLER_MODE
@@ -276,5 +284,14 @@ class WorkflowChildTaskAdapter:
             ),
             idempotency_key=WorkflowChildTaskAdapter.submission_key(parent_ref, step_index),
             _verified_workflow_step=True,
+            **(
+                {
+                    "dispatch_lease": dispatch_lease,
+                    "dispatch_parent_ref": parent_ref,
+                    "dispatch_step_index": step_index,
+                }
+                if dispatch_lease is not None
+                else {}
+            ),
         )
         return result.task_ref

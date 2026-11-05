@@ -73,7 +73,8 @@ class PlatformOutboxProjector:
         if schema_ref is None:
             return  # not a platform read-model family; authoritative in the log
         envelope = EventEnvelope.from_dict(envelope_dict)
-        workspace_id = await self._resolve_workspace(envelope.task_ref)
+        terminal_task = event_type == "task_state" and payload.get("state") in {"cancelled", "failed", "succeeded"}
+        workspace_id = await self._resolve_workspace(envelope.task_ref, retry_errors=terminal_task)
         async with self._session_factory() as db:
             events = PlatformEventService(db)
             if await events.find_by_event_id(envelope.event_id) is None:
@@ -122,6 +123,28 @@ class PlatformOutboxProjector:
                         await service._cancel_pending_workflow_child(
                             envelope.task_ref, current, workspace_id, retry_errors=True
                         )
+                if state in {"cancelled", "failed", "succeeded"}:
+                    # A workflow parent that reached a terminal state can no
+                    # longer start its reserved steps: the reclaim sweep
+                    # closes and releases the holds no child will consume.
+                    # The sweep self-filters non-workflow parents, is
+                    # idempotent per step, and a raise leaves the event
+                    # unacknowledged so the outbox retries it durably.
+                    # Platform tasks mint UUID ids; seam-level rows with
+                    # foreign id shapes never carry a workflow, so they are
+                    # skipped without disturbing the projection.
+                    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+                    try:
+                        parent_task_id = uuid.UUID(str(envelope.task_ref.id))
+                    except ValueError:
+                        parent_task_id = None
+                    if parent_task_id is not None:
+                        await db.commit()
+                        service = PlatformTaskDispatcher(self._store, self._session_factory)._task_control(db)
+                        await service.reclaim_workflow_step_reservations(
+                            workspace_id=workspace_id, parent_task_id=parent_task_id
+                        )
             if event_type == "run_terminal":
                 await db.commit()
                 task_input = await asyncio.to_thread(self._store.get_task_input, envelope.task_ref) or {}
@@ -136,12 +159,14 @@ class PlatformOutboxProjector:
                     context = dispatcher._context_of(envelope.task_ref, task_input)
                     await dispatcher._issue_agent_child_callback(db, context, payload, retry_errors=True)
 
-    async def _resolve_workspace(self, task_ref: Any) -> uuid.UUID | None:
+    async def _resolve_workspace(self, task_ref: Any, *, retry_errors: bool = False) -> uuid.UUID | None:
         """Task attribution: the row column, then the persisted input payload."""
 
         try:
             record = await asyncio.to_thread(self._store.get_task_state, task_ref)
-        except Exception:  # noqa: BLE001 — attribution is best-effort; scoping stays safe
+        except Exception:  # noqa: BLE001 - terminal cleanup must be retried after a read outage
+            if retry_errors:
+                raise
             return None
         if record is None:
             return None
@@ -149,8 +174,9 @@ class PlatformOutboxProjector:
         try:
             payload = await asyncio.to_thread(self._store.get_task_input, task_ref) or {}
             candidates.append(payload.get("workspace_id"))
-        except Exception:  # noqa: BLE001, S110 — attribution fallback only; the row column already covered it
-            pass
+        except Exception:  # noqa: BLE001 - terminal cleanup needs an attributable event
+            if retry_errors:
+                raise
         for raw in candidates:
             if raw:
                 try:

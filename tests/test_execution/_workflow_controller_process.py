@@ -12,6 +12,13 @@ Modes
 ``converge-callback``  the relay-shaped lost-callback reissue, raced behind a shared
                        ready-file barrier so concurrent processes issue the
                        verified callback AT the same boundary
+``hold-step``          the PAUSED old executor: claims the parent's dispatch lease,
+                       takes the step's reservation behind the fence, stalls on the
+                       barrier, then — after release — replays its submission with
+                       the (now stale) lease and runs the dispatcher's honest
+                       release-if-no-association tail
+``close-step``         the takeover owner: polls until the old lease expires, takes
+                       the lease over, then runs the reclaim sweep (close + release)
 
 Fault points (``HECATE_WF_CONTROLLER_FAULT``) — a hard ``os._exit(73)``:
 ``after_step_terminal``  the child committed its terminal fact, the verified
@@ -223,6 +230,19 @@ async def main() -> None:
         elif mode == "drive":
             deadline = time.monotonic() + float(os.environ.get("HECATE_WF_CONTROLLER_MAX_SECONDS") or 60.0)
             report["cycles"] = report["dispatches"] = 0
+            # Production runs the OutboxRelay alongside the dispatch loop;
+            # the drive mode pumps it too so terminal task_state events run
+            # their real handler chain (cancel propagation, the reclaim
+            # sweep) instead of a test shortcut.
+            from hecate_durable.worker import OutboxRelay
+
+            from hecate.execution.event_relay import PlatformOutboxProjector
+
+            relay = OutboxRelay(
+                store.session_factory,
+                PlatformOutboxProjector(store, sessions),
+                relay_key=f"drive-{os.getpid()}",
+            )
             while time.monotonic() < deadline:
                 try:
                     report["dispatches"] += await worker.reconcile()
@@ -230,6 +250,10 @@ async def main() -> None:
                     report["errors"].append(f"StaleFenceError: {exc}")
                 except Exception as exc:  # noqa: BLE001
                     report["errors"].append(f"{type(exc).__name__}: {exc}")
+                try:
+                    await relay.pump_once()
+                except Exception as exc:  # noqa: BLE001 — the loop outlives a bad pump
+                    report["errors"].append(f"pump {type(exc).__name__}: {exc}")
                 report["cycles"] += 1
                 parent = await asyncio.to_thread(store.get_task_state, parent_ref)
                 children = await _children(store, parent_id)
@@ -275,6 +299,136 @@ async def main() -> None:
                 )
             report["receipt_state"] = receipt.record.state.value
             report["receipt_detail"] = receipt.detail
+        elif mode in ("hold-step", "close-step"):
+            from hecate_durable.storage.lease import task_dispatch_lease_key
+
+            from hecate.contracts.execution.durable import TaskLifecycleState
+            from hecate.execution.workflow_child import WorkflowChildTaskAdapter
+
+            workspace_id = uuid.UUID(os.environ["HECATE_WF_CONTROLLER_WORKSPACE_ID"])
+            lease_key = task_dispatch_lease_key(parent_ref.issuer_domain, parent_ref.id)
+            payload = await asyncio.to_thread(store.get_task_input, parent_ref) or {}
+            agent_id = uuid.UUID(str(payload.get("agent_id")))
+            step = ((payload.get("workflow") or {}).get("steps") or [])[0]
+
+            if mode == "hold-step":
+                ttl = float(os.environ.get("HECATE_WF_CONTROLLER_LEASE_TTL") or 2.0)
+                handle = await asyncio.to_thread(store.leases.acquire, lease_key, f"old-{os.getpid()}", ttl)
+                assert handle is not None, "the paused executor could not claim the parent lease"
+                report["lease_token"] = handle.fencing_token
+                await asyncio.to_thread(
+                    store.apply_task_state,
+                    parent_ref,
+                    TaskLifecycleState.RUNNING,
+                    extra_update={"dispatch_starts": 1},
+                    lease=handle,
+                )
+                async with sessions() as db:
+                    service = TaskControlService(
+                        db,
+                        store=store,
+                        recorder=store,
+                        backend="postgres",
+                        ledger_source="core",
+                        session_factory=sessions,
+                    )
+                    pause = os.environ.get("HECATE_WF_CONTROLLER_RESERVE_PAUSE")
+                    if pause:
+                        from hecate.ops.budget_reservations import QuotaBudgetLedger
+
+                        original = getattr(QuotaBudgetLedger, pause)
+
+                        async def paused_operation(self, *args, **kwargs):
+                            # before_lock has not checked the parent yet;
+                            # before_insert already owns quota and passed the guard.
+                            if pause == "_reservation":
+                                result = await original(self, *args, **kwargs)
+                            ready = Path(os.environ["HECATE_WF_CONTROLLER_READY_DIR"])
+                            (ready / f"ready-{os.getpid()}").touch()
+                            barrier = Path(os.environ["HECATE_WF_CONTROLLER_RELEASE_BARRIER"])
+                            end = time.monotonic() + 120
+                            while not barrier.exists():
+                                if time.monotonic() >= end:
+                                    raise TimeoutError("reservation barrier was never released")
+                                await asyncio.sleep(0.05)
+                            if pause == "_reservation":
+                                return result
+                            return await original(self, *args, **kwargs)
+
+                        setattr(QuotaBudgetLedger, pause, paused_operation)
+                    try:
+                        reserved = await service.reserve_workflow_step_budget(
+                            workspace_id=workspace_id,
+                            parent_task_id=uuid.UUID(parent_id),
+                            step_index=0,
+                            units=int(step.get("budget_units") or 0),
+                            dispatch_lease=handle,
+                        )
+                        report["reserved"] = reserved.status.value
+                    except Exception as exc:  # noqa: BLE001 - report the actual preflight refusal
+                        report["reserved"] = type(exc).__name__
+                    finally:
+                        if pause:
+                            setattr(QuotaBudgetLedger, pause, original)
+                # Barrier: stall BEFORE the child submission, exactly the
+                # window the recovery package closes. The test releases this
+                # only after the takeover owner has closed the step and
+                # reclaimed the hold.
+                ready = os.environ.get("HECATE_WF_CONTROLLER_READY_DIR")
+                if ready:
+                    (Path(ready) / f"ready-{os.getpid()}").touch()
+                release = os.environ.get("HECATE_WF_CONTROLLER_RELEASE_BARRIER")
+                assert release, "hold-step needs a release barrier path"
+                end = time.monotonic() + 120
+                while not Path(release).exists():
+                    if time.monotonic() >= end:
+                        raise TimeoutError("the hold-step release barrier was never opened")
+                    await asyncio.sleep(0.05)
+                async with sessions() as db:
+                    service = TaskControlService(
+                        db,
+                        store=store,
+                        recorder=store,
+                        backend="postgres",
+                        ledger_source="core",
+                        session_factory=sessions,
+                    )
+                    try:
+                        child_ref = await WorkflowChildTaskAdapter.submit_step(
+                            service, workspace_id, agent_id, parent_ref, step, 0, dispatch_lease=handle
+                        )
+                        report["late_submit"] = f"accepted:{child_ref.id}"
+                    except Exception as exc:  # noqa: BLE001 — the refusal class IS the evidence
+                        report["late_submit"] = type(exc).__name__
+                        outcome = await service.release_workflow_step_budget(
+                            workspace_id=workspace_id,
+                            parent_task_id=uuid.UUID(parent_id),
+                            step_index=0,
+                            dispatch_lease=handle,
+                        )
+                        report["tail_release"] = outcome.value
+            else:
+                end = time.monotonic() + 120
+                handle = None
+                while time.monotonic() < end:
+                    handle = await asyncio.to_thread(store.leases.acquire, lease_key, f"new-{os.getpid()}", 3600.0)
+                    if handle is not None:
+                        break
+                    await asyncio.sleep(0.1)
+                assert handle is not None, "the takeover owner never acquired the expired lease"
+                report["takeover_token"] = handle.fencing_token
+                async with sessions() as db:
+                    service = TaskControlService(
+                        db,
+                        store=store,
+                        recorder=store,
+                        backend="postgres",
+                        ledger_source="core",
+                        session_factory=sessions,
+                    )
+                    report["sweep"] = await service.reclaim_workflow_step_reservations(
+                        workspace_id=workspace_id, parent_task_id=uuid.UUID(parent_id)
+                    )
         else:
             raise SystemExit(f"unknown mode {mode!r}")
 

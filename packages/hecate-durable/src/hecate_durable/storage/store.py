@@ -326,6 +326,9 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         task_ref: BackendRef,
         run_ref: BackendRef,
         input_payload: dict[str, Any],
+        dispatch_lease: LeaseHandle | None = None,
+        dispatch_parent_ref: BackendRef | None = None,
+        dispatch_step_index: int | None = None,
     ) -> SubmissionAssociation:
         """Idempotent submission that also creates the task and its linkage.
 
@@ -333,7 +336,18 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         creating anything twice; the task row (``queued``, revision 0), run
         linkage, replay input, and the ``task_submitted`` governance event all
         commit in one transaction.
+
+        ``dispatch_lease`` + ``dispatch_parent_ref`` + ``dispatch_step_index``
+        fence the CREATION (never an idempotent replay) on the parent's live
+        dispatch lease and step state inside that same transaction: a stale
+        executor whose lease was taken over, or whose workflow step was
+        closed, is refused instead of minting a child nobody will drive.
         """
+
+        if (dispatch_lease is None) != (dispatch_parent_ref is None) or (dispatch_parent_ref is None) != (
+            dispatch_step_index is None
+        ):
+            raise ValueError("dispatch fencing needs the lease, the parent ref and the step index together")
 
         for attempt in range(3):
             try:
@@ -342,6 +356,10 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                     if existing is not None:
                         self._check_submission_digest(key, existing)
                         return _association_of(existing)
+                    if dispatch_lease is not None:
+                        self._assert_step_dispatchable(
+                            session, dispatch_parent_ref, dispatch_step_index, dispatch_lease
+                        )
                     task_row = session.execute(
                         select(TaskStateRow).where(
                             TaskStateRow.task_issuer == task_ref.issuer_domain,
@@ -393,6 +411,99 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 if attempt == 2:
                     raise
         raise RuntimeError("unreachable")  # pragma: no cover
+
+    def _assert_step_dispatchable(
+        self, session: Any, parent_ref: BackendRef | None, step_index: int | None, lease: LeaseHandle
+    ) -> None:
+        """Fence one workflow step's start on the parent's live dispatch lease.
+
+        Runs inside the caller's transaction: the lease row lock serializes
+        against every takeover, and the parent row lock serializes against
+        the reclaim sweep's close marker, so the decision (lease valid, the
+        lease binds THIS parent, the parent still running, the step still
+        open) and the first write that depends on it commit or fail together.
+        """
+
+        from hecate_durable.storage.lease import task_dispatch_lease_key
+
+        if type(step_index) is not int or step_index < 0:
+            raise ValueError("workflow step index must be a non-negative integer")
+        self.leases.assert_valid(session, lease)
+        if parent_ref is None or lease.lease_key != task_dispatch_lease_key(parent_ref.issuer_domain, parent_ref.id):
+            raise ValueError("dispatch lease is not bound to the workflow parent task")
+        row = session.execute(
+            select(TaskStateRow)
+            .where(
+                TaskStateRow.task_issuer == parent_ref.issuer_domain,
+                TaskStateRow.task_id == parent_ref.id,
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if row is None or TaskLifecycleState(row.lifecycle_state) is not TaskLifecycleState.RUNNING:
+            raise ValueError("the workflow parent is not running; this step cannot start")
+        closed = (row.extra or {}).get("workflow_step_states") or {}
+        if str(step_index) in closed:
+            raise ValueError(f"workflow step {step_index} is closed; late dispatch is refused")
+
+    def assert_workflow_step_dispatchable(self, parent_ref: BackendRef, step_index: int, lease: LeaseHandle) -> None:
+        """Read the creation fence before reserving quota.
+
+        The quota caller holds its own scope lock. Use the read engine here
+        so SQLite does not try to acquire a second writer lock. Child
+        creation rechecks the fence in its own write transaction.
+        """
+        with self._read_session() as session:
+            self._assert_step_dispatchable(session, parent_ref, step_index, lease)
+
+    def update_task_extra(
+        self,
+        task_ref: BackendRef,
+        extra_update: dict[str, Any],
+        *,
+        expected_revision: int | None = None,
+    ) -> TaskStateRecord:
+        """Merge ``extra_update`` into a task's extra without a lifecycle move.
+
+        The reclaim sweep's step-close markers land through this writer: the
+        parent is already terminal there, where ``apply_task_state`` refuses
+        the same-state write. Revision CAS + the row lock keep concurrent
+        marker writers honest; the ``task_state`` event re-arms the relay's
+        sweep so an interruption between close and release re-converges.
+        """
+
+        with self._session() as session, session.begin():
+            row = session.execute(
+                select(TaskStateRow)
+                .where(
+                    TaskStateRow.task_issuer == task_ref.issuer_domain,
+                    TaskStateRow.task_id == task_ref.id,
+                )
+                .with_for_update()
+            ).scalar_one_or_none()
+            if row is None:
+                raise ValueError(f"task {task_ref.id} has no durable state to update")
+            if expected_revision is not None and expected_revision != row.revision:
+                raise ValueError(f"stale revision: expected {expected_revision}, current is {row.revision}")
+            if extra_update:
+                row.extra = {**(row.extra or {}), **extra_update}
+            row.revision += 1
+            row.updated_at = self._clock()
+            run_ref = self._run_linkage(session, task_ref)
+            if run_ref is not None:
+                self.events.emit(
+                    session,
+                    task_ref=task_ref,
+                    run_ref=run_ref,
+                    event_type="task_state",
+                    payload={"state": row.lifecycle_state, "revision": row.revision},
+                )
+            return TaskStateRecord(
+                task_ref=task_ref,
+                lifecycle_state=TaskLifecycleState(row.lifecycle_state),
+                revision=row.revision,
+                recorded_at=row.recorded_at,
+                extra=dict(row.extra or {}),
+            )
 
     def apply_task_state(
         self,
