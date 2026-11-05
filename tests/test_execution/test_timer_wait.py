@@ -270,6 +270,14 @@ async def test_concurrent_cancel_and_timer_wake_preserve_the_winning_state(harne
     record = await _record_of(harness, t_ref)
     if command.record.state is CommandState.APPLIED:
         assert record.lifecycle_state is TaskLifecycleState.CANCELLED
+    elif command.record.state is CommandState.REQUESTED:
+        # Third legitimate interleaving: the cancel's state read saw the
+        # pre-wake wait, but the wake committed the transition first and the
+        # cancel's CAS lost. The command stays honestly REQUESTED (it
+        # converges through cooperative cancellation on the running task)
+        # and the wake's win is preserved: the task is NOT cancelled.
+        assert record.lifecycle_state is not TaskLifecycleState.CANCELLED
+        assert command.detail == "dispatch raced the cancel; the command stays requested"
     else:
         assert command.record.state is CommandState.REJECTED
         assert record.lifecycle_state is TaskLifecycleState.QUEUED
