@@ -185,11 +185,41 @@ def install_environment(delivery: Path, expected_digest: str, target: Path) -> P
     # pip must consume the verified bytes even if the delivery is later changed.
     with tempfile.TemporaryDirectory(prefix="runner-env-wheels-") as snapshot:
         requirements, versions = _audit_wheelhouse(delivery / "wheelhouse", Path(snapshot), manifest, pins)
-        _install_verified_wheels(target, requirements, versions)
+        _install_verified_wheels(target, requirements, versions, manifest["manifest_sha256"])
     return target
 
 
-def _install_verified_wheels(target: Path, requirements: list[str], versions: dict[str, str]) -> None:
+def _write_install_receipt(target: Path, environment_manifest_sha256: str, packages: dict[str, str]) -> None:
+    """Record the verified installation into the venv root.
+
+    Matches the receipt format read by hecate_runner.deployment: the
+    runner's cold-start composition check reads this receipt from
+    sys.prefix and refuses a deployment bound to a different environment.
+    Written after every check has passed; the failure path removes the
+    whole environment, so a partial receipt never survives.
+    """
+
+    receipt = {
+        "format_version": 1,
+        "environment_manifest_sha256": environment_manifest_sha256,
+        "python_target": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "python_implementation": sys.implementation.name,
+        "python_abi": sysconfig.get_config_var("SOABI"),
+        "venv_path_sha256": hashlib.sha256(os.fsencode(os.path.normcase(str(target.resolve())))).hexdigest(),
+        "packages": packages,
+    }
+    digest = hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    receipt["receipt_sha256"] = digest
+    (target / "hecate-install-receipt.json").write_text(
+        json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def _install_verified_wheels(
+    target: Path, requirements: list[str], versions: dict[str, str], environment_manifest_sha256: str
+) -> None:
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith(("PIP_", "PYTHON"))}
     env["PIP_CONFIG_FILE"] = os.devnull
 
@@ -229,7 +259,10 @@ def _install_verified_wheels(target: Path, requirements: list[str], versions: di
         if installed != versions:
             raise InstallError("installed distribution set does not match the verified wheelhouse")
         _run([*pip, "check"], cwd=target, env=env)
+        # Everything above passed: certify the environment so a cold start
+        # can bind a signed artifact to THIS installed set.
         install_lock.unlink()
+        _write_install_receipt(target, environment_manifest_sha256, installed)
     except (Exception, KeyboardInterrupt):
         shutil.rmtree(target)
         raise

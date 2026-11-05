@@ -676,12 +676,12 @@ def test_guard_initialization_failure_releases_the_host_lock(tmp_path, _shutdown
     load_selection = entry.load_host_selection
     held = []
 
-    def capture_lock(*args):
-        result = load_selection(*args)
+    def capture_lock(*args, **kwargs):
+        result = load_selection(*args, **kwargs)
         held.append(result[1])
         return result
 
-    def failed_guard(*args):
+    def failed_guard(*args, **kwargs):
         raise RuntimeError("injected guard initialization failure")
 
     monkeypatch.setattr(entry, "load_host_selection", capture_lock)

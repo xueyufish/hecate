@@ -925,3 +925,43 @@ def test_exception_during_boot_releases_host_lock(tmp_path, _shutdown_env, monke
         runner_main.main(["--host", str(host), "--artifact-trust", str(policy_path)])
     with release_module.HostLock(host):
         pass
+
+
+def test_composition_refusal_preserves_durable_history_and_releases_the_lock(
+    tmp_path, _shutdown_env, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    from hecate_runner.deployment import DeploymentManifest
+
+    private_pem, public_pem = _keypair(tmp_path)
+    artifact, sha = _make_artifact(tmp_path, "artifact", "version-a", private_pem)
+    database = tmp_path / "history.db"
+    database_url = f"sqlite:///{database}"
+    host = _write_host(tmp_path, durable_url=database_url)
+    policy = _policy(tmp_path, public_pem)
+    install_release(host, artifact, policy)
+    store = SqlDurableStore(database_url)
+    try:
+        store.create_schema()
+        activate_release(host, sha, policy)
+        runtime = DurableRuntime(store, workspace="standalone")
+        runtime.submit(
+            principal="app-reader", run_input={"prompt": "check"}, idempotency_key=None, domains=("domain_a",)
+        )
+    finally:
+        store.dispose()
+
+    monkeypatch.setattr(
+        release_module,
+        "sys",
+        SimpleNamespace(flags=SimpleNamespace(isolated=1), prefix=str(tmp_path / "venv"), base_prefix=sys.base_prefix),
+    )
+    pointer = host / ACTIVE_POINTER_NAME
+    before = pointer.read_bytes(), database.read_bytes()
+    deployment = DeploymentManifest("f" * 64, PUBLISHER, "c" * 64, "d" * 64)
+    with pytest.raises(ReleaseError, match="activate the composed release"):
+        load_host_selection(host, policy, deployment=deployment)
+    assert (pointer.read_bytes(), database.read_bytes()) == before
+    with release_module.HostLock(host):
+        pass
