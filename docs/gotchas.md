@@ -491,14 +491,36 @@ of the task's own deadline.
   per step identity), settles from the child's durable slice ledger at
   its verified callback (unknown usage stays held, proven-zero
   settles as zero), and accumulates into the parent's `workflow_budget_used`.
-  An interruption after reservation but before child submission can leave
-  an open hold if the parent reaches its deadline before resubmission.
-  This recovery window still needs a fenced cleanup path.
+  The hold's lifecycle is fenced end to end: the child's creation commits
+  only inside the parent's still-valid dispatch lease and an open step
+  (`submit_task` verifies both in the creation transaction), and the
+  reservation checks the same fence inside the quota scope transaction.
+  Recovery takes that scope lock before reading or releasing holds, including
+  scopes without a quota definition. A reservation already in flight must
+  finish before recovery can acknowledge the close. When the parent converges terminal
+  (cancelled / failed / succeeded) with a hold no child will consume, the
+  relay's terminal-event handler runs the reclaim sweep: it closes the
+  step on the parent's `workflow_step_states` extra marker and only then
+  releases the hold — close-then-release, so a late reservation replay
+  cannot mint a second hold, and an interruption between the two is
+  repaired idempotently by the next sweep pass. A submitted child keeps
+  its hold for settlement (the association is verified against the
+  child's persisted stamp); an association read failure or a stamp/fact
+  mismatch marks the step `held_for_reconciliation` and keeps the quota.
+  Task detail exposes these markers as `workflow_step_states`. A competing
+  marker writer cannot turn a reconciliation hold into a release. Failed
+  marker writes and terminal attribution outages leave the outbox pending.
+  Failed-submit cleanup also checks the dispatch lease under the quota
+  scope lock so an old owner cannot release the new owner's hold. A parent parked `reconciliation_required`
+  (restart budget exhausted, `on_failure: "await"`) keeps its holds
+  visible until an operator resolves it; the sweep deliberately does not
+  act there. Late dispatch into a closed step is refused with
+  `failure_source: "closed"`.
   Terminal settlement still runs when a cancelled parent cannot wake.
   The workflow deadline gates advances and caps each controller step's
   own deadline and approval or input wait. Refusals
-  are distinguishable (`failure_source`: `budget` / `deadline` vs
-  `execution` / `validation`).
+  are distinguishable (`failure_source`: `budget` / `deadline` / `closed`
+  vs `execution` / `validation`).
 - **Parent cancel records a cancel request on the held step child** —
   cancelling (or converging) a parent parked on `await_task_ref`
   persists a real CANCEL command (`workflow-cancel:<parent>:<child>`) for
@@ -517,7 +539,10 @@ of the task's own deadline.
   state event, without creating a successful callback.
   `tests/test_execution/test_workflow_controller_postgres.py` proves the
   death window, the two-process callback race (a ready-file barrier puts
-  both racers at the boundary before either fires) and the cross-process
-  cancel propagation against `HECATE_STEP6_POSTGRES_URL` — skips, not
+  both racers at the boundary before either fires), the cross-process
+  cancel propagation and the reservation-recovery barrier (a paused
+  executor's late submission is refused after the takeover's sweep closed
+  the step, with no child and no re-opened hold) against
+  `HECATE_STEP6_POSTGRES_URL` — skips, not
   passes, without it; `test_workflow_controller_steps.py` holds the
   SQLite contract tier.

@@ -382,3 +382,147 @@ async def test_cancel_is_requested_on_a_step_another_process_is_running(harness,
         )
     assert late.record.state is CommandState.REJECTED
     assert (await asyncio.to_thread(_state, harness, parent.task_ref)).lifecycle_state.value == "cancelled"
+
+
+@pytest.mark.parametrize("pause", ["after_reserve", "_lock_scope", "_reservation"])
+async def test_paused_executor_cannot_submit_after_the_takeover_reclaims(harness, tmp_path, pause) -> None:
+    """The reservation window, closed by two independent processes and a
+    barrier: the paused old worker holds the step's reservation mid-dispatch;
+    a cancel lands and the takeover owner's reconcile converges the parent,
+    then the reclaim sweep closes the step and restores the quota — and only
+    THEN the old worker is released. Its late submission is refused on its
+    stale fence, no child exists, and nothing re-opens the reservation."""
+
+    from sqlalchemy import select
+
+    from hecate.contracts.execution.durable import TaskLifecycleState
+    from hecate.execution.task_control import TaskControlService
+    from hecate.models.quota import QuotaReservationModel
+
+    agent_id = await _agent_with_tools(harness, "wf-pg-reclaim-agent")
+    parent = await _submit_workflow(
+        harness, agent_id, [{"goal": "research the stock", "mode": "controller", "budget_units": 50000}]
+    )
+    ready = tmp_path / "ready"
+    ready.mkdir()
+    release = tmp_path / "release-barrier"
+    env = _worker_env(harness, tmp_path, child_tool="web_search", lease_ttl=2)
+    hold_env = {
+        **env,
+        "HECATE_WF_CONTROLLER_READY_DIR": str(ready),
+        "HECATE_WF_CONTROLLER_RELEASE_BARRIER": str(release),
+        "HECATE_WF_CONTROLLER_ERROR_FILE": str(tmp_path / "hold-error.log"),
+    }
+    if pause != "after_reserve":
+        hold_env["HECATE_WF_CONTROLLER_RESERVE_PAUSE"] = pause
+    close_env = {**env, "HECATE_WF_CONTROLLER_MAX_SECONDS": "90"}
+
+    # The paused executor: lease claimed, reservation committed behind the
+    # fence, then stalled before the child submission.
+    paused = _spawn(hold_env, "hold-step", parent.task_ref.id)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 60
+    while loop.time() < deadline and not list(ready.glob("ready-*")):
+        if paused.poll() is not None:
+            code, report, err = await _finish(paused)
+            raise AssertionError(f"the paused worker exited early: {code}, {report}, {err[-2000:]}")
+        await asyncio.sleep(0.1)
+    assert list(ready.glob("ready-*")), "the paused worker never reached its barrier"
+    async with harness["session_factory"]() as db:
+        holds = (
+            (
+                await db.execute(
+                    select(QuotaReservationModel).where(
+                        QuotaReservationModel.invocation_key == f"workflow-step:{parent.task_ref.id}:0"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if pause == "after_reserve":
+        assert len(holds) == 1 and not holds[0].released and not holds[0].settled, holds
+    else:
+        assert holds == [], holds
+
+    # The user cancels a workflow whose dispatch has visibly stalled.
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        issued = await service.issue_command(
+            workspace_id=WS, task_id=uuid.UUID(parent.task_ref.id), kind=ControlCommandKind.CANCEL, issuer="tester"
+        )
+    assert issued.record.state is CommandState.REQUESTED, issued.record.state
+
+    # The takeover owner: reconcile requeues the expired dispatch, the fresh
+    # dispatch observes the cancel and converges the parent, and the sweep
+    # closes the step and releases the hold on those durable facts.
+    takeover = _spawn(close_env, "drive", parent.task_ref.id)
+    if pause == "_reservation":
+        # The late insert holds quota; the sweep must wait for its transaction
+        # after committing the close marker, even though no hold is visible yet.
+        deadline = loop.time() + 60
+        while loop.time() < deadline:
+            current = await asyncio.to_thread(_state, harness, parent.task_ref)
+            if (current.extra or {}).get("workflow_step_states") == {"0": "closed_unexecuted"}:
+                break
+            await asyncio.sleep(0.1)
+        assert (current.extra or {}).get("workflow_step_states") == {"0": "closed_unexecuted"}
+        assert takeover.poll() is None, "recovery acknowledged a reservation still in flight"
+        release.touch()
+    code, report, err = await _finish(takeover)
+    assert code == 0 and report["parent_state"] == "cancelled", (report, err[-3000:])
+    parent_state = await asyncio.to_thread(_state, harness, parent.task_ref)
+    assert parent_state.lifecycle_state is TaskLifecycleState.CANCELLED
+    assert (parent_state.extra or {}).get("workflow_step_states") == {"0": "closed_unexecuted"}, parent_state.extra
+    async with harness["session_factory"]() as db:
+        holds = (
+            (
+                await db.execute(
+                    select(QuotaReservationModel).where(
+                        QuotaReservationModel.invocation_key == f"workflow-step:{parent.task_ref.id}:0"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if pause == "_lock_scope":
+        assert holds == [], holds
+    else:
+        assert len(holds) == 1 and holds[0].released and not holds[0].settled, holds
+
+    # ONLY NOW the barrier opens: the paused worker replays its submission
+    # on the stale fence and is refused — honestly releasing nothing new.
+    release.touch()
+    code, report, err = await _finish(paused)
+    assert code == 0, (report, err[-3000:])
+    assert report["reserved"] == ("StaleFenceError" if pause == "_lock_scope" else "reserved"), report
+    assert report["late_submit"] == "StaleFenceError", report
+    assert report["tail_release"] == "no_reservation", report
+    assert report["children"] == [], report
+
+    children = await asyncio.to_thread(_children_of, harness, parent.task_ref)
+    assert len(children) == 0, "the refused late submission must not mint a child"
+    async with harness["session_factory"]() as db:
+        holds = (
+            (
+                await db.execute(
+                    select(QuotaReservationModel).where(
+                        QuotaReservationModel.invocation_key.like(f"workflow-step:{parent.task_ref.id}:%")
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if pause == "_lock_scope":
+        assert holds == []
+    else:
+        assert len(holds) == 1 and holds[0].released, "no reservation may be re-opened for the closed step"

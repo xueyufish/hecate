@@ -935,15 +935,25 @@ class PlatformTaskDispatcher:
             # The step's workspace hold is taken BEFORE the child exists, so
             # a refusal leaves neither. The reserve is idempotent per step
             # identity: a dispatcher crash between reserve and submit
-            # replays the same hold instead of minting a second one.
+            # replays the same hold instead of minting a second one. The
+            # dispatch lease pre-flights the creation fence: an executor
+            # that lost the parent's lease, or a step the reclaim sweep
+            # already closed, never re-occupies quota.
             from hecate_governance.usage import ReservationStatus
 
-            reserved = await service.reserve_workflow_step_budget(
-                workspace_id=context.workspace_id,
-                parent_task_id=uuid.UUID(task_ref.id),
-                step_index=next_index,
-                units=step_budget,
-            )
+            try:
+                reserved = await service.reserve_workflow_step_budget(
+                    workspace_id=context.workspace_id,
+                    parent_task_id=uuid.UUID(task_ref.id),
+                    step_index=next_index,
+                    units=step_budget,
+                    dispatch_lease=lease,
+                )
+            except ValueError as exc:
+                detail = f"workflow step {next_index} refused: {exc}"
+                if plan.on_failure == "await":
+                    return {"status": "awaiting_reconciliation", "content": detail, "failure_source": "closed"}
+                return {"status": "failed", "content": "", "error": detail, "failure_source": "closed"}
             if reserved.status is not ReservationStatus.RESERVED:
                 detail = (
                     f"workflow step {next_index} refused: the workspace budget has no headroom for its declared slice"
@@ -961,23 +971,21 @@ class PlatformTaskDispatcher:
                 next_index,
                 initiator_user_id=str(context.user_id) if context.user_id else None,
                 workflow_deadline=plan.deadline,
+                dispatch_lease=lease,
             )
         except Exception:
             if isinstance(step_budget, int) and not isinstance(step_budget, bool) and step_budget > 0:
                 try:
-                    # Submission can fail after the durable child commits.
-                    # Only the absence of its association proves there is
-                    # no child whose spend still needs this hold.
-                    if lookup is not None and await asyncio.to_thread(lookup, submission_key) is None:
-                        await service.release_workflow_step_budget(
-                            workspace_id=context.workspace_id,
-                            parent_task_id=uuid.UUID(task_ref.id),
-                            step_index=next_index,
-                        )
-                except Exception:  # noqa: BLE001 — the submission failure is the primary error
-                    logger.warning(
-                        "workflow step %s hold release after failed submit failed", next_index, exc_info=True
+                    # Serialize with the next owner's reservation and check
+                    # ownership before releasing a possibly reused hold.
+                    await service.release_workflow_step_budget(
+                        workspace_id=context.workspace_id,
+                        parent_task_id=uuid.UUID(task_ref.id),
+                        step_index=next_index,
+                        dispatch_lease=lease,
                     )
+                except Exception:  # noqa: BLE001 - retain the original submission error
+                    logger.warning("workflow step %s hold cleanup failed", next_index, exc_info=True)
             raise
         raise TaskWaitingSignalError(
             ControlCommandKind.PROVIDE_INPUT,

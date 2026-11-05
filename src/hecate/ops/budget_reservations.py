@@ -13,8 +13,12 @@ ledger per (workspace, entry) scope they choose to meter.
 
 from __future__ import annotations
 
+import hashlib
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from hecate_governance.usage import (
     BudgetLedger,
@@ -26,7 +30,7 @@ from hecate_governance.usage import (
     UsageRecord,
     UsageStatus,
 )
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.models.quota import QuotaModel, QuotaReservationModel, QuotaUsageModel
@@ -70,7 +74,29 @@ class QuotaBudgetLedger(BudgetLedger):
             unit_scale=self._unit_scale,
         )
 
+    @asynccontextmanager
+    async def locked_scope(self) -> AsyncIterator[QuotaBudgetLedger]:
+        """Hold the quota scope across recovery reads and release."""
+        if self._factory is not None:
+            async with self._factory.begin() as db:
+                ledger = self._transaction_ledger(db)
+                await ledger._lock_scope()
+                yield ledger
+        else:
+            try:
+                await self._lock_scope()
+                yield self
+                await self._db.commit()
+            except BaseException:
+                await self._db.rollback()
+                raise
+
     async def _lock_scope(self) -> None:
+        # Unlimited scopes may have no quota row to lock on PostgreSQL.
+        if self._db.get_bind().dialect.name == "postgresql":
+            identity = f"quota:{self._resource_type}:{self._scope}:{self._workspace_id}:{self._window_type}"
+            lock_id = int.from_bytes(hashlib.sha256(identity.encode()).digest()[:8], signed=True)
+            await self._db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_id})
         # A write serializes SQLite as well as PostgreSQL; SELECT FOR UPDATE
         # alone is ignored by SQLite. Lock before reading usage or reservations.
         await self._db.execute(
@@ -148,6 +174,7 @@ class QuotaBudgetLedger(BudgetLedger):
                 QuotaReservationModel.scope_id == self._workspace_id,
                 QuotaReservationModel.deleted.is_(False),
             )
+            .execution_options(populate_existing=True)
             .order_by(QuotaReservationModel.created_at.desc())
             .limit(1)
         )
@@ -156,11 +183,15 @@ class QuotaBudgetLedger(BudgetLedger):
     def _remaining_window(self, quota: QuotaModel, used: float, open_holds: float) -> float:
         return max(0.0, quota.limit_value - used - open_holds)
 
-    async def reserve(self, invocation_id: str, units: int) -> ReservationOutcome:
+    async def reserve(
+        self, invocation_id: str, units: int, *, guard: Callable[[], Awaitable[None]] | None = None
+    ) -> ReservationOutcome:
         if self._factory is not None:
             async with self._factory.begin() as db:
-                return await self._transaction_ledger(db).reserve(invocation_id, units)
+                return await self._transaction_ledger(db).reserve(invocation_id, units, guard=guard)
         await self._lock_scope()
+        if guard is not None:
+            await guard()
         if units < 0:
             raise ValueError("reservation units must be non-negative")
         units = units * self._unit_scale
@@ -302,6 +333,29 @@ class QuotaBudgetLedger(BudgetLedger):
             status=_status_from_record(reservation),
             detail=reservation.detail or "",
         )
+
+    async def reservation_state(self, invocation_id: str) -> dict[str, Any] | None:
+        """Read one reservation's lifecycle facts without mutating anything.
+
+        The workflow reclaim sweep classifies a step's hold (settled / already
+        released / an open hold it may close) from this record instead of
+        guessing from ``usage_for``'s settle-only view.
+        """
+
+        if self._factory is not None:
+            async with self._factory.begin() as db:
+                return await self._transaction_ledger(db).reservation_state(invocation_id)
+        reservation = await self._reservation(invocation_id)
+        if reservation is None:
+            return None
+        return {
+            "invocation_key": reservation.invocation_key,
+            "units": round((reservation.units or 0.0) / self._unit_scale),
+            "released": bool(reservation.released),
+            "settled": bool(reservation.settled),
+            "unknown_hold": bool(reservation.unknown_hold),
+            "usage_status": reservation.usage_status,
+        }
 
 
 def _status_from_record(reservation: QuotaReservationModel) -> UsageStatus:

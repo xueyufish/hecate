@@ -804,3 +804,491 @@ async def test_a_lost_step_callback_converges_exactly_once(harness, llm_stub, mo
     assert final.lifecycle_state.value == "succeeded", final.extra
     used = (final.extra or {}).get("workflow_budget_used")
     assert isinstance(used, int) and used > 0, final.extra
+
+
+# --- reservation recovery ------------------------------------------------------------
+
+
+async def _reserve_step_hold(harness, parent_ref, step_index: int, units: int) -> None:
+    """Take a step's workspace hold the way a crashed dispatcher would have:
+    committed, with the child creation (and the lease fence) never reached."""
+
+    from hecate.execution.task_control import TaskControlService
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        outcome = await service.reserve_workflow_step_budget(
+            workspace_id=WS, parent_task_id=uuid.UUID(parent_ref.id), step_index=step_index, units=units
+        )
+        assert outcome.status.value == "reserved", outcome
+
+
+async def _sweep(harness, parent_ref) -> dict[str, Any]:
+    from hecate.execution.task_control import TaskControlService
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        return await service.reclaim_workflow_step_reservations(
+            workspace_id=WS, parent_task_id=uuid.UUID(parent_ref.id)
+        )
+
+
+async def _terminate_parent(harness, parent_ref) -> None:
+    store = harness["store"]
+    await asyncio.to_thread(store.apply_task_state, parent_ref, TaskLifecycleState.RUNNING)
+    await asyncio.to_thread(store.apply_task_state, parent_ref, TaskLifecycleState.FAILED)
+
+
+async def test_deadline_refusal_reclaims_a_hold_orphaned_before_the_child(harness) -> None:
+    """Acceptance 1: the hold committed, the child never existed, and the
+    parent converged on its reached deadline. The takeover sweep closes the
+    step and restores the quota exactly once; a repeated recovery reclaims
+    nothing and mints nothing."""
+
+    agent_id = await _agent_with_tools(harness, "workflow-orphan-recovery")
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    parent = await _submit_workflow(
+        harness, agent_id, [_controller_step(budget_units=50000)], deadline=past, budget_units=50000
+    )
+    await _reserve_step_hold(harness, parent.task_ref, 0, 50000)
+    holds = await _holds(harness, parent.task_ref)
+    assert len(holds) == 1 and not holds[0].released
+
+    # The parent's advance hits the workflow deadline gate BEFORE the step
+    # reserve/submit: the orphan hold survives the dispatch (the documented
+    # window), the parent converges FAILED, and the relay carries the
+    # terminal event to the reclaim sweep.
+    assert await _worker_of(harness).dispatch_once(parent.task_ref) is True
+    state = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    assert state.lifecycle_state.value == "failed", state.extra
+    assert (state.extra or {}).get("result", {}).get("failure_source") == "deadline"
+    assert len(await asyncio.to_thread(_children_of, harness, parent.task_ref)) == 0
+    assert (await _holds(harness, parent.task_ref))[0].released is False
+
+    from hecate_durable.worker import OutboxRelay
+
+    from hecate.execution.event_relay import PlatformOutboxProjector
+
+    relay = OutboxRelay(
+        harness["store"].session_factory,
+        PlatformOutboxProjector(harness["store"], harness["session_factory"]),
+        relay_key="workflow-orphan-recovery",
+    )
+    await relay.pump_once()
+    holds = await _holds(harness, parent.task_ref)
+    assert len(holds) == 1 and holds[0].released, holds
+    state = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    assert (state.extra or {}).get("workflow_step_states") == {"0": "closed_unexecuted"}, state.extra
+
+    # Repeated recovery is a no-op: the closed marker routes the second pass
+    # to the ledger's idempotent release, never a second effect.
+    summary = await _sweep(harness, parent.task_ref)
+    assert summary["steps"] == {"0": "already_reclaimed"}, summary
+    assert len(await _holds(harness, parent.task_ref)) == 1
+    assert len(await asyncio.to_thread(_children_of, harness, parent.task_ref)) == 0
+
+
+async def test_takeover_sweep_keeps_a_submitted_childs_hold(harness) -> None:
+    """Acceptance 2 (sweep side): a submitted step's association — verified
+    against the child's persisted parent stamp — keeps its hold for the real
+    settlement; only the provably-unsubmitted step is closed."""
+
+    from hecate_durable.worker import OutboxRelay
+
+    from hecate.execution.event_relay import PlatformOutboxProjector
+
+    agent_id = await _agent_with_tools(harness, "workflow-submitted-recovery")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    assert await _worker_of(harness).dispatch_once(parent.task_ref) is True
+    child_ref, _index = (await asyncio.to_thread(_children_of, harness, parent.task_ref))[0]
+
+    from hecate.execution.task_control import TaskControlService
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        await service.issue_command(
+            workspace_id=WS, task_id=uuid.UUID(parent.task_ref.id), kind=ControlCommandKind.CANCEL, issuer="tester"
+        )
+
+    relay = OutboxRelay(
+        harness["store"].session_factory,
+        PlatformOutboxProjector(harness["store"], harness["session_factory"]),
+        relay_key="workflow-submitted-recovery",
+    )
+    await relay.pump_once()
+    summary = await _sweep(harness, parent.task_ref)
+    assert summary["steps"] == {"0": "kept_submitted"}, summary
+    holds = await _holds(harness, parent.task_ref)
+    assert len(holds) == 1 and not holds[0].released, holds
+
+    # The second pump lands the child's cancel settlement through the
+    # existing callback path; the sweep still refuses to touch the hold.
+    await relay.pump_once()
+    child = await asyncio.to_thread(harness["store"].get_task_state, child_ref)
+    assert child.lifecycle_state.value == "cancelled", child.extra
+    holds = await _holds(harness, parent.task_ref)
+    assert len(holds) == 1 and holds[0].settled and not holds[0].released, holds
+    assert (await _sweep(harness, parent.task_ref))["steps"] == {"0": "kept_submitted"}
+
+
+async def test_stale_executor_cannot_reserve_or_submit_a_closed_step(harness) -> None:
+    """Late interception: after the takeover closed the step, the paused old
+    worker's reservation AND its child submission are refused — no child, no
+    re-opened quota occupation — even though the creation digest would
+    replay cleanly."""
+
+    from hecate_durable.storage.lease import StaleFenceError, task_dispatch_lease_key
+
+    from hecate.execution.task_control import TaskControlService
+
+    agent_id = await _agent_with_tools(harness, "workflow-late-intercept")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    store = harness["store"]
+    lease_key = task_dispatch_lease_key(parent.task_ref.issuer_domain, parent.task_ref.id)
+
+    old = await asyncio.to_thread(store.leases.acquire, lease_key, "old-executor", 0.05)
+    assert old is not None
+    await asyncio.to_thread(
+        store.apply_task_state,
+        parent.task_ref,
+        TaskLifecycleState.RUNNING,
+        extra_update={"dispatch_starts": 1},
+        lease=old,
+    )
+    # The old executor stalls past its lease TTL: the harness lease clock is
+    # the frozen injectable one, so expiry is advanced deterministically.
+    harness["clock"].advance(30)
+    new = await asyncio.to_thread(store.leases.acquire, lease_key, "takeover-owner", 3600.0)
+    assert new is not None and new.fencing_token > old.fencing_token
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=store,
+            recorder=store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        # The stale executor's reservation is refused before any quota moves.
+        with pytest.raises(StaleFenceError):
+            await service.reserve_workflow_step_budget(
+                workspace_id=WS,
+                parent_task_id=uuid.UUID(parent.task_ref.id),
+                step_index=0,
+                units=50000,
+                dispatch_lease=old,
+            )
+        # Its child submission is refused inside the creation transaction.
+        with pytest.raises(StaleFenceError):
+            await WorkflowChildTaskAdapter.submit_step(
+                service,
+                WS,
+                agent_id,
+                parent.task_ref,
+                _controller_step(budget_units=50000),
+                0,
+                dispatch_lease=old,
+            )
+    assert await asyncio.to_thread(_children_of, harness, parent.task_ref) == []
+    assert await _holds(harness, parent.task_ref) == [], "a refused late dispatch leaves no hold"
+
+    # The takeover closes the step; now even a VALID lease cannot re-open
+    # the reservation for it.
+    states = (await asyncio.to_thread(store.get_task_state, parent.task_ref)).extra or {}
+    await asyncio.to_thread(
+        store.update_task_extra,
+        parent.task_ref,
+        {"workflow_step_states": {**states.get("workflow_step_states", {}), "0": "closed_unexecuted"}},
+        expected_revision=(await asyncio.to_thread(store.get_task_state, parent.task_ref)).revision,
+    )
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=store,
+            recorder=store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        with pytest.raises(ValueError, match="closed"):
+            await service.reserve_workflow_step_budget(
+                workspace_id=WS,
+                parent_task_id=uuid.UUID(parent.task_ref.id),
+                step_index=0,
+                units=50000,
+                dispatch_lease=new,
+            )
+    assert await _holds(harness, parent.task_ref) == []
+
+
+async def test_close_to_release_interruption_completes_on_the_next_sweep(harness) -> None:
+    """Acceptance 4a: a crash between the close marker and the hold release
+    is repaired by the next sweep pass, and repeating it is a no-op."""
+
+    agent_id = await _agent_with_tools(harness, "workflow-close-crash")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    await _reserve_step_hold(harness, parent.task_ref, 0, 50000)
+    await _terminate_parent(harness, parent.task_ref)
+
+    store = harness["store"]
+    # The crash left exactly the close marker behind; the release never ran.
+    revision = (await asyncio.to_thread(store.get_task_state, parent.task_ref)).revision
+    await asyncio.to_thread(
+        store.update_task_extra,
+        parent.task_ref,
+        {"workflow_step_states": {"0": "closed_unexecuted"}},
+        expected_revision=revision,
+    )
+
+    summary = await _sweep(harness, parent.task_ref)
+    assert summary["steps"] == {"0": "reclaimed"}, summary
+    holds = await _holds(harness, parent.task_ref)
+    assert len(holds) == 1 and holds[0].released, holds
+
+    assert (await _sweep(harness, parent.task_ref))["steps"] == {"0": "already_reclaimed"}
+    assert len(await _holds(harness, parent.task_ref)) == 1
+
+
+async def test_association_read_failure_keeps_the_hold_for_reconciliation(harness, monkeypatch) -> None:
+    """Acceptance 4b: when the submission association cannot be read, the
+    sweep keeps the quota and leaves an explicit reconciliation state — it
+    never guesses an absence it could not prove."""
+
+    agent_id = await _agent_with_tools(harness, "workflow-read-failure")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    await _reserve_step_hold(harness, parent.task_ref, 0, 50000)
+    await _terminate_parent(harness, parent.task_ref)
+
+    def broken_read(_key: str):
+        raise OSError("injected association read failure")
+
+    monkeypatch.setattr(harness["store"], "submission_for_key", broken_read)
+    summary = await _sweep(harness, parent.task_ref)
+    assert summary["steps"] == {"0": "association_read_failed"}, summary
+    holds = await _holds(harness, parent.task_ref)
+    assert len(holds) == 1 and not holds[0].released, holds
+    state = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    assert (state.extra or {}).get("workflow_step_states") == {"0": "held_for_reconciliation"}, state.extra
+
+    # The reconciliation mark is sticky: a healthy reader does NOT silently
+    # flip it into a reclaim; the hold stays until a human resolves it.
+    summary = await _sweep(harness, parent.task_ref)
+    assert summary["steps"] == {"0": "held_reconciliation"}, summary
+    assert (await _holds(harness, parent.task_ref))[0].released is False
+    from hecate.execution.task_control import TaskControlService
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        detail = await service.get_task_detail(WS, uuid.UUID(parent.task_ref.id))
+    assert detail["workflow_step_states"] == {"0": "held_for_reconciliation"}
+
+
+async def test_reservation_waiting_for_quota_cannot_reopen_a_closed_step(harness, monkeypatch) -> None:
+    from hecate_durable.storage.lease import task_dispatch_lease_key
+
+    from hecate.execution.task_control import TaskControlService
+    from hecate.ops.budget_reservations import QuotaBudgetLedger
+
+    agent_id = await _agent_with_tools(harness, "workflow-pre-reserve-race")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    store = harness["store"]
+    lease = await asyncio.to_thread(
+        store.leases.acquire, task_dispatch_lease_key(parent.task_ref.issuer_domain, parent.task_ref.id), "paused", 3600
+    )
+    await asyncio.to_thread(store.apply_task_state, parent.task_ref, TaskLifecycleState.RUNNING, lease=lease)
+    ready, proceed = asyncio.Event(), asyncio.Event()
+    lock = QuotaBudgetLedger._lock_scope
+
+    async def pause_before_lock(self):
+        if asyncio.current_task().get_name() == "paused-reservation":
+            ready.set()
+            await proceed.wait()
+        await lock(self)
+
+    monkeypatch.setattr(QuotaBudgetLedger, "_lock_scope", pause_before_lock)
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=store,
+            recorder=store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        pending = asyncio.create_task(
+            service.reserve_workflow_step_budget(
+                workspace_id=WS,
+                parent_task_id=uuid.UUID(parent.task_ref.id),
+                step_index=0,
+                units=50000,
+                dispatch_lease=lease,
+            ),
+            name="paused-reservation",
+        )
+        try:
+            await asyncio.wait_for(ready.wait(), 10)
+            await asyncio.to_thread(store.apply_task_state, parent.task_ref, TaskLifecycleState.FAILED, lease=lease)
+            await _sweep(harness, parent.task_ref)
+            proceed.set()
+            result = await asyncio.gather(pending, return_exceptions=True)
+            assert isinstance(result[0], ValueError), result
+        finally:
+            proceed.set()
+            await asyncio.gather(pending, return_exceptions=True)
+    assert not any(not hold.released and not hold.settled for hold in await _holds(harness, parent.task_ref))
+
+
+async def test_concurrent_reconciliation_marker_prevents_reclaim(harness, monkeypatch) -> None:
+    from hecate.execution.task_control import TaskControlService
+
+    agent_id = await _agent_with_tools(harness, "workflow-marker-race")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    await _reserve_step_hold(harness, parent.task_ref, 0, 50000)
+    await _terminate_parent(harness, parent.task_ref)
+    mark = TaskControlService._mark_workflow_step
+
+    async def competing_marker(self, parent_ref, index, value):
+        if value == "closed_unexecuted":
+            await mark(self, parent_ref, index, "held_for_reconciliation")
+        return await mark(self, parent_ref, index, value)
+
+    monkeypatch.setattr(TaskControlService, "_mark_workflow_step", competing_marker)
+    await _sweep(harness, parent.task_ref)
+    assert (await _holds(harness, parent.task_ref))[0].released is False
+    current = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    assert current.extra["workflow_step_states"]["0"] == "held_for_reconciliation"
+
+
+async def test_stale_submit_cleanup_keeps_the_takeover_owners_hold(harness) -> None:
+    from hecate_durable.storage.lease import task_dispatch_lease_key
+
+    from hecate.execution.task_control import TaskControlService
+
+    agent_id = await _agent_with_tools(harness, "workflow-cleanup-takeover")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    store = harness["store"]
+    key = task_dispatch_lease_key(parent.task_ref.issuer_domain, parent.task_ref.id)
+    old = await asyncio.to_thread(store.leases.acquire, key, "old", 10)
+    await asyncio.to_thread(store.apply_task_state, parent.task_ref, TaskLifecycleState.RUNNING, lease=old)
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=store,
+            recorder=store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        await service.reserve_workflow_step_budget(
+            workspace_id=WS,
+            parent_task_id=uuid.UUID(parent.task_ref.id),
+            step_index=0,
+            units=50000,
+            dispatch_lease=old,
+        )
+        harness["clock"].advance(30)
+        new = await asyncio.to_thread(store.leases.acquire, key, "new", 3600)
+        reserved = await service.reserve_workflow_step_budget(
+            workspace_id=WS,
+            parent_task_id=uuid.UUID(parent.task_ref.id),
+            step_index=0,
+            units=50000,
+            dispatch_lease=new,
+        )
+        assert reserved.status.value == "reserved"
+        outcome = await service.release_workflow_step_budget(
+            workspace_id=WS,
+            parent_task_id=uuid.UUID(parent.task_ref.id),
+            step_index=0,
+            dispatch_lease=old,
+        )
+        assert outcome.value == "held_for_reconciliation"
+    holds = await _holds(harness, parent.task_ref)
+    assert len(holds) == 1 and not holds[0].released and not holds[0].settled
+
+
+async def test_failed_marker_write_is_retried_by_the_outbox(harness, monkeypatch) -> None:
+    from hecate.execution.task_control import TaskControlValidationError
+
+    agent_id = await _agent_with_tools(harness, "workflow-marker-retry")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    await _reserve_step_hold(harness, parent.task_ref, 0, 50000)
+    await _terminate_parent(harness, parent.task_ref)
+    writer = harness["store"].update_task_extra
+
+    def failed_write(*args, **kwargs):
+        raise ValueError("injected CAS conflict")
+
+    monkeypatch.setattr(harness["store"], "update_task_extra", failed_write)
+    with pytest.raises(TaskControlValidationError, match="retry recovery"):
+        await _sweep(harness, parent.task_ref)
+    assert not (await _holds(harness, parent.task_ref))[0].released
+    monkeypatch.setattr(harness["store"], "update_task_extra", writer)
+    assert (await _sweep(harness, parent.task_ref))["steps"] == {"0": "reclaimed"}
+
+
+async def test_terminal_projection_retries_when_workspace_attribution_fails(harness, monkeypatch) -> None:
+    from hecate_durable.worker import OutboxRelay
+
+    from hecate.execution.event_relay import PlatformOutboxProjector
+    from hecate.execution.task_control import TaskControlService
+
+    agent_id = await _agent_with_tools(harness, "workflow-attribution-retry")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step(budget_units=50000)])
+    await _reserve_step_hold(harness, parent.task_ref, 0, 50000)
+    await _terminate_parent(harness, parent.task_ref)
+    projector = PlatformOutboxProjector(harness["store"], harness["session_factory"])
+    resolve = projector._resolve_workspace
+
+    async def outage(ref, *, retry_errors=False):
+        if retry_errors:
+            raise OSError("injected attribution outage")
+        return await resolve(ref)
+
+    monkeypatch.setattr(projector, "_resolve_workspace", outage)
+    relay = OutboxRelay(harness["store"].session_factory, projector, relay_key="attribution-retry")
+    await relay.pump_once()
+    assert not (await _holds(harness, parent.task_ref))[0].released
+    monkeypatch.setattr(projector, "_resolve_workspace", resolve)
+    await relay.pump_once()
+    assert (await _holds(harness, parent.task_ref))[0].released
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        detail = await service.get_task_detail(WS, uuid.UUID(parent.task_ref.id))
+    assert detail["workflow_step_states"] == {"0": "closed_unexecuted"}

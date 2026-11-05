@@ -125,6 +125,14 @@ def _expired(expires_at: str | None) -> bool:
     return deadline <= datetime.now(UTC)
 
 
+# Persisted per-step facts on the workflow parent's extra
+# (``workflow_step_states``): the reclaim sweep writes them once the parent
+# can no longer use the step, and the fenced creation/reservation reads them
+# to refuse late dispatch into a closed step.
+_WORKFLOW_STEP_CLOSED = "closed_unexecuted"
+_WORKFLOW_STEP_HELD = "held_for_reconciliation"
+
+
 def _same_command_request(existing: ControlCommandRecord, candidate: ControlCommandRecord) -> bool:
     """One command identity, one intent.
 
@@ -297,8 +305,24 @@ class TaskControlService:
         stream: bool = False,
         _verified_agent_child: bool = False,
         _verified_workflow_step: bool = False,
+        dispatch_lease: Any = None,
+        dispatch_parent_ref: BackendRef | None = None,
+        dispatch_step_index: int | None = None,
     ) -> SubmitResult:
-        """Idempotently submit one task; the durable worker dispatches it."""
+        """Idempotently submit one task; the durable worker dispatches it.
+
+        ``dispatch_lease`` / ``dispatch_parent_ref`` / ``dispatch_step_index``
+        are the host adapter's fence (workflow steps only): the child's
+        creation commits only inside the parent's still-valid dispatch lease
+        and while the step is open. Idempotent replays of an already-committed
+        submission stay available regardless of the fence.
+        """
+        if (dispatch_lease is None) != (dispatch_parent_ref is None) or (dispatch_parent_ref is None) != (
+            dispatch_step_index is None
+        ):
+            raise TaskControlValidationError("dispatch fencing needs lease, parent ref and step index together")
+        if dispatch_lease is not None and not _verified_workflow_step:
+            raise TaskControlValidationError("dispatch fencing is reserved for the host workflow adapter")
         if not goal or not goal.strip():
             raise TaskControlValidationError("goal must be a non-empty string")
         messages = input.get("messages")
@@ -526,6 +550,15 @@ class TaskControlService:
                 task_ref=t_ref,
                 run_ref=BackendRef(RefKind.RUN, PLATFORM_ISSUER, str(minted_run)),
                 input_payload=persisted_input,
+                **(
+                    {
+                        "dispatch_lease": dispatch_lease,
+                        "dispatch_parent_ref": dispatch_parent_ref,
+                        "dispatch_step_index": dispatch_step_index,
+                    }
+                    if dispatch_lease is not None
+                    else {}
+                ),
             )
         except IdempotencyConflictError as exc:
             raise SubmissionConflictError(
@@ -720,6 +753,13 @@ class TaskControlService:
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "runs": [self._run_summary(run) for run in runs],
         }
+        step_states = (record.extra or {}).get("workflow_step_states") if record else None
+        if isinstance(step_states, dict):
+            detail["workflow_step_states"] = {
+                key: value
+                for key, value in step_states.items()
+                if isinstance(key, str) and key.isdecimal() and value in (_WORKFLOW_STEP_CLOSED, _WORKFLOW_STEP_HELD)
+            }
         wait = (record.extra or {}).get("wait") if record else None
         if wait:
             detail["wait"] = wait
@@ -1700,15 +1740,48 @@ class TaskControlService:
         return outcome.status is not SettleStatus.IDEMPOTENT_CONFIRMED
 
     async def reserve_workflow_step_budget(
-        self, *, workspace_id: uuid.UUID, parent_task_id: uuid.UUID, step_index: int, units: int
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        parent_task_id: uuid.UUID,
+        step_index: int,
+        units: int,
+        dispatch_lease: Any = None,
     ) -> Any:
         """Hold one workflow step's declared slice on the workspace quota.
 
         Called before the step child is submitted, so a refused call leaves
         no child and no hold. Same workspace ledger, same token scale as the
         Agent child path — never a parallel budget authority.
+
+        ``dispatch_lease`` checks the creation fence while holding the
+        quota scope lock: a stale executor whose dispatch lease was taken over, or a
+        step the reclaim sweep already closed, is refused BEFORE it can
+        re-occupy quota. ``StaleFenceError`` propagates (the executor is
+        fenced; the current owner drives on); a closed step raises
+        ``ValueError`` for the caller's refusal mapping.
         """
 
+        if type(step_index) is not int or step_index < 0:
+            raise ValueError("workflow step index must be a non-negative integer")
+
+        async def check_dispatch() -> None:
+            parent_ref = task_ref_of(parent_task_id)
+            if dispatch_lease is not None:
+                guard = getattr(self._store, "assert_workflow_step_dispatchable", None)
+                if guard is None:
+                    raise ValueError("workflow step dispatch fencing requires the platform SQL durable store")
+                await asyncio.to_thread(guard, parent_ref, step_index, dispatch_lease)
+            else:
+                parent = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+                if (
+                    parent is None
+                    or parent.lifecycle_state
+                    in {TaskLifecycleState.FAILED, TaskLifecycleState.SUCCEEDED, TaskLifecycleState.CANCELLED}
+                    or str(step_index) in ((parent.extra or {}).get("workflow_step_states") or {})
+                ):
+                    raise ValueError("workflow step is closed or its parent is terminal")
+
         from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
 
         ledger = QuotaBudgetLedger(
@@ -1717,16 +1790,29 @@ class TaskControlService:
             session_factory=self._session_factory,
             unit_scale=MODEL_TOKEN_UNIT_SCALE,
         )
-        outcome = await ledger.reserve(f"workflow-step:{parent_task_id}:{step_index}", units)
-        if self._session_factory is None:
-            await self._db.commit()
-        return outcome
+        try:
+            outcome = await ledger.reserve(f"workflow-step:{parent_task_id}:{step_index}", units, guard=check_dispatch)
+            if self._session_factory is None:
+                await self._db.commit()
+            return outcome
+        except BaseException:
+            if self._session_factory is None:
+                await self._db.rollback()
+            raise
 
     async def release_workflow_step_budget(
-        self, *, workspace_id: uuid.UUID, parent_task_id: uuid.UUID, step_index: int
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        parent_task_id: uuid.UUID,
+        step_index: int,
+        dispatch_lease: Any = None,
     ) -> Any:
-        """Release a proven-unexecuted step hold (unknown holds stay held)."""
+        """Release an unsubmitted hold while the failed dispatcher still owns it."""
+        from hecate_durable.storage.lease import StaleFenceError
+        from hecate_governance.usage import ReleaseStatus
 
+        from hecate.execution.workflow_child import WorkflowChildTaskAdapter
         from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
 
         ledger = QuotaBudgetLedger(
@@ -1735,10 +1821,204 @@ class TaskControlService:
             session_factory=self._session_factory,
             unit_scale=MODEL_TOKEN_UNIT_SCALE,
         )
-        outcome = await ledger.release(f"workflow-step:{parent_task_id}:{step_index}")
-        if self._session_factory is None:
-            await self._db.commit()
-        return outcome
+        key = f"workflow-step:{parent_task_id}:{step_index}"
+        async with ledger.locked_scope() as transaction:
+            state = await transaction.reservation_state(key)
+            if state is None or state["released"] or state["settled"]:
+                return ReleaseStatus.NO_RESERVATION
+            if dispatch_lease is not None:
+                parent_ref = task_ref_of(parent_task_id)
+                try:
+                    await asyncio.to_thread(
+                        self._store.assert_workflow_step_dispatchable, parent_ref, step_index, dispatch_lease
+                    )
+                except (StaleFenceError, ValueError):
+                    return ReleaseStatus.HELD_FOR_RECONCILIATION
+                association = await asyncio.to_thread(
+                    self._store.submission_for_key, WorkflowChildTaskAdapter.submission_key(parent_ref, step_index)
+                )
+                if association is not None:
+                    return ReleaseStatus.HELD_FOR_RECONCILIATION
+            return await transaction.release(key)
+
+    async def reclaim_workflow_step_reservations(
+        self, *, workspace_id: uuid.UUID, parent_task_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """Close and reclaim the step holds a terminal workflow parent can no
+        longer use.
+
+        The recovery half of the reservation contract: a hold taken before
+        the child exists can outlive its use when the parent converges
+        (deadline reached, cancelled, failed) before resubmission, or when a
+        dispatcher dies between the reserve and the child creation. For every
+        declared controller slice the sweep classifies the durable facts and
+        acts on provable ones only:
+
+        - an already-closed step just finishes its release (idempotent — the
+          interrupted close→release gap re-converges here, and repeating the
+          sweep is a no-op);
+        - a submitted child keeps its hold for settlement — the association
+          is verified against the child's persisted parent stamp before the
+          hold is trusted to anyone;
+        - an unsubmitted step is closed first (``workflow_step_states`` on
+          the parent extra), THEN released — the reverse order can mint a
+          second hold through a late reservation replay, the close cannot;
+        - an association read failure or a stamp/fact mismatch keeps the
+          quota and marks the step ``held_for_reconciliation`` — never a
+          silent reclaim of money the platform cannot account for.
+
+        The relay re-runs this sweep on the parent's terminal ``task_state``
+        events, so a crash mid-sweep is retried durably until the facts
+        converge. Non-workflow parents and non-terminal parents return
+        without touching anything.
+        """
+
+        from hecate.execution.workflow_child import WorkflowChildTaskAdapter
+
+        parent_ref = task_ref_of(parent_task_id)
+        parent = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+        if parent is None:
+            return {"status": "absent"}
+        if parent.lifecycle_state not in {
+            TaskLifecycleState.SUCCEEDED,
+            TaskLifecycleState.FAILED,
+            TaskLifecycleState.CANCELLED,
+        }:
+            return {"status": "not_terminal", "parent_state": parent.lifecycle_state.value}
+        payload = await asyncio.to_thread(self._store.get_task_input, parent_ref) or {}
+        raw = payload.get("workflow")
+        if raw is None:
+            return {"status": "not_workflow"}
+        try:
+            plan = WorkflowChildTaskAdapter.plan(
+                {"workflow": raw} if isinstance(raw, dict) else {"workflow": {"steps": []}}
+            )
+        except ValueError:
+            plan = None
+        if plan is None:
+            return {"status": "not_workflow"}
+        if payload.get("workspace_id") not in (None, str(workspace_id)):
+            return {"status": "workspace_mismatch"}
+        lookup = getattr(self._store, "submission_for_key", None)
+        states = dict((parent.extra or {}).get("workflow_step_states") or {})
+        steps: dict[str, str] = {}
+        for index, step in enumerate(plan.steps):
+            budget = step.get("budget_units")
+            if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
+                continue
+            key = f"workflow-step:{parent_task_id}:{index}"
+            steps[str(index)] = await self._reclaim_one_step(
+                workspace_id,
+                parent_ref,
+                index,
+                key,
+                states,
+                submission_for_key=lookup,
+            )
+        return {"status": "swept", "parent_state": parent.lifecycle_state.value, "steps": steps}
+
+    async def _reclaim_one_step(
+        self,
+        workspace_id: uuid.UUID,
+        parent_ref: BackendRef,
+        index: int,
+        key: str,
+        states: dict[str, str],
+        *,
+        submission_for_key: Any,
+    ) -> str:
+        from hecate.execution.workflow_child import WorkflowChildTaskAdapter
+        from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE, QuotaBudgetLedger
+
+        ledger = QuotaBudgetLedger(
+            self._db,
+            workspace_id=workspace_id,
+            session_factory=self._session_factory,
+            unit_scale=MODEL_TOKEN_UNIT_SCALE,
+        )
+        marker = states.get(str(index))
+        if marker == _WORKFLOW_STEP_HELD:
+            return "held_reconciliation"
+        if marker == _WORKFLOW_STEP_CLOSED:
+            return await self._release_closed_step(ledger, key)
+        if submission_for_key is None:
+            # Without the association surface no absence is provable; the
+            # hold stays and the state is observable instead of guessed.
+            await self._mark_workflow_step(parent_ref, index, _WORKFLOW_STEP_HELD)
+            return "held_reconciliation"
+        try:
+            submission_key = WorkflowChildTaskAdapter.submission_key(parent_ref, index)
+            association = await asyncio.to_thread(submission_for_key, submission_key)
+        except Exception:  # noqa: BLE001 — the association surface itself failed
+            await self._mark_workflow_step(parent_ref, index, _WORKFLOW_STEP_HELD)
+            return "association_read_failed"
+        if association is not None:
+            consistent = await self._step_child_binding_consistent(association, parent_ref, index, workspace_id)
+            if consistent:
+                return "kept_submitted"
+            await self._mark_workflow_step(parent_ref, index, _WORKFLOW_STEP_HELD)
+            return "held_reconciliation"
+        marker = await self._mark_workflow_step(parent_ref, index, _WORKFLOW_STEP_CLOSED)
+        if marker != _WORKFLOW_STEP_CLOSED:
+            return "held_reconciliation"
+        return await self._release_closed_step(ledger, key)
+
+    async def _release_closed_step(self, ledger: Any, key: str) -> str:
+        from hecate_governance.usage import ReleaseStatus
+
+        # A reservation may have passed its preflight before the close marker.
+        # Wait for its quota transaction before deciding that no hold exists.
+        async with ledger.locked_scope() as transaction:
+            state = await transaction.reservation_state(key)
+            if state is None or state.get("settled"):
+                return "settled"
+            if state.get("released"):
+                return "already_reclaimed"
+            if state.get("unknown_hold"):
+                return "held_unknown"
+            outcome = await transaction.release(key)
+            if outcome is ReleaseStatus.RELEASED:
+                return "reclaimed"
+            if outcome in (ReleaseStatus.NO_RESERVATION, ReleaseStatus.ALREADY_SETTLED):
+                return "already_reclaimed"
+            return "held_unknown"
+
+    async def _mark_workflow_step(self, parent_ref: BackendRef, index: int, value: str) -> str:
+        writer = getattr(self._store, "update_task_extra", None)
+        if writer is None:
+            raise TaskControlValidationError("workflow step marker cannot be persisted")
+        for _ in range(3):
+            current = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+            if current is None:
+                raise TaskControlValidationError("workflow step marker cannot be persisted")
+            states = dict((current.extra or {}).get("workflow_step_states") or {})
+            if states.get(str(index)):
+                return str(states[str(index)])
+            states[str(index)] = value
+            try:
+                await asyncio.to_thread(
+                    writer, parent_ref, {"workflow_step_states": states}, expected_revision=current.revision
+                )
+                return value
+            except (InvalidTaskTransitionError, ValueError):
+                continue  # raced another marker writer; re-read and merge again
+        raise TaskControlValidationError("workflow step marker did not converge; retry recovery")
+
+    async def _step_child_binding_consistent(
+        self, association: Any, parent_ref: BackendRef, index: int, workspace_id: uuid.UUID
+    ) -> bool:
+        payload = await asyncio.to_thread(self._store.get_task_input, association.task_ref) or {}
+        stamp = payload.get("workflow_parent")
+        if not isinstance(stamp, dict):
+            return False
+        raw_ref = stamp.get("task_ref")
+        return (
+            raw_ref == parent_ref.to_dict()
+            and type(stamp.get("step_index")) is int
+            and stamp["step_index"] == index
+            and payload.get("workflow_controller_step") is True
+            and payload.get("workspace_id") == str(workspace_id)
+        )
 
     async def settle_workflow_step_budget(
         self, *, workspace_id: uuid.UUID, child_task_id: uuid.UUID
