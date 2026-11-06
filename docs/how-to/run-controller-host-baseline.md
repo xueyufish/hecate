@@ -48,6 +48,33 @@ python -m tests.scenarios.baseline.run_controller_host_baseline
 - `_meta.collection` — three separated statements: what the collector completed, whether real-model collection happened (and its per-case quality fields when it did), and what the deterministic-injection runs cover.
 - `runs[]` — one entry per host and case: Task/Run identities, per-round model inputs and choices, tool receipts, stable ledger action keys and argument digests, approval decisions, the host's stop classification, rebuild facts, usage, and the shared rubric's verdicts. Inspect each run's source when reading a mixed real/deterministic record.
 
+## Repeated trials: the experiment layer
+
+One single-shot record is one sample. `tests/scenarios/baseline/run_controller_host_experiment.py` wraps the collector in a **versioned experiment definition** that pins — behind a content digest — the scenario identity (data, prompts, tools, output schema, expected stops), the host and case matrix, the model configuration, the repetition count, the resource caps, the scoring rubric version, and the pre-declared per-case criteria and security rules. Every run of a definition produces an aggregate record plus one immutable trial record per repetition.
+
+```bash
+# deterministic-injection repetition matrix (no network), built-in definition
+python -m tests.scenarios.baseline.run_controller_host_experiment
+# real-model repetition: pin the model in a definition file, then
+python -m tests.scenarios.baseline.run_controller_host_experiment --definition my-experiment.json
+# inspect the pinned fields before running
+python -m tests.scenarios.baseline.run_controller_host_experiment --print-default-definition
+```
+
+Properties that make the records comparable and auditable:
+
+- **Isolation** — every trial gets its own identity (`trial_id`) and state directory and calls the single-shot collector, so no Task/Run identity, model-call counter or business side-effect state carries across trials. Trial work dirs live under `--state-root` and are transient; the trial records land beside the aggregate in `tests/scenarios/baselines/`.
+- **Denominators and failures** — the aggregate keeps explicit denominators (repetitions requested, trials recorded/skipped/failed), per-host-and-case completion rates against those denominators, latency distributions, and a failure ledger. Per-source pass rates use the scheduled repetitions for that source, including missing or failed samples; if none can be evaluated, the rate stays unknown. Skipped real-mode trials, collection errors, criterion failures and trial-level infrastructure losses are all recorded separately. Available latency and reported usage from failed attempts remain in the summaries.
+- **Source grouping** — real-model and deterministic-injection evidence are counted in separate `by_source` blocks and separate pass rates; deterministic injection is labeled harness evidence, never model quality.
+- **Security apart from quality** — the pre-declared security rules (side-effect ceiling per case, zero writes on stop cases) are evaluated per recorded run into their own `security` block, including expected and missing check counts. A known failure makes `all_passed` false; missing evidence leaves it unknown until every scheduled check passes. No quality average can offset a security failure.
+- **Unknown stays unknown** — token totals are summed only over runs whose usage the provider reported; cost has no billing source and stays `unknown`; manual review effort (count, duration) is `null` until someone records it. Nothing is zero-filled.
+- **Review records** — manual review is written as a separate immutable file bound to the aggregate's exact file digest (`write_review_record` / `load_review_records` / `review_summary`); reviews never mutate the reviewed record.
+- **Comparison groups** — the definition digest is the group identity (`compare_records`). Comparisons verify that each digest matches its embedded definition. Any criteria or input change re-keys the digest, and cross-digest comparisons return `comparable: false` instead of silent deltas. Collection rejects a stale scenario/scoring digest, missing case criteria or an unpinned real model before calling a provider. Historical single-run records are retained unchanged and are not experiment records.
+
+New reports use `controller-host-experiment-2` to distinguish the corrected denominators, security coverage and scoring identity from historical experiment reports. Existing records remain unchanged. Trial files, including trial-level failure records, use exclusive creation and byte-level digests; reviews bind the aggregate's exact bytes, including its line endings.
+
+Real-model repeated trials inherit the single-shot real-mode gate (`HECATE_RUN_CONTROLLER_HOST_BASELINE=1`) and matching provider credential checks; missing either produces explicit skipped trials. Authorized business samples and a cost budget must be agreed before manually enabling real collection; the collector does not verify those approvals. The current task remains a synthetic inventory fixture even when a real model executes it, so that run cannot certify real business work.
+
 ## What a record does not certify
 
 - `gate` stays `false` and `business_value` stays `unverified` on every record; nothing here is a production or release certificate.
@@ -58,4 +85,4 @@ python -m tests.scenarios.baseline.run_controller_host_baseline
 
 ## Verification pointers
 
-Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).
+Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).
