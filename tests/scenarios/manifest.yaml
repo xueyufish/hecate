@@ -405,3 +405,16 @@ recorded_tracks:
       collection requires HECATE_RUN_CONTROLLER_HOST_BASELINE=1 with provider
       credentials and is not certified by that record
     ci_gate: false
+  - id: controller_host_experiment
+    tier: 2
+    runner: tests/scenarios/baseline/run_controller_host_experiment.py
+    record: tests/scenarios/baselines/controller_host_experiment_controller-host-repeat-baseline-20261105T145548465374Z-7c4643.json
+    status: skipped
+    reason: >-
+      committed record is the deterministic-injection repetition aggregate
+      (definition controller-host-repeat-baseline, trials with independent
+      identities and state dirs; harness evidence only); real-model repeated
+      trials additionally require a definition that pins the model plus the
+      HECATE_RUN_CONTROLLER_HOST_BASELINE gate, provider credentials,
+      authorized samples and a cost budget, none of which are provisioned
+    ci_gate: false
