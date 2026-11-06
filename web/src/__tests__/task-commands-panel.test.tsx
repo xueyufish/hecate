@@ -314,3 +314,47 @@ it("returns from a failed later page without requiring a successful retry", asyn
   expect(apiMock.get).toHaveBeenLastCalledWith(url("task-1", 0));
   expect(screen.queryByTestId("task-commands-error")).not.toBeInTheDocument();
 });
+
+
+describe("TaskCommandsPanel live-supplement delivery", () => {
+  it("renders delivery lifecycle facts in the expanded detail row", async () => {
+    apiMock.get.mockResolvedValueOnce(page([
+      command({
+        command_id: "live-1",
+        kind: "provide_input",
+        state: "applied",
+        delivery: {
+          source_ref: "live-1",
+          revision_id: "revision-1",
+          run_ref: { kind: "run", issuer_domain: "hecate", id: "run-1" },
+          status: "consumed",
+          effective_turn: 3,
+          consumed_by: { decision_step_id: "agent-turn-000003", turn: 3 },
+        },
+      }),
+      command({
+        command_id: "live-2",
+        kind: "provide_input",
+        state: "applied",
+        delivery: {
+          source_ref: "live-2",
+          revision_id: "revision-2",
+          run_ref: { kind: "run", issuer_domain: "hecate", id: "run-1" },
+          status: "not_applied",
+          settled_reason: "task_cancelled",
+        },
+      }),
+    ]));
+    render(<TaskCommandsPanel taskId="task-1" />);
+    await screen.findByTestId("task-commands-table");
+    const rows = screen.getAllByTestId("task-command-expand");
+    expect(screen.getAllByTestId("task-command-state").map((cell) => cell.textContent)).toEqual(["已消费", "未应用"]);
+    await userEvent.click(rows[0]);
+    expect(screen.getByTestId("task-command-delivery")).toHaveTextContent("已消费");
+    expect(screen.getByTestId("task-command-delivery")).toHaveTextContent("生效边界 turn 3");
+    expect(screen.getByTestId("task-command-delivery")).toHaveTextContent("agent-turn-000003");
+    await userEvent.click(rows[1]);
+    expect(screen.getByTestId("task-command-delivery")).toHaveTextContent("未应用");
+    expect(screen.getByTestId("task-command-delivery")).toHaveTextContent("task_cancelled");
+  });
+});

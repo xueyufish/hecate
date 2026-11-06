@@ -73,6 +73,14 @@ PLATFORM_ISSUER = "hecate"
 _RUN_TERMINAL_EVENT = "run_terminal"
 _RUN_PROJECTION_TERMINAL = {"succeeded", "failed", "cancelled"}
 
+# Between-turns park reason the platform host injects through the loop's
+# ``boundary_check``: a live supplement was received but not yet bound. The
+# host binds it at that exact not-yet-started decision boundary and re-enters
+# the loop; the in-flight call and accepted decisions keep their original
+# facts.
+LIVE_INPUT_STOP_REASON = "input_revision_pending"
+_LIVE_INPUT_READ_FAILED = "input_revision_read_failed"
+
 
 def _definition_digest(snapshot: dict[str, Any], effective_tools: list[dict[str, Any]], model_name: str) -> str:
     """Freeze the resolved execution definition of one dispatch (step6d).
@@ -1960,6 +1968,19 @@ class PlatformTaskDispatcher:
                 ),
                 *context.messages,
             ]
+
+        async def live_input_boundary() -> str | None:
+            try:
+                pending = await asyncio.to_thread(
+                    self._store.count_pending_live_input_revisions,
+                    task_ref,
+                    BackendRef(RefKind.RUN, controller_run.issuer_domain, controller_run.run_id),
+                )
+            except Exception as exc:
+                logger.warning("task %s live-input boundary read failed (%s)", task_ref.id, type(exc).__name__)
+                return _LIVE_INPUT_READ_FAILED
+            return LIVE_INPUT_STOP_REASON if pending else None
+
         spec = ControllerRunSpec(
             run_ref=controller_run,
             base_messages=messages,
@@ -2006,6 +2027,11 @@ class PlatformTaskDispatcher:
                     )
                 )
             ),
+            boundary_check=live_input_boundary
+            if context.workflow_parent is None
+            and context.agent_child_parent is None
+            and hasattr(self._store, "count_pending_live_input_revisions")
+            else None,
             continuation_policy=continuation_policy,
         )
         # Persisted trigger facts are the durable authority for the
@@ -2226,6 +2252,53 @@ class PlatformTaskDispatcher:
                     return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
                 spec = replace(spec, continuations=(*spec.continuations, advanced))
                 continue
+            if outcome.reason == _LIVE_INPUT_READ_FAILED:
+                return {
+                    "status": "awaiting_reconciliation",
+                    "content": "",
+                    "error": "live input queue is unreadable; manual reconciliation required",
+                    "error_category": "input_history_unavailable",
+                }
+            if outcome.reason == LIVE_INPUT_STOP_REASON:
+                # The loop parked before a not-yet-started model call with
+                # received live supplements: bind them at this boundary
+                # (durable, leased, no in-flight call) and re-enter — the
+                # rebuilt replay consumes them at the recorded boundary.
+                try:
+                    bound = await self._bind_pending_input_revisions(task_ref, controller_run, lease)
+                except Exception as exc:
+                    logger.warning("task %s live-input binding failed (%s)", task_ref.id, type(exc).__name__)
+                    return {
+                        "status": "awaiting_reconciliation",
+                        "content": "",
+                        "error": "live input binding could not be verified; manual reconciliation required",
+                        "error_category": "input_history_unavailable",
+                    }
+                if not bound:
+                    # Either the task moved off RUNNING (cancel won the
+                    # race) or the durable facts disagree with the boundary
+                    # gate; both classify deterministically instead of
+                    # livelocking empty passes.
+                    current = self._store.get_task_state(task_ref)
+                    if current is None or current.lifecycle_state is not TaskLifecycleState.RUNNING:
+                        return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
+                    return {
+                        **last_delivery,
+                        "status": "failed",
+                        "content": last_delivery.get("content", ""),
+                        "error": "controller loop parked for live input but no pending revision bound",
+                        "error_category": "input_revision_bind_empty",
+                    }
+                revisions, revisions_error = await self._controller_input_revisions(context, task_ref, controller_run)
+                if revisions_error is not None:
+                    return {
+                        "status": "awaiting_reconciliation",
+                        "content": "",
+                        "error": revisions_error,
+                        "error_category": "input_history_unavailable",
+                    }
+                spec = replace(spec, input_revisions=revisions)
+                continue
             if outcome.reason == "cancel_requested":
                 return {"status": "cancelled", "content": "", "error": "controller loop cancelled"}
             return {
@@ -2341,6 +2414,28 @@ class PlatformTaskDispatcher:
                 live_revision["value"] = state.revision
             stored = (state.extra or {}).get("continuation") or {}
             return ControllerContinuation.from_record(stored["attempts"][-1])
+
+    async def _bind_pending_input_revisions(
+        self, task_ref: BackendRef, controller_run: Any, lease: Any
+    ) -> list[dict[str, Any]]:
+        """Bind received live supplements at the parked decision boundary.
+
+        The caller re-enters the loop only when this returns non-empty; the
+        store's boundary derivation (committed decision count + 1 under the
+        task row lock and the dispatch lease) is valid exactly because the
+        loop is parked and no model call is in flight.
+        """
+
+        if not hasattr(self._store, "bind_pending_input_revisions"):
+            return []
+        if lease is None:
+            raise ValueError("live input binding requires a dispatch lease")
+        return await asyncio.to_thread(
+            self._store.bind_pending_input_revisions,
+            task_ref,
+            BackendRef(RefKind.RUN, controller_run.issuer_domain, controller_run.run_id),
+            lease=lease,
+        )
 
     async def _controller_input_revisions(
         self, context: _DispatchContext, task_ref: BackendRef, controller_run: Any

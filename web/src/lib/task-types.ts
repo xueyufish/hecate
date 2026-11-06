@@ -174,6 +174,17 @@ export interface TaskDetail {
   agent_child_parent?: AgentChildParentStamp;
   /** Parent side of delegation; absent = no recorded delegation surface. */
   agent_children?: AgentChildrenSummary;
+  /** Server-owned live-supplement composer capability; absent = the task
+   * carries no live-input surface at all (non-controller or legacy). */
+  live_input?: TaskLiveInputCapability;
+}
+
+/** Server-owned capability for the running-task supplement composer. The
+ * page never derives write permission locally: unsupported shapes state
+ * their own explicit reason. */
+export interface TaskLiveInputCapability {
+  supported: boolean;
+  reason: string | null;
 }
 
 export interface RunActionItem {

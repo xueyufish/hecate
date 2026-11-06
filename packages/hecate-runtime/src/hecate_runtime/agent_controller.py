@@ -35,7 +35,7 @@ import copy
 import hashlib
 import json
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -473,6 +473,18 @@ class ControllerRunSpec:
     # cancel/deadline classification. Example: a durable input wait parked
     # mid-turn must stop the turn's remaining actions claim-free.
     stop_check: Callable[[], str | None] | None = None
+    # Host-injected between-turns gate, consulted only after a turn fully
+    # committed (its accepted actions dispatched) and before the next
+    # turn's model call — never between one turn's actions, and never as
+    # part of ``stop_check``. A non-None reason parks the loop with a
+    # stopped outcome carrying that reason; the host resolves the
+    # condition durably and re-enters with a rebuilt spec, so the next
+    # decision starts with the resolved state (e.g. newly bound input
+    # revisions). Unlike ``stop_check`` this can never skip a committed
+    # decision's remaining actions, which is exactly the guarantee a
+    # running-task input supplement needs: the in-flight call keeps its
+    # original inputs, the next not-yet-started call sees the new ones.
+    boundary_check: Callable[[], Awaitable[str | None]] | None = None
     # Explicitly declared no-progress policy (see :class:`NoProgressPolicy`).
     # Every decision pins its version and digest; absent pins nothing, so
     # chains committed before the declaration replay byte-for-byte.
@@ -797,6 +809,16 @@ class AgentController:
             if turn_index > spec.limits.max_turns:
                 yield self._terminal(_STOPPED, committed, turn_index - 1, reason="turn_limit")
                 return
+            # The between-turns gate runs after the stop gates and before
+            # this turn's revisions drain or its model call starts: a park
+            # here hands control back to the host at an exact
+            # not-yet-started decision boundary, with no in-flight call and
+            # no undispatched accepted action.
+            if spec.boundary_check is not None:
+                boundary_reason = await spec.boundary_check()
+                if boundary_reason is not None:
+                    yield self._terminal(_STOPPED, committed, turn_index - 1, reason=boundary_reason)
+                    return
             # Revisions enter at their causal boundary: after the turns that
             # committed before acceptance, before this turn's ask. A later
             # input can never move before an earlier turn's projection.

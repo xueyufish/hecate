@@ -415,6 +415,23 @@ async def test_managed_command_is_delivered_and_receipt_is_durable(platform, hos
             )
         )
 
+        # A poll can race the platform's rejection of a live-input request.
+        # Even a still-requested command must not cross the host boundary.
+        live_command_id = str(uuid.uuid4())
+        platform_recorder.record(
+            ControlCommandRecord(
+                command_id=live_command_id,
+                kind=ControlCommandKind.PROVIDE_INPUT,
+                issuer="operator",
+                task_ref=platform_task_ref,
+                run_ref=platform_run_ref,
+                issued_at=datetime.now(UTC).isoformat(),
+                state=CommandState.REQUESTED,
+                payload={"schema_version": 1, "content": {"region": "EU"}},
+                payload_schema_ref="urn:hecate:task-live-input/1",
+                extra={"workspace_id": str(WS)},
+            )
+        )
         received: list[str] = []
 
         async def reject_command(item: dict) -> dict:
@@ -448,6 +465,7 @@ async def test_managed_command_is_delivered_and_receipt_is_durable(platform, hos
         await channel.pull_once()
 
         assert received == [command_id]
+        assert host_store.get(live_command_id) is None
         local_command = host_store.get(command_id)
         assert local_command is not None and local_command.state is CommandState.REJECTED
         assert platform_recorder.get(command_id).state is CommandState.REJECTED

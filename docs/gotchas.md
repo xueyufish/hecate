@@ -546,3 +546,30 @@ of the task's own deadline.
   `HECATE_STEP6_POSTGRES_URL` — skips, not
   passes, without it; `test_workflow_controller_steps.py` holds the
   SQLite contract tier.
+
+
+## Durable input revisions & live supplements
+
+- **A nullable column with a scalar default silently rewrites explicit
+  NULLs** — `mapped_column(Integer, default=1)` turns an intentionally
+  `None` attribute into `1` at INSERT (SQLAlchemy omits NULL attributes
+  from the INSERT statement, so the default fires). A "pending" row that
+  must persist unbound needs a defaultless column and writers that always
+  pass an explicit value when bound.
+    `tests/test_input_revisions.py::test_live_input_receipt_persists_pending_revision_while_running`
+  pins the NULL path; the wake path pins the bound path.
+- **Live-supplement lifecycle facts have exactly one authoritative writer
+  each** — the command service persists the receipt (`received`, under the
+  task row lock + revision CAS), only the lease-holding host binds
+  (`effective_turn` = committed decision count + 1, valid because the
+  kernel's `boundary_check` gate parks the loop before the next model
+  call), and consumption is derived from the accepted decision's pinned
+  `input_refs["inputs"]` (never recomputed). Terminal settlement rides the
+  same transaction as the terminal state in `apply_task_state`, so an
+  unconsumed requirement can neither vanish nor outlive the task.
+- **Kernel RunRef is not a durable BackendRef** — `RunRef` carries
+  `run_id`; `BackendRef` carries `id`. Handing a kernel `RunRef` to a
+  store method makes the boundary read fail and stops the task for
+  reconciliation. Convert at the call
+  site (`BackendRef(RefKind.RUN, ...)`), the way `_bind_pending_input_revisions`
+  and `_controller_input_revisions` do.

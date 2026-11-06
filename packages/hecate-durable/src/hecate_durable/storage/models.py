@@ -346,6 +346,13 @@ class InputRevisionRow(Base):
     then the inputs accepted at that point, then later decisions. Unique
     per (task, source command) for idempotent wake replays; the content
     digest detects corruption on read instead of guessing history.
+
+    Live supplements (``source == live_input``) persist in two phases:
+    ``effective_turn`` stays NULL from receipt until the lease-holding host
+    binds them at the next not-yet-started decision boundary, and
+    ``settled_reason`` records the explicit not-applied settlement when the
+    task reached a terminal state before consumption. Wake revisions are
+    written bound and never settle.
     """
 
     __tablename__ = "durable_input_revision"
@@ -363,5 +370,9 @@ class InputRevisionRow(Base):
     content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     content_sha256: Mapped[str] = mapped_column(String(128))
     wait_token: Mapped[str | None] = mapped_column(String(256))
-    effective_turn: Mapped[int] = mapped_column(Integer, default=1)
+    # No column default on purpose: an explicitly None value must persist as
+    # NULL (a pending live supplement), and every bound writer passes its
+    # int boundary explicitly.
+    effective_turn: Mapped[int | None] = mapped_column(Integer)
+    settled_reason: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[str] = mapped_column(String(64))

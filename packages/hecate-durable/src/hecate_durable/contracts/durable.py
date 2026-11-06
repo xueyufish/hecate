@@ -161,6 +161,14 @@ TERMINAL_COMMAND_STATES: frozenset[CommandState] = frozenset(
     }
 )
 
+# Input-revision source for live supplements submitted while a platform-local
+# controller_loop task is RUNNING (urn:hecate:task-live-input/1 payloads).
+# Unlike wake revisions these are persisted unbound (``effective_turn`` NULL)
+# and bind at the next not-yet-started decision boundary; the store's
+# terminal settlement and delivery queries are scoped to this source so the
+# waiting_input wake vocabulary is untouched.
+LIVE_INPUT_REVISION_SOURCE = "live_input"
+
 
 class InvalidCommandTransitionError(ValueError):
     """Raised when a command receipt transition violates the contract."""

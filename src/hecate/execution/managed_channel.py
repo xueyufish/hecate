@@ -420,7 +420,11 @@ class ManagedDeliveryService:
 
     async def command_for_host(self, host: HostContext, command: Any) -> dict[str, Any] | None:
         """Translate one platform command into the accepted host-local references."""
+        from hecate.execution.task_input import TASK_LIVE_INPUT_SCHEMA_REF
 
+        # A poll may see a command before the local service rejects it.
+        if command.payload_schema_ref == TASK_LIVE_INPUT_SCHEMA_REF:
+            return None
         delivery = await self.get_by_task_ref(
             host.workspace_id,
             command.task_ref.to_dict(),

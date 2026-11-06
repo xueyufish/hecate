@@ -13,8 +13,8 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  commandKindLabel, commandStateLabel, TASK_COMMANDS_PAGE_SIZE,
-  taskCommandsApi, type CommandBackendRef, type TaskCommandItem, type TaskCommandsPage,
+  commandKindLabel, commandStateLabel, liveDeliveryStatusLabel, TASK_COMMANDS_PAGE_SIZE,
+  taskCommandsApi, type CommandBackendRef, type LiveInputDelivery, type TaskCommandItem, type TaskCommandsPage,
 } from "@/lib/task-command-types";
 import { taskErrorCode, taskErrorMessage } from "@/lib/task-types";
 
@@ -42,6 +42,17 @@ function refCell(value: CommandBackendRef | null, emptyLabel: string): string {
   return value ? backendRefText(value) : emptyLabel;
 }
 
+function deliveryText(delivery: LiveInputDelivery): string {
+  const parts: string[] = [liveDeliveryStatusLabel(delivery.status)];
+  if (typeof delivery.effective_turn === "number") parts.push(`生效边界 turn ${delivery.effective_turn}`);
+  if (delivery.consumed_by) {
+    const turn = typeof delivery.consumed_by.turn === "number" ? `（turn ${delivery.consumed_by.turn}）` : "";
+    parts.push(`消费决策 ${delivery.consumed_by.decision_step_id}${turn}`);
+  }
+  if (delivery.settled_reason) parts.push(`结算原因：${delivery.settled_reason}`);
+  return parts.join("；");
+}
+
 function CommandRow({
   item, expanded, onToggle,
 }: {
@@ -53,7 +64,9 @@ function CommandRow({
     <>
       <TableRow data-testid="task-command-row">
         <TableCell>{commandKindLabel(item.kind)}</TableCell>
-        <TableCell data-testid="task-command-state">{commandStateLabel(item.state)}</TableCell>
+        <TableCell data-testid="task-command-state">
+          {item.delivery ? liveDeliveryStatusLabel(item.delivery.status) : commandStateLabel(item.state)}
+        </TableCell>
         <TableCell className="font-mono text-xs">{item.issuer}</TableCell>
         <TableCell>{timeLabel(item.issued_at)}</TableCell>
         <TableCell>
@@ -88,6 +101,12 @@ function CommandRow({
               <dd data-testid="task-command-revision">
                 {item.expected_revision ?? "未记录"}
               </dd>
+              {item.delivery && (
+                <>
+                  <dt className="text-muted-foreground">补充要求投递</dt>
+                  <dd data-testid="task-command-delivery">{deliveryText(item.delivery)}</dd>
+                </>
+              )}
             </dl>
           </TableCell>
         </TableRow>

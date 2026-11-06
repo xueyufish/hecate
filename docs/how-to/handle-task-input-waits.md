@@ -66,6 +66,47 @@ across retry; a later wait can start another operation after a receipt.
 Revision conflicts reject the command without consuming the
 token — refresh and resubmit against the current wait.
 
+## Live supplements while the task is running
+
+A platform-local, top-level `controller_loop` task can accept a supplement
+while it is RUNNING. The task detail page offers the running-task composer
+when the server reports `live_input.supported`. The command endpoint
+rejects requests for managed hosts, child tasks, non-controller tasks
+and tasks outside the running state.
+
+- **Envelope**: the page issues the same `provide_input` command kind with
+  schema ref `urn:hecate:task-live-input/1` and the payload
+  `{"schema_version": 1, "content": <JSON object>}`. The content object —
+  never the envelope — becomes the model-visible supplement, and control
+  keys (`approval_ref`, `wait_token`, `agent_child_result`) are rejected
+  outright: free text can never approve an action, consume a wait or forge
+  a child result.
+- **Receipt**: `applied` plus delivery `received` means the platform
+  durably recorded the pending revision — not that it took effect. The
+  same `command_id` + body replays one command; changing the content
+  requires a new command identity. Both `command_id` and
+  `expected_revision` are required. The latter binds the request to the
+  page-read task revision, so a moved revision rejects the request.
+- **Effect boundary**: the revision binds at the next not-yet-started
+  decision boundary under the dispatch lease (the committed decision count
+  plus one). The in-flight model call keeps its original inputs and its
+  accepted decision and actions stand as recorded; the supplement never
+  rewrites committed `input_refs` or the frozen base input. Each accepted
+  decision pins the revision ids it consumed, so consumption has an
+  authoritative decision/turn location in the command list's delivery view.
+- **Crashes and restarts**: a crash after receipt leaves the revision
+  pending and it binds on the next pass; a crash after binding replays the
+  revision at its recorded boundary exactly once. Nothing re-asks an
+  accepted decision or re-executes a confirmed action.
+- **Terminal races**: an unconsumed requirement settles explicitly as
+  `not_applied` with the terminal reason (`task_succeeded`, `task_failed`,
+  `task_cancelled`) in the same transaction as the task's terminal state —
+  it is never silently lost, never applied after the fact, and never
+  resets turn budgets, accumulated budgets or deadlines.
+- **Unsupported combinations**: managed runner hosts, non-controller
+  tasks, non-running states and non-platform stores reject the command
+  with a stated reason — never a fake success and never the wake path.
+
 ## Contract rules
 
 - The tool declares its input request: `status: "input_required"` plus a

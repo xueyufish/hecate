@@ -1544,3 +1544,265 @@ async def test_invalid_no_progress_declaration_is_rejected_before_submission(har
                 controller={"max_turns": 4, "no_progress": declaration},
             )
     assert harness["store"].list_tasks() == []
+
+
+# ---------------------------------------------------------------------------
+# running-task live supplements (urn:hecate:task-live-input/1)
+# ---------------------------------------------------------------------------
+
+
+class _LiveRegionPort(ScriptedLoopPort):
+    """Turn 1's first ask blocks until released; the final ask echoes inputs.
+
+    Records the injected input-revision user messages each ask saw, so tests
+    can assert the in-flight call kept its original inputs while the next
+    not-yet-started decision consumed the bound supplement.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(final_text="unused")
+        self.first_ask_started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.first_ask_provided: list[dict] = []
+        self.final_ask_provided: list[dict] = []
+
+    async def llm_invoke_structured(self, messages: list[dict], config: dict):
+        self.model_calls += 1
+        self.messages = messages
+        provided: list[dict] = []
+        for message in messages:
+            if message.get("role") == "user" and "provided_input" in str(message.get("content")):
+                provided.append(json.loads(message["content"])["provided_input"])
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        if not tool_messages:
+            self.first_ask_provided = provided
+            self.first_ask_started.set()
+            await self.release.wait()
+            yield {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "query_inventory", "arguments": json.dumps({"sku": "S-9"})},
+                    }
+                ],
+            }
+            return
+        self.final_ask_provided = provided
+        yield {"content": "inputs:" + json.dumps(provided, sort_keys=True, ensure_ascii=False), "tool_calls": None}
+
+
+async def _issue_live_input(
+    harness, task_uuid: uuid.UUID, content: dict, *, command_id: str, expected_revision: int | None = None
+) -> Any:
+    """One real ``issue_command`` live supplement through the service."""
+    from hecate.contracts.execution.durable import ControlCommandKind
+
+    if expected_revision is None:
+        record = await asyncio.to_thread(harness["store"].get_task_state, task_ref_of(task_uuid))
+        expected_revision = record.revision
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["suite"].store,
+            recorder=harness["suite"].recorder,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+            dispatcher=None,
+        )
+        return await service.issue_command(
+            workspace_id=WS,
+            task_id=task_uuid,
+            kind=ControlCommandKind.PROVIDE_INPUT,
+            issuer="editor",
+            payload={"schema_version": 1, "content": content},
+            payload_schema_ref="urn:hecate:task-live-input/1",
+            command_id=command_id,
+            expected_revision=expected_revision,
+        )
+
+
+async def test_live_input_returns_first_and_binds_at_next_boundary(harness) -> None:
+    """Receipt returns during the in-flight call; the next decision consumes it."""
+    port = _LiveRegionPort()
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    worker = _worker_for(harness)
+    dispatch = asyncio.create_task(worker.reconcile())
+    await asyncio.wait_for(port.first_ask_started.wait(), timeout=60)
+
+    # The editor's request returns while the model call is still in flight.
+    issue = await _issue_live_input(harness, task_uuid, {"region": "EU"}, command_id="live-1")
+    assert issue.record.state.value == "applied"
+    assert issue.detail.startswith("live input received")
+    assert issue.delivery["status"] == "received"
+    assert issue.delivery["revision_id"] == issue.record.extra["input_revision"]
+
+    port.release.set()
+    await asyncio.wait_for(dispatch, timeout=120)
+    record = await _dispatch_to_terminal(harness, t_ref, worker=worker)
+    assert record.lifecycle_state.value == "succeeded", record.extra
+    # The in-flight call kept its original inputs; the next not-yet-started
+    # decision consumed the bound supplement.
+    assert port.first_ask_provided == []
+    assert port.final_ask_provided == [{"region": "EU"}]
+    result = (record.extra or {}).get("result") or {}
+    assert result["content"] == "inputs:" + json.dumps([{"region": "EU"}], sort_keys=True)
+    revisions = await asyncio.to_thread(harness["store"].list_input_revisions, t_ref)
+    assert len(revisions) == 1 and revisions[0]["source_ref"] == "live-1"
+    delivery = await asyncio.to_thread(harness["store"].list_input_revisions_with_delivery, t_ref)
+    assert delivery[0]["status"] == "consumed"
+    assert delivery[0]["consumed_by"]["decision_step_id"] == "agent-turn-000002"
+    # Idempotent replay: one command, one revision, consumed exactly once.
+    replay = await _issue_live_input(
+        harness, task_uuid, {"region": "EU"}, command_id="live-1", expected_revision=issue.record.expected_revision
+    )
+    assert replay.detail == "idempotent replay of a settled command"
+    assert replay.delivery == delivery[0]
+    assert len(await asyncio.to_thread(harness["store"].list_input_revisions, t_ref)) == 1
+
+
+async def test_live_input_bound_before_crash_replays_once_and_consumes(harness) -> None:
+    """Crash after binding, before consumption: recovery re-enters the same identity."""
+    port = _LiveRegionPort()
+    port.release.set()  # no mid-flight submission here; unblock the asks
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    store = harness["store"]
+    await asyncio.to_thread(store.apply_task_state, t_ref, TaskLifecycleState.RUNNING)
+    issue = await _issue_live_input(harness, task_uuid, {"region": "EU"}, command_id="live-1")
+    assert issue.record.state.value == "applied"
+    from hecate_durable.storage.lease import task_dispatch_lease_key
+
+    run_ref = await asyncio.to_thread(store.run_for_task, t_ref)
+    lease_key = task_dispatch_lease_key(t_ref.issuer_domain, t_ref.id)
+    lease = await asyncio.to_thread(store.leases.acquire, lease_key, "before-restart", 60)
+    assert lease is not None
+    bound = await asyncio.to_thread(store.bind_pending_input_revisions, t_ref, run_ref, lease=lease)
+    await asyncio.to_thread(store.leases.release, lease_key, lease.holder, fencing_token=lease.fencing_token)
+    assert len(bound) == 1 and bound[0]["effective_turn"] == 1
+    # The process "dies" here: a fresh worker re-enters the loop from storage.
+    worker = _worker_for(harness)
+    record = await _dispatch_to_terminal(harness, t_ref, worker=worker)
+    assert record.lifecycle_state.value == "succeeded", record.extra
+    assert port.first_ask_provided == [{"region": "EU"}]
+    assert port.final_ask_provided == [{"region": "EU"}]
+    delivery = await asyncio.to_thread(store.list_input_revisions_with_delivery, t_ref)
+    assert delivery[0]["status"] == "consumed"
+
+
+async def test_live_input_settles_not_applied_when_the_task_ends_first(harness) -> None:
+    """Cancel wins the race: the unconsumed requirement settles, never applies."""
+    port = _LiveRegionPort()
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    worker = _worker_for(harness)
+    dispatch = asyncio.create_task(worker.reconcile())
+    await asyncio.wait_for(port.first_ask_started.wait(), timeout=60)
+    issue = await _issue_live_input(harness, task_uuid, {"region": "EU"}, command_id="live-1")
+    assert issue.record.state.value == "applied"
+    from hecate.contracts.execution.durable import ControlCommandKind
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["suite"].store,
+            recorder=harness["suite"].recorder,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+            dispatcher=None,
+            worker=worker,
+        )
+        cancel = await service.issue_command(
+            workspace_id=WS, task_id=task_uuid, kind=ControlCommandKind.CANCEL, issuer="editor"
+        )
+    assert cancel.record.state.value == "requested"
+    port.release.set()
+    await asyncio.wait_for(dispatch, timeout=120)
+    record = await _dispatch_to_terminal(harness, t_ref, worker=worker)
+    assert record.lifecycle_state.value == "cancelled", record.extra
+    delivery = await asyncio.to_thread(harness["store"].list_input_revisions_with_delivery, t_ref)
+    assert delivery[0]["status"] == "not_applied"
+    assert delivery[0]["settled_reason"] == "task_cancelled"
+
+
+async def test_live_input_rejects_unsupported_shapes(harness) -> None:
+    """Queued tasks, non-controller tasks and bad envelopes are rejected explicitly."""
+    port = _LiveRegionPort()
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    store = harness["store"]
+
+    queued = await _issue_live_input(harness, task_uuid, {"region": "EU"}, command_id="live-queued")
+    assert queued.record.state.value == "rejected"
+    assert "not running" in (queued.detail or "")
+
+    # A malformed envelope is refused at validation, before any receipt exists.
+    from hecate.execution.task_control import TaskControlValidationError
+
+    with pytest.raises(TaskControlValidationError):
+        await _issue_live_input(harness, task_uuid, {"approval_ref": "x"}, command_id="live-bad")
+
+    # A running task without the controller_loop opt-in states its own reason.
+    await asyncio.to_thread(store.apply_task_state, t_ref, TaskLifecycleState.RUNNING, input_payload={"messages": []})
+    non_controller = await _issue_live_input(harness, task_uuid, {"region": "EU"}, command_id="live-plain")
+    assert non_controller.record.state.value == "rejected"
+    assert "controller_loop" in (non_controller.detail or "")
+
+    state = await asyncio.to_thread(store.get_task_state, t_ref)
+    await asyncio.to_thread(
+        store.apply_task_state,
+        t_ref,
+        TaskLifecycleState.RUNNING,
+        input_payload={"controller_loop": True, "workflow_parent": {}},
+    )
+    child = await _issue_live_input(harness, task_uuid, {"region": "EU"}, command_id="live-child")
+    assert child.record.state.value == "rejected"
+    assert "child tasks" in (child.detail or "")
+
+    await asyncio.to_thread(
+        store.apply_task_state, t_ref, TaskLifecycleState.RUNNING, input_payload={"controller_loop": True}
+    )
+    stale = await _issue_live_input(
+        harness, task_uuid, {"region": "EU"}, command_id="live-stale", expected_revision=state.revision
+    )
+    assert stale.record.state.value == "rejected"
+    assert "stale" in (stale.detail or "")
+    assert await asyncio.to_thread(store.list_input_revisions_with_delivery, t_ref) == []
+
+
+async def test_live_input_rejects_managed_runner_hosts(harness) -> None:
+    """A managed delivery row makes the platform host unsupported for live input."""
+    port = _LiveRegionPort()
+    t_ref, task_uuid = await _submit_without_dispatch(harness, port)
+    store = harness["store"]
+    await asyncio.to_thread(store.apply_task_state, t_ref, TaskLifecycleState.RUNNING)
+    async with harness["session_factory"]() as db:
+        db.add(
+            ManagedDeliveryModel(
+                workspace_id=WS,
+                enrollment_id=uuid.uuid4(),
+                task_ref={"issuer_domain": "hecate", "id": str(task_uuid)},
+                run_ref=None,
+                input_payload={},
+                state="pending",
+            )
+        )
+        await db.commit()
+    rejected = await _issue_live_input(harness, task_uuid, {"region": "EU"}, command_id="live-managed")
+    assert rejected.record.state.value == "rejected"
+    assert "managed runner" in (rejected.detail or "")
+    assert await asyncio.to_thread(store.list_input_revisions_with_delivery, t_ref) == []
+
+
+async def test_live_input_boundary_read_failure_stops_before_model(harness, monkeypatch) -> None:
+    """An unreadable queue cannot silently allow a decision without accepted inputs."""
+
+    def unavailable(*args):
+        raise OSError("live input queue is unavailable")
+
+    monkeypatch.setattr(harness["store"], "count_pending_live_input_revisions", unavailable)
+    port = ScriptedLoopPort(final_text="must not be asked")
+    record, _task_ref, _port = await _dispatch_to_completion(harness, port=port)
+    assert record.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+    assert record.extra["result"]["error_category"] == "input_history_unavailable"
+    assert port.model_calls == 0 and port.tool_calls == []

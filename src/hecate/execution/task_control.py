@@ -62,7 +62,13 @@ from hecate.execution.delivery_acceptance_view import read_acceptance_view
 from hecate.execution.durable import ControlCommandRecorder, DurableTaskStore
 from hecate.execution.governance_events import RUN_TERMINAL, PlatformEventService
 from hecate.execution.task_dispatcher import PlatformTaskDispatcher, run_row_ref
-from hecate.execution.task_input import TASK_USER_INPUT_SCHEMA_REF, human_input_contract, input_wait_timeout
+from hecate.execution.task_input import (
+    TASK_LIVE_INPUT_SCHEMA_REF,
+    TASK_USER_INPUT_SCHEMA_REF,
+    human_input_contract,
+    input_wait_timeout,
+    live_input_payload,
+)
 from hecate.execution.task_run_registry import (
     TaskNotFoundError,
     TaskRunRegistry,
@@ -192,6 +198,10 @@ def task_ref_of(task_id: uuid.UUID | str) -> BackendRef:
     return task_ref(PLATFORM_ISSUER, str(task_id))
 
 
+def _is_child_task_input(payload: dict[str, Any]) -> bool:
+    return isinstance(payload.get("agent_child_parent"), dict) or isinstance(payload.get("workflow_parent"), dict)
+
+
 def command_receipt_summary(record: ControlCommandRecord) -> dict[str, Any]:
     """Return only public command receipt fields, never control payloads."""
     return {
@@ -225,6 +235,10 @@ class CommandIssueResult:
 
     record: ControlCommandRecord
     detail: str | None = None
+    # Whitelisted live-supplement delivery facts (received / bound /
+    # consumed / not_applied with their authoritative locations); ``None``
+    # for every other command vocabulary.
+    delivery: dict[str, Any] | None = None
 
 
 class _NullAccessGuard:
@@ -763,6 +777,12 @@ class TaskControlService:
         wait = (record.extra or {}).get("wait") if record else None
         if wait:
             detail["wait"] = wait
+        live_capability = await self._live_input_capability(workspace_id, t_ref, record)
+        if live_capability is not None:
+            # Server-owned composer capability for running controller tasks:
+            # unsupported shapes state their own reason instead of letting
+            # the page derive permission locally.
+            detail["live_input"] = live_capability
         task_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
         if isinstance(task_input.get("agent_child_parent"), dict):
             # The child side: the durable delegation stamp it was accepted
@@ -1133,6 +1153,22 @@ class TaskControlService:
             kind is not ControlCommandKind.PROVIDE_INPUT or not isinstance(payload, dict)
         ):
             raise TaskControlValidationError("task-user-input requires provide_input with a JSON object payload")
+        if payload_schema_ref == TASK_LIVE_INPUT_SCHEMA_REF and (
+            kind is not ControlCommandKind.PROVIDE_INPUT
+            or not isinstance(payload, dict)
+            or live_input_payload(payload) is None
+        ):
+            raise TaskControlValidationError("task-live-input requires provide_input with a versioned content envelope")
+        if payload_schema_ref == TASK_LIVE_INPUT_SCHEMA_REF and (
+            not command_id
+            or not command_id.strip()
+            or type(expected_revision) is not int
+            or expected_revision < 0
+            or detail_ns
+        ):
+            raise TaskControlValidationError(
+                "task-live-input requires a command ID and nonnegative expected revision without control metadata"
+            )
         if (detail_ns or {}).get("callback_digest") and not (
             _verified_workflow_callback or _verified_agent_child_callback
         ):
@@ -1162,7 +1198,12 @@ class TaskControlService:
                 ):
                     raise TaskControlValidationError("command ID is bound to a different request")
                 if existing.state in (CommandState.APPLIED, CommandState.REJECTED, CommandState.EXPIRED):
-                    return CommandIssueResult(record=existing, detail="idempotent replay of a settled command")
+                    delivery = await self._live_input_delivery_map(t_ref, [existing])
+                    return CommandIssueResult(
+                        record=existing,
+                        detail="idempotent replay of a settled command",
+                        delivery=delivery.get(existing.command_id),
+                    )
         runs = await self._registry.list_runs_for_task(task.id, workspace_id)
         latest_run = runs[-1] if runs else None
         record = existing or ControlCommandRecord(
@@ -1195,8 +1236,11 @@ class TaskControlService:
             if concurrent is None or not _same_command_request(concurrent, record):
                 raise
             await self._db.commit()
+            delivery = await self._live_input_delivery_map(t_ref, [concurrent])
             return CommandIssueResult(
-                record=concurrent, detail="command recorded concurrently; replaying its current receipt"
+                record=concurrent,
+                detail="command recorded concurrently; replaying its current receipt",
+                delivery=delivery.get(concurrent.command_id),
             )
         # Close this session's write transaction before the recorder's own
         # transaction runs — the seam store never shares a transaction with
@@ -1213,6 +1257,15 @@ class TaskControlService:
             managed_delivery = await ManagedDeliveryService(self._db).get_by_task_ref(workspace_id, t_ref.to_dict())
         except ManagedChannelError as exc:
             raise TaskControlValidationError(str(exc)) from exc
+        if kind is ControlCommandKind.PROVIDE_INPUT and record.payload_schema_ref == TASK_LIVE_INPUT_SCHEMA_REF:
+            # Live supplements settle at receipt: durable pending revision,
+            # applied command — and never the managed-host delivery path a
+            # runner cannot honor. The running loop parks itself at the
+            # next decision boundary, so nothing is dispatched here.
+            detail = await self._queue_live_input(t_ref, record, managed=managed_delivery is not None)
+            refreshed = await asyncio.to_thread(self._recorder.get, record.command_id) or record
+            delivery = await self._live_input_delivery_map(t_ref, [refreshed])
+            return CommandIssueResult(record=refreshed, detail=detail, delivery=delivery.get(record.command_id))
         if managed_delivery is not None:
             if _expired(record.expires_at):
                 expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
@@ -2450,6 +2503,125 @@ class TaskControlService:
             _spawn_background(self._dispatch_task(t_ref))
         return f"wake accepted; task requeued (receipt {applied.state.value})"
 
+    async def _queue_live_input(
+        self,
+        t_ref: BackendRef,
+        record: ControlCommandRecord,
+        *,
+        managed: bool,
+    ) -> str:
+        """Receive a live supplement while a platform controller task runs.
+
+        The receipt is the durable fact: the pending revision persists and
+        the command applies on receipt — ``applied`` never means consumed.
+        Binding and consumption belong to the lease-holding loop's decision
+        boundary, so a running pass parks itself and nothing is dispatched
+        here. Unsupported shapes are rejected explicitly, never faked into
+        the wake path.
+        """
+
+        if _expired(record.expires_at):
+            expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
+            return f"live input expired before receipt (receipt {expired.state.value})"
+        if managed:
+            await self._transition_rejected(record.command_id)
+            return "managed runner hosts do not accept live input; rejected"
+        if not hasattr(self._store, "record_live_input_revision"):
+            await self._transition_rejected(record.command_id)
+            return "live input requires the platform durable store; rejected"
+        content = live_input_payload(record.payload)
+        if content is None:
+            await self._transition_rejected(record.command_id)
+            return "live input payload is not a versioned content envelope; rejected"
+        state = await self._lifecycle_state(t_ref)
+        if state != TaskLifecycleState.RUNNING.value:
+            await self._transition_rejected(record.command_id)
+            return f"task is {state}, not running; live input rejected"
+        base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
+        if base_input.get("controller_loop") is not True:
+            await self._transition_rejected(record.command_id)
+            return "live input requires a controller_loop task; rejected"
+        if _is_child_task_input(base_input):
+            await self._transition_rejected(record.command_id)
+            return "child tasks do not accept live input; rejected"
+        try:
+            revision_id = await asyncio.to_thread(
+                self._store.record_live_input_revision,
+                t_ref,
+                command_id=record.command_id,
+                content=content,
+                expected_revision=record.expected_revision,
+            )
+        except ValueError:
+            # Lost CAS, not-running race or a conflicting duplicate: the
+            # authoritative store decided; the receipt rejects without
+            # publishing internal state.
+            await self._db.commit()
+            await self._transition_rejected(record.command_id)
+            return "live input rejected: task moved on concurrently or request is stale"
+        await self._db.commit()
+        logger.info(
+            "task %s received live input (revision %s); binds at the next decision boundary",
+            t_ref.id,
+            revision_id,
+        )
+        return "live input received; it binds at the next not-yet-started decision boundary"
+
+    async def _live_input_capability(
+        self, workspace_id: uuid.UUID, t_ref: BackendRef, record: Any
+    ) -> dict[str, Any] | None:
+        """Whether the detail page may offer a live-supplement composer.
+
+        Only platform-local ``controller_loop`` tasks carry the block at
+        all. Within them, a managed runner host, a non-running state or a
+        missing durable store each renders its own explicit reason; the
+        page never derives write permission locally.
+        """
+
+        if not hasattr(self._store, "record_live_input_revision"):
+            return None
+        base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
+        if base_input.get("controller_loop") is not True:
+            return None
+        if _is_child_task_input(base_input):
+            return {"supported": False, "reason": "child tasks do not accept live input"}
+        if record is None or record.lifecycle_state is not TaskLifecycleState.RUNNING:
+            return {"supported": False, "reason": "task is not running; live input needs the running state"}
+        from hecate.execution.managed_channel import ManagedDeliveryService
+
+        try:
+            managed = await ManagedDeliveryService(self._db).get_by_task_ref(workspace_id, t_ref.to_dict())
+        except Exception:
+            return {"supported": False, "reason": "live input support could not be verified"}
+        if managed is not None:
+            return {"supported": False, "reason": "managed runner hosts do not accept live input"}
+        return {"supported": True, "reason": None}
+
+    async def _live_input_delivery_map(self, t_ref: BackendRef, records: list[ControlCommandRecord]) -> dict[str, Any]:
+        """Whitelisted delivery facts for live-supplement receipts, by command id.
+
+        The pending revision and its pinning decisions are required to
+        interpret an applied receipt. A read failure must not present that
+        receipt as proof of delivery.
+        """
+
+        applied = {
+            record.command_id
+            for record in records
+            if record.payload_schema_ref == TASK_LIVE_INPUT_SCHEMA_REF and record.state is CommandState.APPLIED
+        }
+        if not applied:
+            return {}
+        try:
+            rows = await asyncio.to_thread(self._store.list_input_revisions_with_delivery, t_ref)
+            delivery = {row["source_ref"]: row for row in rows if row["source_ref"] in applied}
+        except Exception as exc:
+            logger.warning("task %s live input delivery read failed (%s)", t_ref.id, type(exc).__name__)
+            raise TaskControlError("live input delivery is unavailable") from exc
+        if applied - delivery.keys():
+            raise TaskControlError("live input delivery is unavailable")
+        return delivery
+
     def _approval_ledger(self) -> Any | None:
         """The approval authority for wake gates; ``None`` fails closed."""
 
@@ -2746,6 +2918,15 @@ class TaskControlService:
             record = await asyncio.to_thread(self._recorder.transition, command_id, CommandState.EXPIRED)
         return record
 
+    async def get_command_receipt(self, workspace_id: uuid.UUID, command_id: str) -> dict[str, Any]:
+        """Return a whitelisted receipt with its current live delivery facts."""
+        record = await self.get_command(workspace_id, command_id)
+        summary = command_receipt_summary(record)
+        delivery = await self._live_input_delivery_map(record.task_ref, [record])
+        if command_id in delivery:
+            summary["delivery"] = delivery[command_id]
+        return summary
+
     async def list_task_commands(
         self,
         workspace_id: uuid.UUID,
@@ -2774,7 +2955,16 @@ class TaskControlService:
                 limit,
                 offset,
             )
-            return {"items": [command_receipt_summary(record) for record in items], "total": total}
+            delivery = await self._live_input_delivery_map(task_ref(task.issuer_domain, str(task.id)), items)
+            return {
+                "items": [
+                    {**command_receipt_summary(record), "delivery": delivery[record.command_id]}
+                    if record.command_id in delivery
+                    else command_receipt_summary(record)
+                    for record in items
+                ],
+                "total": total,
+            }
         except Exception as exc:
             # Driver exceptions may contain URLs or SQL parameters; log only
             # safe attribution and never publish the text.

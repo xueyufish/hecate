@@ -456,13 +456,6 @@ async def issue_command(task_id: uuid.UUID, body: CommandRequest, service: Servi
     return await _issue(ctx, service, task_id, body.kind, body)
 
 
-def _command_summary(record: Any) -> dict[str, Any]:
-    """Use the shared whitelist for the existing single-command response."""
-    from hecate.execution.task_control import command_receipt_summary
-
-    return command_receipt_summary(record)
-
-
 @router.get("/{task_id}/commands")
 async def list_task_commands(
     task_id: uuid.UUID,
@@ -532,7 +525,7 @@ async def _issue(
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
     record = issued.record
-    return {
+    response = {
         "command_id": record.command_id,
         "kind": record.kind.value,
         "state": record.state.value,
@@ -544,6 +537,11 @@ async def _issue(
         "expected_revision": record.expected_revision,
         "detail": issued.detail,
     }
+    if issued.delivery is not None:
+        # Whitelisted live-supplement delivery facts only; the raw payload,
+        # wait tokens and storage internals never leave the service.
+        response["delivery"] = issued.delivery
+    return response
 
 
 # --- runs & events -----------------------------------------------------------
@@ -729,10 +727,9 @@ async def get_command(command_id: str, service: ServiceDep, ctx: AuthDep) -> dic
     except WorkspaceRoleRequiredError as exc:
         raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
     try:
-        record = await service.get_command(workspace_id, command_id)
+        return await service.get_command_receipt(workspace_id, command_id)
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
-    return _command_summary(record)
 
 
 @reconciliation_router.get("/pending")
