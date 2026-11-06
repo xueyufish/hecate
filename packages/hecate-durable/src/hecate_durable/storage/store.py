@@ -34,12 +34,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import create_engine, func, select, tuple_, update
+from sqlalchemy import create_engine, func, inspect, select, tuple_, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from hecate_durable.contracts.durable import (
+    LIVE_INPUT_REVISION_SOURCE,
     ActionIntent,
     ActionLedgerState,
     ActionOutcome,
@@ -62,7 +63,7 @@ from hecate_durable.contracts.durable import (
 from hecate_durable.contracts.references import BackendRef, RefKind, require_kind
 from hecate_durable.seams import ActionLedger, ControlCommandRecorder, DurableTaskStore
 from hecate_durable.storage.eventlog import EventPage, SqlEventLog
-from hecate_durable.storage.lease import LeaseHandle, LeaseManager
+from hecate_durable.storage.lease import LeaseHandle, LeaseManager, task_dispatch_lease_key
 from hecate_durable.storage.models import (
     ActionIntentRow,
     ActionOutcomeRow,
@@ -76,6 +77,17 @@ logger = logging.getLogger(__name__)
 
 _SQLITE_MEMORY_URLS = ("sqlite://", "sqlite:///:memory:")
 _EPOCH_SENTINEL = "1970-01-01T00:00:00Z"
+# Sentinel for the wake path: derive the input boundary from the committed
+# decision count under the task row lock. An explicit ``None`` in the
+# revision dict instead persists an unbound (pending) live supplement.
+_COMPUTE_INPUT_BOUNDARY = object()
+
+# Why a terminal task settles its unconsumed live supplements as not applied.
+_LIVE_SETTLEMENT_REASONS = {
+    TaskLifecycleState.SUCCEEDED: "task_succeeded",
+    TaskLifecycleState.FAILED: "task_failed",
+    TaskLifecycleState.CANCELLED: "task_cancelled",
+}
 
 
 class LateOutcomeError(Exception):
@@ -257,7 +269,21 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def create_schema(self) -> None:
         """Create this package's tables (standalone-host startup path)."""
 
-        Base.metadata.create_all(self.engine)
+        with self.engine.begin() as connection:
+            Base.metadata.create_all(connection)
+            columns = inspect(connection).get_columns("durable_input_revision")
+            if not any(column["name"] == "settled_reason" for column in columns):
+                # Existing standalone databases bypass platform Alembic. The
+                # standalone host writes only bound revisions, so it needs
+                # the additive column but can retain its NOT NULL constraint.
+                if connection.dialect.name == "postgresql":
+                    connection.exec_driver_sql(
+                        "ALTER TABLE durable_input_revision ADD COLUMN IF NOT EXISTS settled_reason VARCHAR(128)"
+                    )
+                else:
+                    connection.exec_driver_sql(
+                        "ALTER TABLE durable_input_revision ADD COLUMN settled_reason VARCHAR(128)"
+                    )
 
     def dispose(self) -> None:
         self.engine.dispose()
@@ -659,43 +685,71 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 # the durable worker can never miss an accepted input.
                 new_revision_id = self._insert_input_revision(session, task_ref, run_ref, input_revision, recorded)
             if applied_command_id is not None:
-                command = session.execute(
-                    select(CommandRow).where(CommandRow.command_id == applied_command_id).with_for_update()
-                ).scalar_one()
-                if (command.task_issuer, command.task_id) != (task_ref.issuer_domain, task_ref.id):
-                    raise ValueError("command is bound to another task")
-                validate_command_transition(CommandState(command.state), CommandState.APPLIED)
-                if command.expires_at is not None:
-                    deadline = datetime.fromisoformat(command.expires_at)
-                    now = datetime.fromisoformat(recorded)
-                    if deadline.tzinfo is None:
-                        deadline = deadline.replace(tzinfo=UTC)
-                    if now.tzinfo is None:
-                        now = now.replace(tzinfo=UTC)
-                    if deadline <= now:
-                        raise ValueError("command expired before effect commit")
-                command.state, command.updated_at = CommandState.APPLIED.value, recorded
-                if run_ref is not None:
-                    command.extra = {
-                        **(command.extra or {}),
-                        "effect_run_ref": run_ref.to_dict(),
-                    }
-                if new_revision_id is not None:
-                    # Receipt correlation: the applied command names the input
-                    # revision it created (idempotent replays re-read it).
-                    command.extra = {
-                        **(command.extra or {}),
-                        "input_revision": new_revision_id,
-                    }
-                if run_ref is not None:
-                    self.events.emit(
-                        session,
-                        task_ref=task_ref,
-                        run_ref=run_ref,
-                        event_type="command_state",
-                        payload={"command_id": applied_command_id, "state": CommandState.APPLIED.value},
-                    )
+                self._stamp_applied_command(session, task_ref, applied_command_id, recorded, run_ref, new_revision_id)
+            if target in (
+                TaskLifecycleState.SUCCEEDED,
+                TaskLifecycleState.FAILED,
+                TaskLifecycleState.CANCELLED,
+            ):
+                # Terminal settlement is part of the terminal fact's own
+                # transaction: an unconsumed live requirement is never
+                # silently lost, never applied after the fact, and never
+                # keeps a task's terminal state ambiguous.
+                self._settle_live_input_revisions(session, task_ref, run_ref, reason=_LIVE_SETTLEMENT_REASONS[target])
         return record
+
+    def _stamp_applied_command(
+        self,
+        session: Session,
+        task_ref: BackendRef,
+        command_id: str,
+        recorded: str,
+        run_ref: BackendRef | None,
+        input_revision_id: str | None,
+    ) -> None:
+        """Flip one command receipt to applied inside the caller's transaction.
+
+        Shared by the wake effect commit and the live-input receive path:
+        the receipt state, its effect-run binding and the input-revision
+        correlation commit atomically with the effect itself.
+        """
+
+        command = session.execute(
+            select(CommandRow).where(CommandRow.command_id == command_id).with_for_update()
+        ).scalar_one()
+        if (command.task_issuer, command.task_id) != (task_ref.issuer_domain, task_ref.id):
+            raise ValueError("command is bound to another task")
+        validate_command_transition(CommandState(command.state), CommandState.APPLIED)
+        if command.expires_at is not None:
+            deadline = datetime.fromisoformat(command.expires_at)
+            now = datetime.fromisoformat(recorded)
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=UTC)
+            if now.tzinfo is None:
+                now = now.replace(tzinfo=UTC)
+            if deadline <= now:
+                raise ValueError("command expired before effect commit")
+        command.state, command.updated_at = CommandState.APPLIED.value, recorded
+        if run_ref is not None:
+            command.extra = {
+                **(command.extra or {}),
+                "effect_run_ref": run_ref.to_dict(),
+            }
+        if input_revision_id is not None:
+            # Receipt correlation: the applied command names the input
+            # revision it created (idempotent replays re-read it).
+            command.extra = {
+                **(command.extra or {}),
+                "input_revision": input_revision_id,
+            }
+        if run_ref is not None:
+            self.events.emit(
+                session,
+                task_ref=task_ref,
+                run_ref=run_ref,
+                event_type="command_state",
+                payload={"command_id": command_id, "state": CommandState.APPLIED.value},
+            )
 
     def record_continuation_trigger(
         self,
@@ -848,7 +902,10 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         The unique (task, source_ref) key arbitrates concurrent or replayed
         acceptance of the same command: the first insert wins and replays
         return the original revision identity. A digest mismatch on the same
-        source_ref is a conflicting command, not a second revision.
+        source_ref is a conflicting command, not a second revision. A live
+        supplement (explicit ``effective_turn=None``) persists unbound; the
+        lease holder binds it at the next not-yet-started decision boundary
+        in its own transaction.
         """
 
         import json as _json
@@ -860,14 +917,27 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         source = revision.get("source")
         source_ref = revision.get("source_ref")
         content = revision.get("content")
-        effective_turn = revision.get("effective_turn")
+        effective_turn: Any = revision.get("effective_turn")
+        if effective_turn is None and source != LIVE_INPUT_REVISION_SOURCE:
+            effective_turn = _COMPUTE_INPUT_BOUNDARY
         if not isinstance(source, str) or not source.strip() or len(source) > 32:
             raise ValueError("input revision source must be a nonblank string")
         if not isinstance(source_ref, str) or not source_ref.strip() or len(source_ref) > 256:
             raise ValueError("input revision source_ref must be a nonblank string of at most 256 characters")
         if not isinstance(content, dict):
             raise ValueError("input revision content must be a JSON object")
-        if effective_turn is not None and (type(effective_turn) is not int or not 1 <= effective_turn <= 10**6):
+        if source == LIVE_INPUT_REVISION_SOURCE and (
+            "approval_ref" in content or "wait_token" in content or "agent_child_result" in content
+        ):
+            # Free supplement text must never carry approval, wait or
+            # child-result control facts — those move only through their
+            # own verified paths.
+            raise ValueError("live input content must not carry approval or wait control keys")
+        if (
+            effective_turn is not _COMPUTE_INPUT_BOUNDARY
+            and effective_turn is not None
+            and (type(effective_turn) is not int or not 1 <= effective_turn <= 10**6)
+        ):
             raise ValueError("input revision effective_turn must be a positive integer")
         if run_ref is None:
             raise ValueError("input revision requires a linked Run")
@@ -892,14 +962,14 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 existing.run_id,
             ) != (
                 source,
-                existing.effective_turn if effective_turn is None else effective_turn,
+                existing.effective_turn if not isinstance(effective_turn, int) else effective_turn,
                 revision.get("wait_token"),
                 run_ref.issuer_domain,
                 run_ref.id,
             ):
                 raise ValueError("input revision command is bound to different content")
             return existing.revision_id
-        if effective_turn is None:
+        if effective_turn is _COMPUTE_INPUT_BOUNDARY:
             # The task row is locked by apply_task_state: boundary selection
             # and accepted input/receipt publication use this transaction.
             effective_turn = (
@@ -964,10 +1034,13 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         return revision_id
 
     def list_input_revisions(self, task_ref: BackendRef, run_ref: BackendRef | None = None) -> list[dict[str, Any]]:
-        """The task's immutable input history in causal order (oldest first).
+        """The task's replayable input history in causal order (oldest first).
 
         Order is (effective_turn, seq) — the same order replay folds into
-        the rebuilt conversation. A stored digest mismatch is corruption:
+        the rebuilt conversation. Pending live supplements (unbound) and
+        settled (not-applied) rows are real durable facts but not replay
+        input, so they are excluded here; :meth:`list_input_revisions_with_delivery`
+        is their public read. A stored digest mismatch is corruption:
         surfaced as an explicit error, never silently reserialized.
         """
 
@@ -1020,6 +1093,10 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         for row in rows:
             if run_ref is not None and (row.run_issuer, row.run_id) != (run_ref.issuer_domain, run_ref.id):
                 raise ValueError("input revision history is bound to another Run")
+            if row.source == LIVE_INPUT_REVISION_SOURCE and (
+                row.effective_turn is None or row.settled_reason is not None
+            ):
+                continue
             if (
                 not isinstance(row.revision_id, str)
                 or not row.revision_id.strip()
@@ -1053,6 +1130,299 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 }
             )
         return revisions
+
+    def record_live_input_revision(
+        self,
+        task_ref: BackendRef,
+        *,
+        command_id: str,
+        content: dict[str, Any],
+        expected_revision: int | None = None,
+        recorded_at: str = "",
+    ) -> str:
+        """Persist one running-task live supplement as an unbound revision.
+
+        One transaction under the task row lock: the authoritative RUNNING
+        check, the caller's revision CAS, the pending revision insert and
+        the applied receipt. The task's lifecycle never changes — a live
+        supplement must not requeue or park a running controller — and the
+        returned revision binds only in :meth:`bind_pending_input_revisions`.
+        """
+
+        with self._session() as session, session.begin():
+            row = session.execute(
+                select(TaskStateRow)
+                .where(
+                    TaskStateRow.task_issuer == task_ref.issuer_domain,
+                    TaskStateRow.task_id == task_ref.id,
+                )
+                .with_for_update()
+            ).scalar_one_or_none()
+            if row is None:
+                raise ValueError("live input requires a recorded task")
+            if TaskLifecycleState(row.lifecycle_state) is not TaskLifecycleState.RUNNING:
+                raise ValueError(f"task is {row.lifecycle_state}; live input requires a running task")
+            if expected_revision is not None and expected_revision != row.revision:
+                raise ValueError(f"stale revision: expected {expected_revision}, current is {row.revision}")
+            recorded = recorded_at or self._clock()
+            run_ref = self._run_linkage(session, task_ref)
+            if run_ref is None:
+                raise ValueError("live input requires a linked Run")
+            revision_id = self._insert_input_revision(
+                session,
+                task_ref,
+                run_ref,
+                {
+                    "source": LIVE_INPUT_REVISION_SOURCE,
+                    "source_ref": command_id,
+                    "content": content,
+                    "effective_turn": None,
+                },
+                recorded,
+            )
+            command = session.execute(
+                select(CommandRow).where(CommandRow.command_id == command_id).with_for_update()
+            ).scalar_one_or_none()
+            if command is not None and command.state == CommandState.APPLIED.value:
+                # Idempotent replay of an already-received command: the
+                # original receipt and its revision correlation stand; a
+                # mismatch here is corruption, not a second receipt.
+                if command.extra.get("input_revision") != revision_id:
+                    raise ValueError("live input command is bound to a different revision")
+            else:
+                self._stamp_applied_command(session, task_ref, command_id, recorded, run_ref, revision_id)
+        return revision_id
+
+    def count_pending_live_input_revisions(self, task_ref: BackendRef, run_ref: BackendRef) -> int:
+        """Received-but-unbound live supplement count for the run's boundary gate."""
+
+        from .models import InputRevisionRow
+
+        with self._read_session() as session:
+            return int(
+                session.execute(
+                    select(func.count()).where(
+                        InputRevisionRow.task_issuer == task_ref.issuer_domain,
+                        InputRevisionRow.task_id == task_ref.id,
+                        InputRevisionRow.run_issuer == run_ref.issuer_domain,
+                        InputRevisionRow.run_id == run_ref.id,
+                        InputRevisionRow.source == LIVE_INPUT_REVISION_SOURCE,
+                        InputRevisionRow.effective_turn.is_(None),
+                        InputRevisionRow.settled_reason.is_(None),
+                    )
+                ).scalar()
+                or 0
+            )
+
+    def bind_pending_input_revisions(
+        self,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        *,
+        lease: LeaseHandle,
+    ) -> list[dict[str, Any]]:
+        """Bind received live supplements at the next not-yet-started boundary.
+
+        Called by the lease-holding host only after the loop parked between
+        turns, so no model call is in flight: the boundary is the committed
+        decision count plus one, computed under the task row lock, and the
+        decision fence makes concurrent commits impossible. Returns the
+        bound revisions in durable order; ``[]`` when the task is no longer
+        RUNNING (the caller's cancel path wins) or nothing is pending. A
+        crash after binding replays deterministically: recovery folds the
+        revision at its recorded boundary exactly once.
+        """
+
+        from .models import AcceptedDecisionRow, InputRevisionRow
+
+        if lease.lease_key != task_dispatch_lease_key(task_ref.issuer_domain, task_ref.id):
+            raise ValueError("live input binding requires the task's dispatch lease")
+        with self._session() as session, session.begin():
+            self.leases.assert_valid(session, lease)
+            row = session.execute(
+                select(TaskStateRow)
+                .where(
+                    TaskStateRow.task_issuer == task_ref.issuer_domain,
+                    TaskStateRow.task_id == task_ref.id,
+                )
+                .with_for_update()
+            ).scalar_one_or_none()
+            if row is None or TaskLifecycleState(row.lifecycle_state) is not TaskLifecycleState.RUNNING:
+                return []
+            if (row.run_issuer, row.run_id) != (run_ref.issuer_domain, run_ref.id):
+                raise ValueError("live input binding requires the task's current Run")
+            pending = (
+                session.execute(
+                    select(InputRevisionRow)
+                    .where(
+                        InputRevisionRow.task_issuer == task_ref.issuer_domain,
+                        InputRevisionRow.task_id == task_ref.id,
+                        InputRevisionRow.run_issuer == run_ref.issuer_domain,
+                        InputRevisionRow.run_id == run_ref.id,
+                        InputRevisionRow.source == LIVE_INPUT_REVISION_SOURCE,
+                        InputRevisionRow.effective_turn.is_(None),
+                        InputRevisionRow.settled_reason.is_(None),
+                    )
+                    .order_by(InputRevisionRow.seq)
+                    .with_for_update()
+                )
+                .scalars()
+                .all()
+            )
+            if not pending:
+                return []
+            boundary = (
+                int(
+                    session.execute(
+                        select(func.count()).where(
+                            AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                            AcceptedDecisionRow.run_id == run_ref.id,
+                        )
+                    ).scalar()
+                    or 0
+                )
+                + 1
+            )
+            bound: list[dict[str, Any]] = []
+            for item in pending:
+                item.effective_turn = boundary
+                self.events.emit(
+                    session,
+                    task_ref=task_ref,
+                    run_ref=run_ref,
+                    event_type="input_revision_bound",
+                    payload={"revision_id": item.revision_id, "effective_turn": boundary, "seq": item.seq},
+                )
+                bound.append(
+                    {
+                        "revision_id": item.revision_id,
+                        "seq": item.seq,
+                        "effective_turn": boundary,
+                        "content": dict(item.content),
+                    }
+                )
+        return bound
+
+    def list_input_revisions_with_delivery(self, task_ref: BackendRef) -> list[dict[str, Any]]:
+        """Whitelisted delivery view of one task's live supplements.
+
+        Derives each revision's lifecycle from the authoritative facts —
+        the persisted row (receipt, binding boundary, settlement reason)
+        and the accepted decision that pinned it (consumption, with the
+        consuming decision's identity and turn). Content, tokens and
+        storage internals are never part of this view.
+        """
+
+        from .models import AcceptedDecisionRow, InputRevisionRow
+
+        with self._read_session() as session:
+            rows = (
+                session.execute(
+                    select(InputRevisionRow)
+                    .where(
+                        InputRevisionRow.task_issuer == task_ref.issuer_domain,
+                        InputRevisionRow.task_id == task_ref.id,
+                        InputRevisionRow.source == LIVE_INPUT_REVISION_SOURCE,
+                    )
+                    .order_by(InputRevisionRow.seq)
+                )
+                .scalars()
+                .all()
+            )
+            consumed_by: dict[tuple[str, str, str], tuple[str, int]] = {}
+            run_keys = sorted({(row.run_issuer, row.run_id) for row in rows})
+            if run_keys:
+                decision_rows = session.execute(
+                    select(
+                        AcceptedDecisionRow.issuer_domain,
+                        AcceptedDecisionRow.run_id,
+                        AcceptedDecisionRow.decision_step_id,
+                        AcceptedDecisionRow.input_refs,
+                    ).where(tuple_(AcceptedDecisionRow.issuer_domain, AcceptedDecisionRow.run_id).in_(run_keys))
+                ).all()
+                for issuer, run_id, step_id, refs in decision_rows:
+                    if not isinstance(refs, dict):
+                        continue
+                    turn = refs.get("turn")
+                    if type(turn) is not int:
+                        continue
+                    for revision_id in refs.get("inputs") or []:
+                        # Later decisions re-pin prior inputs. The database
+                        # need not return the first consuming turn first.
+                        key = (issuer, run_id, str(revision_id))
+                        previous = consumed_by.get(key)
+                        if previous is None or turn < previous[1]:
+                            consumed_by[key] = (step_id, turn)
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                consumer = consumed_by.get((row.run_issuer, row.run_id, row.revision_id))
+                if row.settled_reason is not None:
+                    status = "not_applied"
+                elif row.effective_turn is None:
+                    status = "received"
+                elif consumer is not None:
+                    status = "consumed"
+                else:
+                    status = "bound"
+                item: dict[str, Any] = {
+                    "source_ref": row.source_ref,
+                    "status": status,
+                    "revision_id": row.revision_id,
+                    "run_ref": _run_ref(row.run_issuer, row.run_id).to_dict(),
+                }
+                if status in ("bound", "consumed") and row.effective_turn is not None:
+                    item["effective_turn"] = row.effective_turn
+                if status == "consumed" and consumer is not None:
+                    step_id, turn = consumer
+                    item["consumed_by"] = {"decision_step_id": step_id, "turn": turn}
+                if status == "not_applied":
+                    item["settled_reason"] = row.settled_reason
+                items.append(item)
+            return items
+
+    def _settle_live_input_revisions(
+        self, session: Session, task_ref: BackendRef, run_ref: BackendRef | None, *, reason: str
+    ) -> None:
+        """Settle unconsumed live supplements inside the caller's transaction.
+
+        Rows an accepted decision already pinned are consumed facts and
+        stay untouched; received (unbound) and bound-but-unconsumed rows
+        settle to ``not_applied`` with the terminal reason. Scoped to the
+        live source and the revision's own run: waiting_input wake
+        revisions keep their vocabulary, and settlement never revives or
+        rewrites a consumed requirement.
+        """
+
+        from .models import AcceptedDecisionRow, InputRevisionRow
+
+        query = select(InputRevisionRow).where(
+            InputRevisionRow.task_issuer == task_ref.issuer_domain,
+            InputRevisionRow.task_id == task_ref.id,
+            InputRevisionRow.source == LIVE_INPUT_REVISION_SOURCE,
+            InputRevisionRow.settled_reason.is_(None),
+        )
+        if run_ref is not None:
+            query = query.where(
+                InputRevisionRow.run_issuer == run_ref.issuer_domain,
+                InputRevisionRow.run_id == run_ref.id,
+            )
+        rows = session.execute(query.order_by(InputRevisionRow.seq)).scalars().all()
+        if not rows:
+            return
+        pinned: set[str] = set()
+        if run_ref is not None:
+            for refs in session.execute(
+                select(AcceptedDecisionRow.input_refs).where(
+                    AcceptedDecisionRow.issuer_domain == run_ref.issuer_domain,
+                    AcceptedDecisionRow.run_id == run_ref.id,
+                )
+            ).scalars():
+                if isinstance(refs, dict):
+                    pinned.update(str(item) for item in refs.get("inputs") or [])
+        for row in rows:
+            if row.revision_id in pinned:
+                continue
+            row.settled_reason = reason
 
     def count_accepted_decisions(self, run_ref: BackendRef) -> int:
         """Committed decision count of one run — the input-revision boundary.

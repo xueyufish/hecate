@@ -23,11 +23,27 @@ export interface TaskCommandItem {
   run_ref: CommandBackendRef | null;
   expires_at: string | null;
   expected_revision: number | null;
+  /** Whitelisted live-supplement delivery facts; present only for
+   * urn:hecate:task-live-input/1 commands. */
+  delivery?: LiveInputDelivery;
 }
 
 export interface TaskCommandsPage {
   items: TaskCommandItem[];
   total: number;
+}
+
+/** Whitelisted delivery facts of one live supplement, derived by the server
+ * from the pending revision row and the accepted decision that pinned it.
+ * Never carries content, wait tokens or storage internals. */
+export interface LiveInputDelivery {
+  source_ref: string;
+  revision_id: string;
+  run_ref: CommandBackendRef;
+  status: "received" | "bound" | "consumed" | "not_applied";
+  effective_turn?: number;
+  consumed_by?: { decision_step_id: string; turn: number | null };
+  settled_reason?: string;
 }
 
 /** Response of POST /api/tasks/{id}/commands: the receipt the server records. */
@@ -42,6 +58,8 @@ export interface CommandIssueResponse {
   expires_at: string | null;
   expected_revision: number | null;
   detail?: string | null;
+  /** Present on live-supplement receipts; `received` on success. */
+  delivery?: LiveInputDelivery;
 }
 
 export const TASK_COMMANDS_PAGE_SIZE = 20;
@@ -82,6 +100,19 @@ export const taskCommandsApi = {
       detail_ns: { wait_token: waitToken },
     });
   },
+  // Live supplement for a RUNNING platform controller task: the payload is
+  // the versioned envelope (urn:hecate:task-live-input/1) over the user's
+  // content object. The same id + body replays the same command; changing
+  // the content requires a new command identity.
+  issueLiveInput(taskId: string, commandId: string, expectedRevision: number, content: Record<string, unknown>) {
+    return api.post<CommandIssueResponse>(`/api/tasks/${taskId}/commands`, {
+      kind: "provide_input",
+      command_id: commandId,
+      expected_revision: expectedRevision,
+      payload: { schema_version: 1, content },
+      payload_schema_ref: TASK_LIVE_INPUT_SCHEMA_REF,
+    });
+  },
 };
 
 /** Declared shape of a human provide_input payload: a JSON object of
@@ -89,6 +120,12 @@ export const taskCommandsApi = {
  * durable input revision content (task_control._wake_waiting) and the
  * contract-field validation against it. */
 export const TASK_USER_INPUT_SCHEMA_REF = "urn:hecate:task-user-input/0";
+
+/** Declared shape of a live-supplement payload: a versioned envelope whose
+ * `content` object is the model-visible supplement. The envelope — never
+ * raw text — distinguishes a running-task supplement from a waiting_input
+ * answer, and the server rejects control keys outright. */
+export const TASK_LIVE_INPUT_SCHEMA_REF = "urn:hecate:task-live-input/1";
 
 // ---------------------------------------------------------------------------
 // Label maps: the single home for presentation wording, mirroring task-types.
@@ -133,4 +170,34 @@ export const COMMAND_KIND_LABELS: Record<string, string> = {
 export function commandKindLabel(kind: string | null | undefined): string {
   if (!kind) return "未记录";
   return Object.hasOwn(COMMAND_KIND_LABELS, kind) ? COMMAND_KIND_LABELS[kind] : kind;
+}
+
+// ---------------------------------------------------------------------------
+// Live-supplement delivery lifecycle (urn:hecate:task-live-input/1). Each
+// status is a server-derived fact; "已接收" and "已绑定边界" must never read
+// as consumed, and "未应用" is a terminal settlement, never a retryable state.
+// ---------------------------------------------------------------------------
+
+export const LIVE_DELIVERY_STATUS_LABELS: Record<string, string> = {
+  received: "已接收",
+  bound: "已绑定边界",
+  consumed: "已消费",
+  not_applied: "未应用",
+};
+
+export function liveDeliveryStatusLabel(status: string | null | undefined): string {
+  if (!status) return "未记录";
+  return Object.hasOwn(LIVE_DELIVERY_STATUS_LABELS, status) ? LIVE_DELIVERY_STATUS_LABELS[status] : status;
+}
+
+export const LIVE_DELIVERY_STATUS_MEANINGS: Record<string, string> = {
+  received: "平台已持久接收该补充要求；尚未绑定生效边界，等待下一次未开始的决策边界",
+  bound: "已绑定到指定决策边界；等待该边界的决策提交并实际消费",
+  consumed: "已由某个已接受决策实际消费（见消费位置）",
+  not_applied: "任务在消费前到达终态；该要求已显式结算为未应用",
+};
+
+export function liveDeliveryStatusMeaning(status: string | null | undefined): string | null {
+  if (!status) return null;
+  return Object.hasOwn(LIVE_DELIVERY_STATUS_MEANINGS, status) ? LIVE_DELIVERY_STATUS_MEANINGS[status] : null;
 }

@@ -1626,3 +1626,86 @@ async def test_invalid_continuation_authority_stops_before_model(missing_policy,
             )
         )
     assert source.model_asks == []
+
+
+# ---------------------------------------------------------------------------
+# between-turns boundary gate (host-injected; e.g. running-task input supplements)
+# ---------------------------------------------------------------------------
+
+
+async def test_boundary_check_parks_before_the_first_ask_without_consuming_work() -> None:
+    """A pending condition present at pass start parks the pass with zero asks."""
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    source = LoopScriptedSource({(0, ""): _actions(("a1", "memory_add", {"q": 1}))})
+
+    async def gate() -> str:
+        return "input_revision_pending"
+
+    outcome = await _controller(store, source, port).run(
+        _spec(limits=ControllerLimits(max_turns=3), boundary_check=gate)
+    )
+    assert outcome.state == "stopped" and outcome.reason == "input_revision_pending"
+    assert outcome.turns == 0
+    assert port.calls == []
+    assert source.model_asks == []
+
+
+async def test_boundary_check_parks_only_after_a_turn_fully_committed() -> None:
+    """The gate never runs mid-turn: the accepted action dispatches before the park."""
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    source = LoopScriptedSource({(0, ""): _actions(("a1", "memory_add", {"q": 1}))})
+
+    # A supplement that "arrives" once turn 1's action has dispatched — like
+    # the real host's pending read, which is False at pass start.
+    async def gate() -> str | None:
+        return "input_revision_pending" if len(port.calls) >= 1 else None
+
+    outcome = await _controller(store, source, port).run(
+        _spec(limits=ControllerLimits(max_turns=3), boundary_check=gate)
+    )
+    # Turn 1's committed decision dispatched its action; the park then fires
+    # before turn 2's model call, carrying the committed identity.
+    assert [name for name, _args, _ in port.calls] == ["memory_add"]
+    assert outcome.state == "stopped" and outcome.reason == "input_revision_pending"
+    assert outcome.turns == 1
+    assert outcome.decision_step_ids == (decision_step_id_for_turn("agent-turn", 1),)
+
+
+async def test_boundary_gate_resolution_lets_a_rebuilt_spec_continue() -> None:
+    """Host flow: park, bind at committed+1, re-enter — the next ask sees the revision."""
+    from hecate_runtime.agent_controller import ControllerInputRevision
+
+    store, port = InMemoryDecisionStore(), StubToolPort()
+    source = LoopScriptedSource(
+        {
+            (0, ""): _actions(("a1", "memory_add", {"q": 1})),
+            (1, _RESULT_OK): _final("the answer"),
+        }
+    )
+
+    async def gate() -> str | None:
+        return "input_revision_pending" if len(port.calls) >= 1 else None
+
+    run_ref = _run_ref()
+    first = await _controller(store, source, port).run(
+        _spec(run_ref, limits=ControllerLimits(max_turns=3), boundary_check=gate)
+    )
+    assert first.state == "stopped" and first.reason == "input_revision_pending" and first.turns == 1
+    # The host binds the supplement one past the committed chain and re-enters.
+    revision = ControllerInputRevision("rev-live-1", {"region": "EU"}, effective_turn=2)
+    second = await _controller(store, source, port).run(
+        _spec(run_ref, limits=ControllerLimits(max_turns=3), input_revisions=(revision,))
+    )
+    assert second.is_final_answer
+    # Turn 1 replayed with zero fresh work; turn 2's rebuilt ask carries the
+    # bound revision at its causal boundary.
+    assert source.model_asks == [
+        decision_step_id_for_turn("agent-turn", 1),
+        decision_step_id_for_turn("agent-turn", 2),
+    ]
+    provided = [
+        json.loads(message["content"])["provided_input"]
+        for message in source.turns[-1]
+        if message.get("role") == "user" and "provided_input" in str(message.get("content"))
+    ]
+    assert provided == [{"region": "EU"}]

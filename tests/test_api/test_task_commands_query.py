@@ -326,3 +326,69 @@ async def test_projection_failure_is_redacted(api_records, monkeypatch, caplog):
     for secret in ("password", "sk-SECRET"):
         assert secret not in response.text
         assert secret not in caplog.text
+
+
+async def test_live_input_delivery_is_whitelisted_in_command_list(api_records):
+    """Live supplements expose delivery facts only; content and tokens never leak."""
+    from hecate_durable.contracts.durable import IdempotencyKey, TaskLifecycleState
+
+    records = api_records
+    store = records["store"]
+    task_ref = BackendRef(RefKind.TASK, "hecate", str(records["task"].id))
+    _seed(records, "cmd-plain", CommandState.REQUESTED)
+    store.submit_task(
+        key=IdempotencyKey(key="k-live", subject="app", workspace="ws", request_digest="a" * 64),
+        task_ref=task_ref,
+        run_ref=BackendRef(RefKind.RUN, "hecate", "run-live-1"),
+        input_payload={"controller_loop": True},
+    )
+    store.apply_task_state(task_ref, TaskLifecycleState.RUNNING)
+    store.record(
+        ControlCommandRecord(
+            command_id="live-1",
+            kind=ControlCommandKind.PROVIDE_INPUT,
+            issuer="editor",
+            task_ref=task_ref,
+            issued_at=datetime.now(UTC).isoformat(),
+            state=CommandState.REQUESTED,
+            payload={"schema_version": 1, "content": {"region": "EU", "wait_token": "sk-SECRET"}},
+            payload_schema_ref="urn:hecate:task-live-input/1",
+            extra={"workspace_id": str(DEFAULT_WORKSPACE_ID)},
+        )
+    )
+    store.record_live_input_revision(task_ref, command_id="live-1", content={"region": "EU"})
+
+    response = await records["client"].get(f"/api/tasks/{records['task'].id}/commands")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    items = {item["command_id"]: item for item in body["items"]}
+    # The plain command keeps the original whitelist shape: no delivery key.
+    assert set(items["cmd-plain"]) == COMMAND_WHITELIST
+    delivery = items["live-1"]["delivery"]
+    assert delivery["source_ref"] == "live-1"
+    assert delivery["status"] == "received"
+    assert set(delivery) == {"source_ref", "status", "revision_id", "run_ref"}
+    receipt = await records["client"].get("/api/commands/live-1")
+    assert receipt.status_code == 200, receipt.text
+    assert receipt.json()["delivery"] == delivery
+    # Supplement content, envelope fields and tokens never surface.
+    assert "region" not in response.text
+    assert "sk-SECRET" not in response.text
+    assert "schema_version" not in response.text
+
+
+@pytest.mark.parametrize("missing", ["command_id", "expected_revision"])
+async def test_live_input_requires_request_identity_before_recording(api_records, missing):
+    """The API cannot mint an identity or accept an unversioned live edit."""
+    body = {
+        "kind": "provide_input",
+        "command_id": "live-missing",
+        "expected_revision": 1,
+        "payload_schema_ref": "urn:hecate:task-live-input/1",
+        "payload": {"schema_version": 1, "content": {"region": "EU"}},
+    }
+    del body[missing]
+    response = await api_records["client"].post(f"/api/tasks/{api_records['task'].id}/commands", json=body)
+    assert response.status_code == 422, response.text
+    assert "requires a command ID and nonnegative expected revision" in response.text
+    assert api_records["store"].get("live-missing") is None
