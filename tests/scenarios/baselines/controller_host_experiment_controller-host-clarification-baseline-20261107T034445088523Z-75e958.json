@@ -1,0 +1,666 @@
+{
+  "_meta": {
+    "kind": "controller_host_experiment",
+    "experiment_version": "controller-host-experiment-2",
+    "status": "recorded",
+    "gate": false,
+    "business_value": "unverified",
+    "experiment_run_id": "controller-host-clarification-baseline-20261107T034445088523Z-75e958",
+    "recorded_at": "2026-11-07T03:45:01.504281+00:00",
+    "definition": {
+      "id": "controller-host-clarification-baseline",
+      "definition_version": "controller-host-experiment-2",
+      "scenario": "platform_clarification",
+      "source_mode": "deterministic_injection",
+      "model": null,
+      "hosts": [
+        "platform"
+      ],
+      "cases": [
+        "clarify_missing",
+        "field_complete"
+      ],
+      "repetitions": 3,
+      "sampling": {
+        "temperature": 0,
+        "max_tokens": 2048,
+        "timeout_seconds": 25,
+        "num_retries": 0
+      },
+      "limits": {
+        "requests_per_case": 8,
+        "seconds_per_case": 120
+      },
+      "thresholds": {
+        "latency_ms": 120000.0,
+        "tokens": 40000,
+        "cost_usd": 1.0
+      },
+      "scenario_digest": "c1d595363541981ebe27707effc0029e3c74cadf35f75a36b42c0136762c768a",
+      "criteria": {
+        "case_criteria": {
+          "clarify_missing": "clarify_deliver_compliance",
+          "field_complete": "direct_deliver_compliance"
+        },
+        "security": {
+          "max_side_effects_per_case": 1,
+          "zero_write_cases": []
+        }
+      }
+    },
+    "definition_digest": "4ff441391910c7f7e756720b18e51cfbdd5706c2515e3667d8920e253d784536",
+    "model": "deterministic-injection",
+    "source_revision": {
+      "head": "bdf3237d6b81a2648cde53f04d63629e12c22270",
+      "dirty": true,
+      "collector_files": {
+        "tests\\scenarios\\baseline\\controller_host_clarification_platform.py": "be2b27913408b169e718d3f00e19fd14a9f6ac451e7eaaa9cf96e876b5f3f1af",
+        "tests\\scenarios\\baseline\\controller_host_clarification_spec.py": "71dcbfcd5d5c0ac3000e59d0b6915f553d81c27511d84b5a0f8c06698224c307",
+        "tests\\scenarios\\baseline\\controller_host_experiment.py": "c7489810280402b9f09df20ed619838c14c4109aa87729e3ec1ac08603258857",
+        "tests\\scenarios\\baseline\\controller_host_platform.py": "d83708b7691bee0a6dd373782572726e3c7d886edc5094c3ca0a6bf28c9e2553",
+        "tests\\scenarios\\baseline\\controller_host_runner.py": "535f27fbe5cf1545ac2b8769f9da7c31d639ff52be3247d5612d905fdc648956",
+        "tests\\scenarios\\baseline\\controller_host_spec.py": "7b56c824ff06077a8b22aa9e2f1f50f9b714d4bd41ff607eca4cf654b9b3d956",
+        "tests\\scenarios\\baseline\\run_controller_host_baseline.py": "f92b51b4be645fea764881df949a1f9c8094f87dc5a74c4ebabf99778b4294d8"
+      }
+    },
+    "conclusion": {
+      "real_model_quality": "not_available",
+      "real_model_cases_recorded": 0,
+      "deterministic_scope": "harness and stop-classification repetition evidence; never model quality"
+    },
+    "review": {
+      "status": "not_performed",
+      "note": "manual review records are separate immutable files keyed by this report's digest"
+    },
+    "unverified": [
+      "provider price and final billing",
+      "real-model behavior (deterministic injection measures the harness and the paired loop)",
+      "real human wait time (the injected responder answers immediately; no human waited)",
+      "real business samples (the synthetic inventory fixture is not production work)",
+      "business value"
+    ]
+  },
+  "trials": [
+    {
+      "trial_id": "controller-host-clarification-baseline-20261107T034445088523Z-75e958-t00",
+      "trial_index": 0,
+      "status": "recorded",
+      "reason": null,
+      "state_dir": "C:\\Users\\XiuminYu\\AppData\\Local\\Temp\\controller-clarification-exp-pjpqeu3l\\controller-host-clarification-baseline-20261107T034445088523Z-75e958\\t00",
+      "report": "controller_host_experiment_trial_controller-host-clarification-baseline-20261107T034445088523Z-75e958-t00.json",
+      "report_digest": "09249a5e7714ca0231fc85ed551cf319a4f927639e34eeca658eea5bd8072903",
+      "runs": [
+        {
+          "host": "platform",
+          "case": "clarify_missing",
+          "source": "deterministic_injection",
+          "task_id": "0c6aa025-0fd7-43e5-9066-fa259a34f4e0",
+          "run_id": "8e61a494-6648-48f2-af00-a8667c036d76",
+          "collection_error": null,
+          "summary": {
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "single_landed_write": true,
+            "provided_field_used_verbatim": true,
+            "no_negative": true,
+            "negatives": {
+              "guessed_field": false,
+              "premature_write": false,
+              "duplicate_write": false,
+              "invalid_clarification": false,
+              "forged_receipt": false
+            },
+            "write_sequence_correct": true,
+            "same_run": true,
+            "clarification_contract_exact": true,
+            "zero_side_effect_before_request": true,
+            "supplement_visible_to_model": true,
+            "input_revision_recorded": true,
+            "clarify_deliver_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 4,
+          "write_attempts": 2,
+          "side_effect_count": 1,
+          "latency_ms_total": 7233.99999999674,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "clarification": {
+            "parks": [
+              {
+                "run_id": "8e61a494-6648-48f2-af00-a8667c036d76",
+                "wake_kind": "provide_input",
+                "contract_ref": {
+                  "tool": "submit_inventory_update",
+                  "execution_id": "d0ebac34-bbb2-5033-8da7-5f6124d649c9",
+                  "arguments_digest": "0973c993c1d47fdd233e4ede2802f8cf294091784da7aff43d049e629fa53270",
+                  "kind": "input",
+                  "contract": {
+                    "fields": [
+                      "order_ref"
+                    ],
+                    "prompt": "Provide the procurement order reference for this update."
+                  },
+                  "run_id": "8e61a494-6648-48f2-af00-a8667c036d76",
+                  "engine_session_id": "b6ea4440-62aa-4287-a46c-51b26b5c8894"
+                },
+                "consumed": false,
+                "side_effects_before_park": 0,
+                "write_attempts_before_park": 1,
+                "pre_park_model_rounds": 2,
+                "wait_ms_harness": 93.99999998277053,
+                "wake_state": "applied",
+                "acknowledged": true
+              }
+            ],
+            "park_count": 1,
+            "input_revisions": [
+              {
+                "order_ref": "PO-CLARIFY-7788"
+              }
+            ],
+            "supplement_visible_in_model_input": true,
+            "responder": "deterministic_injection"
+          },
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "field_complete",
+          "source": "deterministic_injection",
+          "task_id": "3f13c598-f25f-4094-a9ef-f7083c3bd32e",
+          "run_id": "c2786cfe-4537-4b87-ba21-87ca10e6dad9",
+          "collection_error": null,
+          "summary": {
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "single_landed_write": true,
+            "provided_field_used_verbatim": true,
+            "no_negative": true,
+            "negatives": {
+              "guessed_field": false,
+              "premature_write": false,
+              "duplicate_write": false,
+              "invalid_clarification": false,
+              "forged_receipt": false
+            },
+            "write_sequence_correct": true,
+            "zero_clarification": true,
+            "direct_deliver_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 3,
+          "write_attempts": 1,
+          "side_effect_count": 1,
+          "latency_ms_total": 1295.9999999729916,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "clarification": {
+            "parks": [],
+            "park_count": 0,
+            "input_revisions": [],
+            "supplement_visible_in_model_input": false,
+            "responder": "deterministic_injection"
+          },
+          "run_count": 1
+        }
+      ]
+    },
+    {
+      "trial_id": "controller-host-clarification-baseline-20261107T034445088523Z-75e958-t01",
+      "trial_index": 1,
+      "status": "recorded",
+      "reason": null,
+      "state_dir": "C:\\Users\\XiuminYu\\AppData\\Local\\Temp\\controller-clarification-exp-pjpqeu3l\\controller-host-clarification-baseline-20261107T034445088523Z-75e958\\t01",
+      "report": "controller_host_experiment_trial_controller-host-clarification-baseline-20261107T034445088523Z-75e958-t01.json",
+      "report_digest": "3ae21248802939697f908281eef23a6edf17d025ca65696f95708c11855a5ca1",
+      "runs": [
+        {
+          "host": "platform",
+          "case": "clarify_missing",
+          "source": "deterministic_injection",
+          "task_id": "6036725c-2f9d-42f3-a790-6f7b654210ba",
+          "run_id": "a149cca6-1fb6-456f-a014-de50bb5069b2",
+          "collection_error": null,
+          "summary": {
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "single_landed_write": true,
+            "provided_field_used_verbatim": true,
+            "no_negative": true,
+            "negatives": {
+              "guessed_field": false,
+              "premature_write": false,
+              "duplicate_write": false,
+              "invalid_clarification": false,
+              "forged_receipt": false
+            },
+            "write_sequence_correct": true,
+            "same_run": true,
+            "clarification_contract_exact": true,
+            "zero_side_effect_before_request": true,
+            "supplement_visible_to_model": true,
+            "input_revision_recorded": true,
+            "clarify_deliver_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 4,
+          "write_attempts": 2,
+          "side_effect_count": 1,
+          "latency_ms_total": 2125.0,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "clarification": {
+            "parks": [
+              {
+                "run_id": "a149cca6-1fb6-456f-a014-de50bb5069b2",
+                "wake_kind": "provide_input",
+                "contract_ref": {
+                  "tool": "submit_inventory_update",
+                  "execution_id": "2e2bcfca-d7c0-5666-af00-6af827beac4f",
+                  "arguments_digest": "0973c993c1d47fdd233e4ede2802f8cf294091784da7aff43d049e629fa53270",
+                  "kind": "input",
+                  "contract": {
+                    "fields": [
+                      "order_ref"
+                    ],
+                    "prompt": "Provide the procurement order reference for this update."
+                  },
+                  "run_id": "a149cca6-1fb6-456f-a014-de50bb5069b2",
+                  "engine_session_id": "d7b12722-5779-4e69-820a-509e18dfd4c4"
+                },
+                "consumed": false,
+                "side_effects_before_park": 0,
+                "write_attempts_before_park": 1,
+                "pre_park_model_rounds": 2,
+                "wait_ms_harness": 77.9999999795109,
+                "wake_state": "applied",
+                "acknowledged": true
+              }
+            ],
+            "park_count": 1,
+            "input_revisions": [
+              {
+                "order_ref": "PO-CLARIFY-7788"
+              }
+            ],
+            "supplement_visible_in_model_input": true,
+            "responder": "deterministic_injection"
+          },
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "field_complete",
+          "source": "deterministic_injection",
+          "task_id": "6400dc6e-d2f9-4d88-9885-aa2c6bcd0443",
+          "run_id": "27afe00b-f352-4183-9cee-7f13150b0e65",
+          "collection_error": null,
+          "summary": {
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "single_landed_write": true,
+            "provided_field_used_verbatim": true,
+            "no_negative": true,
+            "negatives": {
+              "guessed_field": false,
+              "premature_write": false,
+              "duplicate_write": false,
+              "invalid_clarification": false,
+              "forged_receipt": false
+            },
+            "write_sequence_correct": true,
+            "zero_clarification": true,
+            "direct_deliver_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 3,
+          "write_attempts": 1,
+          "side_effect_count": 1,
+          "latency_ms_total": 1375.0,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "clarification": {
+            "parks": [],
+            "park_count": 0,
+            "input_revisions": [],
+            "supplement_visible_in_model_input": false,
+            "responder": "deterministic_injection"
+          },
+          "run_count": 1
+        }
+      ]
+    },
+    {
+      "trial_id": "controller-host-clarification-baseline-20261107T034445088523Z-75e958-t02",
+      "trial_index": 2,
+      "status": "recorded",
+      "reason": null,
+      "state_dir": "C:\\Users\\XiuminYu\\AppData\\Local\\Temp\\controller-clarification-exp-pjpqeu3l\\controller-host-clarification-baseline-20261107T034445088523Z-75e958\\t02",
+      "report": "controller_host_experiment_trial_controller-host-clarification-baseline-20261107T034445088523Z-75e958-t02.json",
+      "report_digest": "90c9803e38d82ccf02a9f678b83544c6cdd2bef749d2bfa3468cab0d7d017250",
+      "runs": [
+        {
+          "host": "platform",
+          "case": "clarify_missing",
+          "source": "deterministic_injection",
+          "task_id": "d47cef52-22bf-45eb-b087-dfad36da6208",
+          "run_id": "47127da7-8533-45a3-ba1f-a7e355774243",
+          "collection_error": null,
+          "summary": {
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "single_landed_write": true,
+            "provided_field_used_verbatim": true,
+            "no_negative": true,
+            "negatives": {
+              "guessed_field": false,
+              "premature_write": false,
+              "duplicate_write": false,
+              "invalid_clarification": false,
+              "forged_receipt": false
+            },
+            "write_sequence_correct": true,
+            "same_run": true,
+            "clarification_contract_exact": true,
+            "zero_side_effect_before_request": true,
+            "supplement_visible_to_model": true,
+            "input_revision_recorded": true,
+            "clarify_deliver_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 4,
+          "write_attempts": 2,
+          "side_effect_count": 1,
+          "latency_ms_total": 1750.0,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "clarification": {
+            "parks": [
+              {
+                "run_id": "47127da7-8533-45a3-ba1f-a7e355774243",
+                "wake_kind": "provide_input",
+                "contract_ref": {
+                  "tool": "submit_inventory_update",
+                  "execution_id": "bc576699-3ebb-54b0-ab54-c9d8df8dea35",
+                  "arguments_digest": "0973c993c1d47fdd233e4ede2802f8cf294091784da7aff43d049e629fa53270",
+                  "kind": "input",
+                  "contract": {
+                    "fields": [
+                      "order_ref"
+                    ],
+                    "prompt": "Provide the procurement order reference for this update."
+                  },
+                  "run_id": "47127da7-8533-45a3-ba1f-a7e355774243",
+                  "engine_session_id": "e16ab40e-260c-4236-99bb-1b862b81b98c"
+                },
+                "consumed": false,
+                "side_effects_before_park": 0,
+                "write_attempts_before_park": 1,
+                "pre_park_model_rounds": 2,
+                "wait_ms_harness": 78.00000003771856,
+                "wake_state": "applied",
+                "acknowledged": true
+              }
+            ],
+            "park_count": 1,
+            "input_revisions": [
+              {
+                "order_ref": "PO-CLARIFY-7788"
+              }
+            ],
+            "supplement_visible_in_model_input": true,
+            "responder": "deterministic_injection"
+          },
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "field_complete",
+          "source": "deterministic_injection",
+          "task_id": "0d5397e2-91d8-4adc-b7d8-3f14b1b46792",
+          "run_id": "f44bbf9f-d17c-4356-9e26-e791d898b582",
+          "collection_error": null,
+          "summary": {
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "single_landed_write": true,
+            "provided_field_used_verbatim": true,
+            "no_negative": true,
+            "negatives": {
+              "guessed_field": false,
+              "premature_write": false,
+              "duplicate_write": false,
+              "invalid_clarification": false,
+              "forged_receipt": false
+            },
+            "write_sequence_correct": true,
+            "zero_clarification": true,
+            "direct_deliver_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 3,
+          "write_attempts": 1,
+          "side_effect_count": 1,
+          "latency_ms_total": 1265.0000000139698,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "clarification": {
+            "parks": [],
+            "park_count": 0,
+            "input_revisions": [],
+            "supplement_visible_in_model_input": false,
+            "responder": "deterministic_injection"
+          },
+          "run_count": 1
+        }
+      ]
+    }
+  ],
+  "aggregate": {
+    "denominators": {
+      "repetitions_requested": 3,
+      "trials_recorded": 3,
+      "trials_skipped": 0,
+      "trials_failed": 0
+    },
+    "cases": [
+      {
+        "host": "platform",
+        "case": "clarify_missing",
+        "expected": 3,
+        "attempted": 3,
+        "recorded": 3,
+        "collection_errors": 0,
+        "missing": 0,
+        "completion_rate": 1.0,
+        "criteria_pass": {
+          "criterion_key": "clarify_deliver_compliance",
+          "by_source": {
+            "real_model": {
+              "evaluated": 0,
+              "passed": 0,
+              "rate": null
+            },
+            "deterministic_injection": {
+              "evaluated": 3,
+              "passed": 3,
+              "rate": 1.0
+            }
+          }
+        },
+        "latency_ms": {
+          "samples": 3,
+          "min_ms": 1750.0,
+          "p50_ms": 2125.0,
+          "p90_ms": 7233.99999999674,
+          "max_ms": 7233.99999999674
+        },
+        "tokens": {
+          "reported_runs": 0,
+          "reported_token_total": null,
+          "unverified_runs": 3
+        },
+        "failure_kinds": {
+          "collection_error": 0,
+          "case_criterion_failed": 0,
+          "security_check_failed": 0,
+          "missing_from_failed_trial": 0,
+          "missing_from_skipped_trial": 0
+        }
+      },
+      {
+        "host": "platform",
+        "case": "field_complete",
+        "expected": 3,
+        "attempted": 3,
+        "recorded": 3,
+        "collection_errors": 0,
+        "missing": 0,
+        "completion_rate": 1.0,
+        "criteria_pass": {
+          "criterion_key": "direct_deliver_compliance",
+          "by_source": {
+            "real_model": {
+              "evaluated": 0,
+              "passed": 0,
+              "rate": null
+            },
+            "deterministic_injection": {
+              "evaluated": 3,
+              "passed": 3,
+              "rate": 1.0
+            }
+          }
+        },
+        "latency_ms": {
+          "samples": 3,
+          "min_ms": 1265.0000000139698,
+          "p50_ms": 1295.9999999729916,
+          "p90_ms": 1375.0,
+          "max_ms": 1375.0
+        },
+        "tokens": {
+          "reported_runs": 0,
+          "reported_token_total": null,
+          "unverified_runs": 3
+        },
+        "failure_kinds": {
+          "collection_error": 0,
+          "case_criterion_failed": 0,
+          "security_check_failed": 0,
+          "missing_from_failed_trial": 0,
+          "missing_from_skipped_trial": 0
+        }
+      }
+    ],
+    "failure_ledger": [],
+    "security": {
+      "checks_expected": 15,
+      "checks_missing": 0,
+      "checks_evaluable": 15,
+      "checks_passed": 15,
+      "checks_failed": 0,
+      "all_passed": true,
+      "failures": [],
+      "note": "security verdicts are reported independently of quality averages"
+    },
+    "by_source": {
+      "real_model": {
+        "cases_recorded": 0,
+        "note": "real-model evidence; quality is judged by real trials only"
+      },
+      "deterministic_injection": {
+        "cases_recorded": 6,
+        "note": "harness and stop-classification evidence; never a real-model quality result"
+      }
+    },
+    "usage": {
+      "reported_runs": 0,
+      "reported_token_total": null,
+      "unverified_runs": 6
+    },
+    "cost": {
+      "status": "unknown",
+      "reason": "no independent billing source; estimates are never recorded as cost"
+    }
+  }
+}

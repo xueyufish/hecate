@@ -22,6 +22,7 @@ import hashlib
 import json
 import math
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,88 @@ CASE_CRITERIA: dict[str, str] = {
 MAX_SIDE_EFFECTS_PER_CASE = 1
 ZERO_WRITE_CASES = ("cancelled", "budget_exhausted", "unknown_outcome")
 SOURCES = ("real_model", "deterministic_injection")
+DEFAULT_SCENARIO = "controller_host_matrix"
+
+
+@dataclass(frozen=True)
+class ScenarioAdapter:
+    """One scenario family's pinned identity, schemas and collector.
+
+    Each adapter owns its definition schema, its single-shot collector and
+    its planned evidence source, so a scenario's definition identity never
+    blends with another's. The default dual-host matrix keeps its original
+    schemas and digest space byte-identical; additional scenarios register
+    their own adapters at import time.
+    """
+
+    name: str
+    collect: Any
+    scenario_digest: Any
+    hosts: tuple[str, ...]
+    cases: tuple[str, ...]
+    definition_schema: dict[str, Any]
+    report_schema: dict[str, Any]
+    planned_source: Any
+    validate_definition: Any
+    default_provider: Any
+    # The scenario's own honest unknown-evidence list for aggregate _meta.
+    unverified: tuple[str, ...] = (
+        "provider price and final billing",
+        "real-model quality (unless real trials are recorded below)",
+        "cross-process and PostgreSQL recovery (host rebuilds are in-process over sqlite)",
+        "managed deployment certification",
+        "business value",
+    )
+    extra_run_fields: tuple[str, ...] = ()
+    security_rules: dict[str, tuple[str, ...]] | None = None
+
+
+_SCENARIO_ADAPTERS: dict[str, ScenarioAdapter] = {}
+
+
+def register_scenario(adapter: ScenarioAdapter) -> ScenarioAdapter:
+    """Register a scenario adapter; re-registration of a name is refused."""
+
+    if adapter.name in _SCENARIO_ADAPTERS:
+        raise ValueError(f"scenario {adapter.name!r} is already registered")
+    _SCENARIO_ADAPTERS[adapter.name] = adapter
+    return adapter
+
+
+def resolve_scenario(name: str | None) -> ScenarioAdapter:
+    """Resolve a scenario adapter; unknown names name the registered set."""
+
+    resolved = name or DEFAULT_SCENARIO
+    if resolved == "platform_clarification" and resolved not in _SCENARIO_ADAPTERS:
+        from tests.scenarios.baseline import run_controller_clarification_baseline  # noqa: F401
+
+    if resolved not in _SCENARIO_ADAPTERS:
+        raise ValueError(f"unknown scenario {resolved!r}; registered: {sorted(_SCENARIO_ADAPTERS)}")
+    return _SCENARIO_ADAPTERS[resolved]
+
+
+async def _collect_dual_host(**kwargs: Any) -> dict[str, Any]:
+    return await collector.collect(**kwargs)
+
+
+def _dual_host_planned_source(definition: dict[str, Any], case: str) -> str:
+    return (
+        "real_model"
+        if definition["source_mode"] == "real_model" and case in spec.QUALITY_CASES
+        else "deterministic_injection"
+    )
+
+
+def _dual_host_validate_definition(definition: dict[str, Any]) -> None:
+    if definition["source_mode"] == "real_model" and not (definition["model"] and str(definition["model"]).strip()):
+        raise ValueError("real_model experiments must pin a concrete model in the definition")
+    if definition["source_mode"] == "deterministic_injection" and definition["model"]:
+        raise ValueError("deterministic_injection experiments must not pin a provider model")
+    if set(definition["hosts"]) - set(spec.HOSTS):
+        raise ValueError("hosts must be a nonempty unique subset of platform,runner")
+    if set(definition["cases"]) - set(spec.CASES):
+        raise ValueError("cases must be a nonempty unique subset of the registered cases")
+
 
 DEFINITION_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -340,35 +423,45 @@ def build_definition(
     return definition
 
 
-def load_definition(path: Path) -> dict[str, Any]:
-    """Load and validate a definition file written by ``dump_definition``."""
+def load_definition(path: Path, *, scenario: str | None = None) -> dict[str, Any]:
+    """Load and validate a definition file against its own scenario."""
 
     definition = json.loads(path.read_text(encoding="utf-8"))
-    _validate_collection_definition(definition)
+    resolved = definition.get("scenario", DEFAULT_SCENARIO)
+    if scenario is not None and resolved != scenario:
+        raise ValueError(f"definition scenario {resolved!r} does not match the requested {scenario!r}")
+    _validate_collection_definition(definition, resolve_scenario(resolved))
     return definition
 
 
-def _validate_collection_definition(definition: dict[str, Any]) -> None:
-    Draft202012Validator(DEFINITION_SCHEMA).validate(definition)
-    if definition["scenario_digest"] != scenario_digest():
+def _validate_collection_definition(definition: dict[str, Any], adapter: ScenarioAdapter | None = None) -> None:
+    resolved = resolve_scenario(definition.get("scenario") if adapter is None else adapter.name)
+    if adapter is not None and definition.get("scenario", DEFAULT_SCENARIO) != adapter.name:
+        raise ValueError(
+            f"definition scenario {definition.get('scenario', DEFAULT_SCENARIO)!r} != adapter {adapter.name!r}"
+        )
+    Draft202012Validator(resolved.definition_schema).validate(definition)
+    if definition["scenario_digest"] != resolved.scenario_digest():
         raise ValueError("scenario digest differs from the current inputs or scoring version; rebuild the definition")
     if set(definition["criteria"]["case_criteria"]) != set(definition["cases"]):
         raise ValueError("case criteria must cover exactly the selected cases")
+    resolved.validate_definition(definition)
 
 
 def dump_definition(definition: dict[str, Any], path: Path) -> Path:
     """Write a definition file; the file's digest is the definition digest."""
 
-    Draft202012Validator(DEFINITION_SCHEMA).validate(definition)
+    definition_digest(definition)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(definition, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path
 
 
-def definition_digest(definition: dict[str, Any]) -> str:
+def definition_digest(definition: dict[str, Any], *, scenario: str | None = None) -> str:
     """The comparison-group identity: any criteria or input change re-keys it."""
 
-    Draft202012Validator(DEFINITION_SCHEMA).validate(definition)
+    resolved = resolve_scenario(scenario if scenario is not None else definition.get("scenario"))
+    Draft202012Validator(resolved.definition_schema).validate(definition)
     return spec.digest(definition)
 
 
@@ -402,7 +495,9 @@ def _distribution(samples: list[float]) -> dict[str, Any]:
     }
 
 
-def _security_checks(run: dict[str, Any], zero_write_cases: tuple[str, ...]) -> list[dict[str, Any]]:
+def _security_checks(
+    run: dict[str, Any], zero_write_cases: tuple[str, ...], extra_rules: tuple[str, ...] = ()
+) -> list[dict[str, Any]]:
     """Evaluate the pre-declared security rules on one recorded run.
 
     Runs missing the counted fields (collection errors) are not evaluable
@@ -430,6 +525,13 @@ def _security_checks(run: dict[str, Any], zero_write_cases: tuple[str, ...]) -> 
                     "observed": {"side_effects": side_effects, "write_attempts": write_attempts},
                 }
             )
+    negatives = run.get("summary", {}).get("negatives", {})
+    for rule in extra_rules:
+        observed = negatives.get(rule)
+        if isinstance(observed, bool):
+            checks.append({"rule": rule, "passed": not observed, "observed": observed})
+    if run.get("collection_error") is not None and extra_rules:
+        return [check for check in checks if not check["passed"]]
     return checks
 
 
@@ -437,7 +539,10 @@ def _case_blocks(
     definition: dict[str, Any],
     trial_records: list[dict[str, Any]],
     ledger: list[dict[str, Any]],
+    *,
+    adapter: ScenarioAdapter | None = None,
 ) -> list[dict[str, Any]]:
+    resolved = adapter if adapter is not None else resolve_scenario(definition.get("scenario"))
     skipped_trials = len([trial for trial in trial_records if trial["status"] == "skipped"])
     failed_trials = len([trial for trial in trial_records if trial["status"] == "failed"])
     blocks: list[dict[str, Any]] = []
@@ -454,11 +559,7 @@ def _case_blocks(
             criterion_key = definition["criteria"]["case_criteria"][case]
 
             by_source: dict[str, Any] = {}
-            planned_source = (
-                "real_model"
-                if definition["source_mode"] == "real_model" and case in spec.QUALITY_CASES
-                else "deterministic_injection"
-            )
+            planned_source = resolved.planned_source(definition, case)
             for source in SOURCES:
                 evaluated = [run for run in recorded if run.get("source") == source]
                 passed = [run for run in evaluated if run.get("summary", {}).get(criterion_key) is True]
@@ -477,8 +578,9 @@ def _case_blocks(
 
             security_failures: list[dict[str, Any]] = []
             zero_write_cases = tuple(definition["criteria"]["security"]["zero_write_cases"])
-            for run in recorded:
-                for check in _security_checks(run, zero_write_cases):
+            extra_rules = (resolved.security_rules or {}).get(case, ())
+            for run in runs if extra_rules else recorded:
+                for check in _security_checks(run, zero_write_cases, extra_rules):
                     if not check["passed"]:
                         failure = {
                             "host": host,
@@ -555,14 +657,16 @@ def _case_blocks(
     return blocks
 
 
-def _compact_run(run: dict[str, Any]) -> dict[str, Any]:
+def _compact_run(run: dict[str, Any], extra_fields: tuple[str, ...] = ()) -> dict[str, Any]:
     """Aggregate-visible projection of one run: verdicts and counters only.
 
     The raw traces (round messages, receipts, ledger actions) stay in the
-    trial record file this aggregate pins by digest.
+    trial record file this aggregate pins by digest. Scenario adapters may
+    name extra aggregate-visible fields (e.g. a clarification evidence
+    block) that their runs carry.
     """
 
-    return {
+    compact = {
         "host": run.get("host"),
         "case": run.get("case"),
         "source": run.get("source"),
@@ -577,6 +681,9 @@ def _compact_run(run: dict[str, Any]) -> dict[str, Any]:
         "latency_ms_total": run.get("latency_ms_total"),
         "usage": run.get("usage"),
     }
+    for field in extra_fields:
+        compact[field] = run.get(field)
+    return compact
 
 
 def _ledger_trial_id(
@@ -619,18 +726,20 @@ async def run_experiment(
     trial_report_dir: Path = BASELINE_DIR,
     case_pacing_seconds: float = 0.0,
     provider_factory: Any = None,
+    scenario: str | None = None,
 ) -> dict[str, Any]:
     """Run the definition's repetition matrix and return the aggregate report.
 
     Each trial gets its own identity and state directory and calls the
-    single-shot collector, so Task/Run identities, model-call counters and
-    business side-effect state are never carried across trials. Trial-level
-    failures and skipped real-mode trials are preserved in the aggregate —
-    they are never dropped before reporting.
+    scenario's single-shot collector, so Task/Run identities, model-call
+    counters and business side-effect state are never carried across
+    trials. Trial-level failures and skipped real-mode trials are
+    preserved in the aggregate — they are never dropped before reporting.
     """
 
+    adapter = resolve_scenario(scenario if scenario is not None else definition.get("scenario"))
     definition = copy.deepcopy(definition)
-    _validate_collection_definition(definition)
+    _validate_collection_definition(definition, adapter)
     state_root = Path(state_root)
     trial_report_dir = Path(trial_report_dir)
     trial_report_dir.mkdir(parents=True, exist_ok=True)
@@ -641,7 +750,7 @@ async def run_experiment(
     ledger: list[dict[str, Any]] = []
 
     def default_factory(trial_index: int) -> Any:
-        return spec.DeterministicProvider() if hermetic else None
+        return adapter.default_provider() if hermetic else None
 
     factory = provider_factory if provider_factory is not None else default_factory
     for index in range(definition["repetitions"]):
@@ -663,7 +772,7 @@ async def run_experiment(
             provider = factory(index)
             if hermetic and provider is None:
                 raise ValueError("deterministic experiments require an injected provider")
-            trial_report = await collector.collect(
+            trial_report = await adapter.collect(
                 provider=provider,
                 model=None if hermetic else definition["model"],
                 hosts=tuple(definition["hosts"]),
@@ -730,13 +839,7 @@ async def run_experiment(
                 "status": "not_performed",
                 "note": "manual review records are separate immutable files keyed by this report's digest",
             },
-            "unverified": [
-                "provider price and final billing",
-                "real-model quality (unless real trials are recorded below)",
-                "cross-process and PostgreSQL recovery (host rebuilds are in-process over sqlite)",
-                "managed deployment certification",
-                "business value",
-            ],
+            "unverified": list(adapter.unverified),
         },
         "trials": [
             {
@@ -744,7 +847,7 @@ async def run_experiment(
                     key: trial[key]
                     for key in ("trial_id", "trial_index", "status", "reason", "state_dir", "report", "report_digest")
                 },
-                "runs": [_compact_run(run) for run in trial.get("runs") or []],
+                "runs": [_compact_run(run, adapter.extra_run_fields) for run in trial.get("runs") or []],
             }
             for trial in trial_records
         ],
@@ -755,9 +858,9 @@ async def run_experiment(
                 "trials_skipped": skipped_trials,
                 "trials_failed": failed_trials,
             },
-            "cases": _case_blocks(definition, trial_records, ledger),
+            "cases": _case_blocks(definition, trial_records, ledger, adapter=adapter),
             "failure_ledger": ledger,
-            "security": _security_block(definition, trial_records),
+            "security": _security_block(definition, trial_records, adapter=adapter),
             "by_source": _by_source_summary(trial_records),
             "usage": _usage_summary(trial_records),
             "cost": {
@@ -766,19 +869,24 @@ async def run_experiment(
             },
         },
     }
-    Draft202012Validator(EXPERIMENT_REPORT_SCHEMA).validate(aggregate)
+    Draft202012Validator(adapter.report_schema).validate(aggregate)
     return aggregate
 
 
-def _security_block(definition: dict[str, Any], trial_records: list[dict[str, Any]]) -> dict[str, Any]:
+def _security_block(
+    definition: dict[str, Any],
+    trial_records: list[dict[str, Any]],
+    *,
+    adapter: ScenarioAdapter | None = None,
+) -> dict[str, Any]:
     """Security verdicts kept separate from every quality average."""
 
     zero_write_cases = tuple(definition["criteria"]["security"]["zero_write_cases"])
-    expected = (
-        definition["repetitions"]
-        * len(definition["hosts"])
-        * sum(1 + (case in zero_write_cases) for case in definition["cases"])
+    extra_rules = (adapter.security_rules if adapter else None) or {}
+    checks_per_host = sum(
+        1 + (case in zero_write_cases) + len(extra_rules.get(case, ())) for case in definition["cases"]
     )
+    expected = definition["repetitions"] * len(definition["hosts"]) * checks_per_host
     failures: list[dict[str, Any]] = []
     evaluable = 0
     passed = 0
@@ -788,9 +896,10 @@ def _security_block(definition: dict[str, Any], trial_records: list[dict[str, An
                 for run in trial.get("runs") or []:
                     if run.get("host") != host or run.get("case") != case:
                         continue
-                    if run.get("collection_error") is not None:
+                    collection_failed = run.get("collection_error") is not None
+                    if collection_failed and not extra_rules:
                         continue
-                    checks = _security_checks(run, zero_write_cases)
+                    checks = _security_checks(run, zero_write_cases, extra_rules.get(case, ()))
                     for check in checks:
                         evaluable += 1
                         if check["passed"]:
@@ -822,7 +931,8 @@ def _usage_summary(trial_records: list[dict[str, Any]]) -> dict[str, Any]:
 def write_experiment_report(report: dict[str, Any], out_dir: Path = BASELINE_DIR) -> Path:
     """Write the aggregate as a new immutable record; never overwrite."""
 
-    Draft202012Validator(EXPERIMENT_REPORT_SCHEMA).validate(report)
+    adapter = resolve_scenario((report.get("_meta", {}).get("definition") or {}).get("scenario"))
+    Draft202012Validator(adapter.report_schema).validate(report)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"controller_host_experiment_{report['_meta']['experiment_run_id']}.json"
@@ -978,3 +1088,30 @@ def review_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "cases_reviewed_total": total("cases_reviewed"),
         "reported_duration_ms_total": total("duration_ms"),
     }
+
+
+def experiment_report_schema_for(definition_schema: dict[str, Any]) -> dict[str, Any]:
+    """The experiment report schema bound to one scenario's definition schema."""
+
+    report_schema = copy.deepcopy(EXPERIMENT_REPORT_SCHEMA)
+    report_schema["properties"]["_meta"]["properties"]["definition"] = copy.deepcopy(definition_schema)
+    return report_schema
+
+
+# The default dual-host matrix keeps its original schemas, digest space and
+# collector; additional scenarios register their own adapters on import.
+register_scenario(
+    ScenarioAdapter(
+        name=DEFAULT_SCENARIO,
+        collect=_collect_dual_host,
+        scenario_digest=scenario_digest,
+        hosts=tuple(spec.HOSTS),
+        cases=tuple(spec.CASES),
+        definition_schema=DEFINITION_SCHEMA,
+        report_schema=EXPERIMENT_REPORT_SCHEMA,
+        planned_source=_dual_host_planned_source,
+        validate_definition=_dual_host_validate_definition,
+        default_provider=spec.DeterministicProvider,
+        extra_run_fields=(),
+    )
+)

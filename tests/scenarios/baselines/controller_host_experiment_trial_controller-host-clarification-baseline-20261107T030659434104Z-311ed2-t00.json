@@ -1,0 +1,1219 @@
+{
+  "_meta": {
+    "kind": "controller_host_clarification",
+    "status": "recorded",
+    "gate": false,
+    "business_value": "unverified",
+    "recorded_at": "2026-11-07T03:06:59.434104+00:00",
+    "rubric_version": "controller-host-clarification-rubric-1",
+    "scenario": "platform_clarification",
+    "source_revision": {
+      "head": "2be489feaddc76789652bbf6ac431183c9a79991",
+      "dirty": true,
+      "collector_files": {
+        "tests\\scenarios\\baseline\\controller_host_clarification_platform.py": "7ee997d1d34b005562cca43f37fbbcd9ae7915471742e6f7f2ef2f4b30723ee6",
+        "tests\\scenarios\\baseline\\controller_host_clarification_spec.py": "bf1a744a4987fefc36d762179a58b66a23f5dd72c1ab79eb0e21daf0c2df0340",
+        "tests\\scenarios\\baseline\\controller_host_experiment.py": "32878e4544b0863d52269894b9c1db4827d7e39458ae3d3c3327c02fb0dde997",
+        "tests\\scenarios\\baseline\\controller_host_platform.py": "f9d8f54a8a3216923c22cd18687f75d2ac5ff25c616ee72d168d8726ae552a12",
+        "tests\\scenarios\\baseline\\controller_host_runner.py": "535f27fbe5cf1545ac2b8769f9da7c31d639ff52be3247d5612d905fdc648956",
+        "tests\\scenarios\\baseline\\controller_host_spec.py": "7b56c824ff06077a8b22aa9e2f1f50f9b714d4bd41ff607eca4cf654b9b3d956",
+        "tests\\scenarios\\baseline\\run_controller_host_baseline.py": "f92b51b4be645fea764881df949a1f9c8094f87dc5a74c4ebabf99778b4294d8"
+      }
+    },
+    "output_schema_digest": "75d4773336812270f9fef5b36c73bfb68e9bbfd4b65878b1ab20c73d1fd66868",
+    "scenario_digest": "5b7c0fab3729c414f8eed78d043f4906649bcc26655dc12a1951322c97547139",
+    "cases": [
+      "clarify_missing",
+      "field_complete"
+    ],
+    "source": "deterministic_injection",
+    "sampling": {
+      "temperature": 0,
+      "max_tokens": 2048,
+      "timeout_seconds": 25,
+      "num_retries": 0
+    },
+    "limits": {
+      "requests_per_case": 8,
+      "seconds_per_case": 120
+    },
+    "thresholds": {
+      "latency_ms": 120000.0,
+      "tokens": 40000,
+      "cost_usd": 1.0
+    },
+    "cost_threshold_conclusion": "unverified",
+    "model": "deterministic-injection",
+    "model_version": "unverified",
+    "tool_versions": {
+      "query_inventory": "synthetic-1",
+      "submit_inventory_update": "synthetic-1"
+    },
+    "dataset_digest": "8c989123ed8f1cc0c0155350324b1c20625634d5a50a348df93def0d3c9644cc",
+    "prompt_digest": "e4f7263d14e6ba921fa98ad9a1eeea2e1cbaa6bb269167f153335d6bc7f965e1",
+    "tool_digest": "818419693d18a325eab1535ed940e292c17fdd805a12999d4a81eb445cfeddad",
+    "hosts": [
+      "platform"
+    ],
+    "collection": {
+      "cases_attempted": 2,
+      "cases_recorded": 2,
+      "cases_with_collection_error": 0
+    },
+    "unverified": [
+      "real-model behavior (deterministic injection measures the harness and the paired loop)",
+      "real human wait time (the injected responder answers immediately; no human waited)",
+      "provider price and final billing",
+      "real business samples (the synthetic inventory fixture is not production work)",
+      "business value"
+    ]
+  },
+  "runs": [
+    {
+      "host": "platform",
+      "case": "clarify_missing",
+      "task_id": "e3f97302-3e43-4f86-ae5e-2cb4e60ed5b7",
+      "run_id": "d0cec19b-e20f-4d18-9597-931ad5007b0e",
+      "source": "deterministic_injection",
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-deterministic-clarify",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "e6692f5d-5649-53bc-8cc1-7e0a1a3e4205",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A'}",
+              "role": "tool",
+              "tool_call_id": "e6692f5d-5649-53bc-8cc1-7e0a1a3e4205"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-deterministic-clarify",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "e6692f5d-5649-53bc-8cc1-7e0a1a3e4205",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"quantity\": 3, \"reorder\": true, \"status\": \"ok\", \"stock\": \"confirmed\", \"update_body\": \"SKU-A1 confirmed by warehouse-A\"}",
+              "role": "tool",
+              "tool_call_id": "e6692f5d-5649-53bc-8cc1-7e0a1a3e4205"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "7fe81a9b-2af4-5c4f-aec0-a6881c5c7925",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"contract\": {\"fields\": [\"order_ref\"], \"prompt\": \"Provide the procurement order reference for this update.\"}, \"status\": \"input_required\"}",
+              "role": "tool",
+              "tool_call_id": "7fe81a9b-2af4-5c4f-aec0-a6881c5c7925"
+            },
+            {
+              "content": "{\"provided_input\": {\"order_ref\": \"PO-CLARIFY-7788\"}}",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-deterministic-clarify",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3,
+                  "order_ref": "PO-CLARIFY-7788"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 3,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "e6692f5d-5649-53bc-8cc1-7e0a1a3e4205",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"quantity\": 3, \"reorder\": true, \"status\": \"ok\", \"stock\": \"confirmed\", \"update_body\": \"SKU-A1 confirmed by warehouse-A\"}",
+              "role": "tool",
+              "tool_call_id": "e6692f5d-5649-53bc-8cc1-7e0a1a3e4205"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "7fe81a9b-2af4-5c4f-aec0-a6881c5c7925",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"contract\": {\"fields\": [\"order_ref\"], \"prompt\": \"Provide the procurement order reference for this update.\"}, \"status\": \"input_required\"}",
+              "role": "tool",
+              "tool_call_id": "7fe81a9b-2af4-5c4f-aec0-a6881c5c7925"
+            },
+            {
+              "content": "{\"provided_input\": {\"order_ref\": \"PO-CLARIFY-7788\"}}",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-CLARIFY-7788\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "7eebd399-e677-5eb4-a59b-eada4e0acf9a",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-CLARIFY'}",
+              "role": "tool",
+              "tool_call_id": "7eebd399-e677-5eb4-a59b-eada4e0acf9a"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Reorder submitted with order_ref PO-CLARIFY-7788; update UPD-CLARIFY.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Reorder submitted with order_ref PO-CLARIFY-7788; update UPD-CLARIFY.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "status": "input_required",
+          "content": {
+            "status": "input_required",
+            "contract": {
+              "fields": [
+                "order_ref"
+              ],
+              "prompt": "Provide the procurement order reference for this update."
+            }
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-CLARIFY-7788",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-CLARIFY"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-CLARIFY-7788",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "business_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-CLARIFY-7788",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "action_key": "5fb6ac38-25bb-51b0-98f3-767789bcf5fb",
+          "arguments_digest": "c65eb9890e2e3ef69f09861e5bcdda34b3306c5926adc5787c53b1f6b4cf238d",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "db49b19e-8b30-5fdb-83a8-a5d2330b678f",
+          "arguments_digest": "0973c993c1d47fdd233e4ede2802f8cf294091784da7aff43d049e629fa53270",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "e6eeef19-ee3d-5201-bc96-90bd6437c857",
+          "arguments_digest": "fa1aa2c2cfd76646c2d599bd570f4b0ce37d6718e588d0cc86d16c3748509ec1",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "single_landed_write": true,
+        "provided_field_used_verbatim": true,
+        "no_negative": true,
+        "negatives": {
+          "guessed_field": false,
+          "premature_write": false,
+          "duplicate_write": false,
+          "invalid_clarification": false,
+          "forged_receipt": false
+        },
+        "clarification_contract_exact": true,
+        "zero_side_effect_before_request": true,
+        "supplement_visible_to_model": true,
+        "input_revision_recorded": true,
+        "clarify_deliver_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 4156.0000000172295,
+      "model_calls": 4,
+      "write_attempts": 2,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      },
+      "clarification": {
+        "parks": [
+          {
+            "wake_kind": "provide_input",
+            "contract_ref": {
+              "tool": "submit_inventory_update",
+              "execution_id": "db49b19e-8b30-5fdb-83a8-a5d2330b678f",
+              "arguments_digest": "0973c993c1d47fdd233e4ede2802f8cf294091784da7aff43d049e629fa53270",
+              "kind": "input",
+              "contract": {
+                "fields": [
+                  "order_ref"
+                ],
+                "prompt": "Provide the procurement order reference for this update."
+              },
+              "run_id": "d0cec19b-e20f-4d18-9597-931ad5007b0e",
+              "engine_session_id": "5fc1ffec-291e-4df7-b6b8-08870bcb4ceb"
+            },
+            "consumed": false,
+            "side_effects_before_park": 0,
+            "write_attempts_before_park": 1,
+            "pre_park_model_rounds": 2,
+            "wait_ms_harness": 92.99999999348074,
+            "wake_state": "applied",
+            "acknowledged": true
+          }
+        ],
+        "park_count": 1,
+        "input_revisions": [
+          {
+            "order_ref": "PO-CLARIFY-7788"
+          }
+        ],
+        "supplement_visible_in_model_input": true,
+        "responder": "deterministic_injection"
+      }
+    },
+    {
+      "host": "platform",
+      "case": "field_complete",
+      "task_id": "b50a5df7-947f-4789-8e05-a2464575493b",
+      "run_id": "b8d64711-a3bc-455d-beef-fdf3e96ef4c0",
+      "source": "deterministic_injection",
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-deterministic-clarify",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "33a34535-0bcb-5941-9747-d01284a9d7f4",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A', 'order_ref': 'PO-CLARIFY-7788'}",
+              "role": "tool",
+              "tool_call_id": "33a34535-0bcb-5941-9747-d01284a9d7f4"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-deterministic-clarify",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 3,
+                  "order_ref": "PO-CLARIFY-7788"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "33a34535-0bcb-5941-9747-d01284a9d7f4",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 3, 'update_body': 'SKU-A1 confirmed by warehouse-A', 'order_ref': 'PO-CLARIFY-7788'}",
+              "role": "tool",
+              "tool_call_id": "33a34535-0bcb-5941-9747-d01284a9d7f4"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-CLARIFY-7788\",\"quantity\":3,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "46a82b30-8a22-543c-bc09-2cff09fadbe5",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-CLARIFY'}",
+              "role": "tool",
+              "tool_call_id": "46a82b30-8a22-543c-bc09-2cff09fadbe5"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Reorder submitted with order_ref PO-CLARIFY-7788; update UPD-CLARIFY.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Reorder submitted with order_ref PO-CLARIFY-7788; update UPD-CLARIFY.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 3,
+            "update_body": "SKU-A1 confirmed by warehouse-A",
+            "order_ref": "PO-CLARIFY-7788"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-CLARIFY-7788",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-CLARIFY"
+          }
+        }
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-CLARIFY-7788",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "business_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-CLARIFY-7788",
+            "quantity": 3,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "action_key": "02aa752e-adb0-5c61-96b0-312f21dd222b",
+          "arguments_digest": "c65eb9890e2e3ef69f09861e5bcdda34b3306c5926adc5787c53b1f6b4cf238d",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "0fcb67cc-8e39-5908-b1ba-358200a6fac0",
+          "arguments_digest": "fa1aa2c2cfd76646c2d599bd570f4b0ce37d6718e588d0cc86d16c3748509ec1",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false
+      },
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "summary": {
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "single_landed_write": true,
+        "provided_field_used_verbatim": true,
+        "no_negative": true,
+        "negatives": {
+          "guessed_field": false,
+          "premature_write": false,
+          "duplicate_write": false,
+          "invalid_clarification": false,
+          "forged_receipt": false
+        },
+        "zero_clarification": true,
+        "direct_deliver_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "latency_ms_total": 1281.0000000172295,
+      "model_calls": 3,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      },
+      "clarification": {
+        "parks": [],
+        "park_count": 0,
+        "input_revisions": [],
+        "supplement_visible_in_model_input": false,
+        "responder": "deterministic_injection"
+      }
+    }
+  ]
+}
