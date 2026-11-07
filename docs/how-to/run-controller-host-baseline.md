@@ -75,6 +75,22 @@ New reports use `controller-host-experiment-2` to distinguish the corrected deno
 
 Real-model repeated trials inherit the single-shot real-mode gate (`HECATE_RUN_CONTROLLER_HOST_BASELINE=1`) and matching provider credential checks; missing either produces explicit skipped trials. Authorized business samples and a cost budget must be agreed before manually enabling real collection; the collector does not verify those approvals. The current task remains a synthetic inventory fixture even when a real model executes it, so that run cannot certify real business work.
 
+## Clarification scenarios: the platform_clarification experiment
+
+`tests/scenarios/baseline/run_controller_clarification_baseline.py` registers a second experiment scenario, `platform_clarification`, on the same versioned definition/aggregate machinery. It runs a **paired** synthetic-inventory probe on the real platform dispatch: the two cases share one dataset, one tool contract, one prompt pair and one output schema, and differ only in whether the read receipt already carries the required procurement order reference (`order_ref`).
+
+- **clarify_missing** — the receipt lacks the field, so the compliant provider calls the governed write tool without it; the tool declares the explicit `input_required` contract (zero side effects so far) and the task parks in the real `waiting_input` state. The driver issues a real `provide_input` command through `TaskControlService`, the durable revision is acknowledged against the parked action's identity, the same Task/Run resumes, the model input carries the platform's `provided_input` supplement, and the follow-up write uses the provided value verbatim before the artifact references the actual receipt.
+- **field_complete** — the receipt carries the field; the write goes out with the receipt-derived value and delivery is direct. Zero clarifications is itself an assertion: any park on this side scores `invalid_clarification`.
+
+Per-run scoring keeps the honest verdicts separate from quality: parks, wait durations (harness time around the injected responder — never a human wait), durable input revisions, side effects before the request, and negative verdicts for a guessed field, a premature write, a duplicate write, an invalid clarification and a forged receipt. The independent security block evaluates guessed input and pre-input side effects alongside the write ceiling, preserving known violations even when later collection fails. The rubric checks the same Run across the park and wake, the exact request/write sequence, and a successful write receipt referenced in the final answer. Missing evidence stays unevaluable. The scenario uses `controller-host-clarification-rubric-2`; earlier records retain their original rubric and comparison group.
+
+This round is deterministic-injection only: `collect` without an injected provider writes an explicit skipped record, and the scenario adapter rejects `real_model` definitions outright — real-model runs, real human wait times and costs stay unknown until authorized samples, human-in-the-loop authorization and a cost budget are provisioned. The scenario's definition digest is an independent comparison group; the default dual-host matrix keeps its own identity, schemas and history byte-identical.
+
+```bash
+python -m tests.scenarios.baseline.run_controller_clarification_baseline            # repeated experiment
+python -m tests.scenarios.baseline.run_controller_clarification_baseline --print-default-definition
+```
+
 ## What a record does not certify
 
 - `gate` stays `false` and `business_value` stays `unverified` on every record; nothing here is a production or release certificate.
@@ -85,4 +101,4 @@ Real-model repeated trials inherit the single-shot real-mode gate (`HECATE_RUN_C
 
 ## Verification pointers
 
-Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).
+Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The clarification scenario's invariants (paired identity, park/wake/resume behavior, negative verdicts, deferred real-model boundary) are asserted in `tests/scenarios/test_controller_clarification_report.py` under the `controller_host_clarification` recorded track. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).

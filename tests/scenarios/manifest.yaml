@@ -418,3 +418,16 @@ recorded_tracks:
       HECATE_RUN_CONTROLLER_HOST_BASELINE gate, provider credentials,
       authorized samples and a cost budget, none of which are provisioned
     ci_gate: false
+  - id: controller_host_clarification
+    tier: 2
+    runner: tests/scenarios/baseline/run_controller_clarification_baseline.py
+    record: tests/scenarios/baselines/controller_host_experiment_controller-host-clarification-baseline-20261107T034445088523Z-75e958.json
+    status: skipped
+    reason: >-
+      committed record is the deterministic-injection paired clarification
+      aggregate (scenario platform_clarification; harness and paired
+      park/provide_input/resume loop evidence, responder labeled
+      deterministic_injection); real-model clarification runs additionally
+      require human-in-the-loop authorization, authorized samples and a
+      cost budget, none of which are provisioned
+    ci_gate: false

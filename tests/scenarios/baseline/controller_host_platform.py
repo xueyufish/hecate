@@ -175,8 +175,16 @@ def _arguments_json(arguments: Any) -> str:
 class _SeamPatch:
     """Patch the composition seams; keep the real runtime port and guardrails."""
 
-    def __init__(self, registry: _SyntheticRegistry, gateway: _RecordingGateway, event_store: Any) -> None:
+    def __init__(
+        self,
+        registry: _SyntheticRegistry,
+        gateway: _RecordingGateway,
+        event_store: Any,
+        *,
+        tool_definitions: list[dict[str, Any]] | None = None,
+    ) -> None:
         self._registry = registry
+        self._tool_definitions = tool_definitions
         self._gateway = gateway
         self._event_store = event_store
         self._saved: dict[str, Any] = {}
@@ -192,7 +200,7 @@ class _SeamPatch:
             "get_shared_event_store": entry_assembly.get_shared_event_store,
             "llm_service": llm_service_module.llm_service,
         }
-        definitions = spec.tool_definitions()
+        definitions = self._tool_definitions if self._tool_definitions is not None else spec.tool_definitions()
 
         async def _load_tools(db, tool_names, *, workspace_id=None):  # noqa: ANN001 — seam signature
             return definitions
@@ -242,7 +250,7 @@ class PlatformEnvironment:
         )
         self._seeded = False
 
-    async def _seed(self, *, with_approval_rule: bool) -> uuid.UUID:
+    async def _seed(self, *, with_approval_rule: bool, persona: str | None = None) -> uuid.UUID:
         """Seed org/workspace/users/agent plus the optional ASK policy row."""
 
         from hecate.models.agent import AgentModel
@@ -271,7 +279,7 @@ class PlatformEnvironment:
                 version=1,
                 config_snapshot={
                     "model": "baseline",
-                    "persona": spec.SYSTEM_PROMPT,
+                    "persona": persona if persona is not None else spec.SYSTEM_PROMPT,
                     "tools": [spec.READ_TOOL, spec.WRITE_TOOL],
                     "model_config": {"model": "baseline", "temperature": 0},
                 },
