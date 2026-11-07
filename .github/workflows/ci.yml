@@ -237,6 +237,19 @@ jobs:
           # a cancel request recorded on a step another process is running.
           # (test_workflow_controller_steps.py is the SQLite contract tier.)
           python scripts/dev.py test tests/test_execution/test_workflow_controller_postgres.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
+      - name: Verify wait resource release and restart recovery on PostgreSQL
+        env:
+          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+          HECATE_WAITRES_EVIDENCE_DIR: ${{ runner.temp }}/wait-resource-evidence
+        run: |
+          python scripts/dev.py test tests/test_execution/test_wait_resource_recovery.py -q -rA --timeout=420 --timeout-method=thread -p no:cacheprovider
+      - name: Preserve wait resource evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-wait-resource-evidence
+          path: ${{ runner.temp }}/wait-resource-evidence/*.json
+          if-no-files-found: warn
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with
