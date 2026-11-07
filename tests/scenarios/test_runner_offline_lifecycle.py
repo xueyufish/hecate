@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -45,11 +46,16 @@ from tests.scenarios.tools import runner_harness
 
 
 def _isolation_evidence() -> dict:
-    """The network boundary the drill actually ran under."""
+    """The network boundary the drill actually ran under.
+
+    The interface list comes from ``socket.if_nameindex`` — a netlink
+    query scoped to the calling process's network namespace, exactly what
+    ``ip link`` reports. ``/sys/class/net`` is NOT namespace-scoped unless
+    sysfs is remounted inside the namespace, so it would wrongly show the
+    host's interfaces.
+    """
     mode = os.environ.get("HECATE_LIFECYCLE_ISOLATION", "host-namespace")
-    interfaces = (
-        sorted(entry.name for entry in Path("/sys/class/net").iterdir()) if sys.platform.startswith("linux") else []
-    )
+    interfaces = sorted(name for _index, name in socket.if_nameindex()) if sys.platform.startswith("linux") else []
     return {"mode": mode, "interfaces": interfaces}
 
 
