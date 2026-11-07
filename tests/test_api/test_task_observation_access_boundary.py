@@ -440,3 +440,62 @@ async def test_authorized_roles_preserve_populated_responses_and_facts(env, role
     assert "store.get_task_state" in env["calls"]
     assert "relay" not in env["calls"] and "service._dispatch_task" not in env["calls"]
     assert await _snapshot(env) == before
+
+
+async def test_budget_projection_is_whitelisted_recorded_only_and_role_preserved(env):
+    """The detail GET mirrors the parent's persisted child-execution counters
+    exactly: a recorded 0 is real, absent/invalid extras stay unrecorded, the
+    list never carries them, every authorized role reads them, and reads
+    never touch durable facts."""
+    client, store, task = env["client"], env["store"], env["task"]
+    # No counters recorded on this task or any listed one.
+    detail = (await client.get(f"/api/tasks/{task.id}")).json()
+    assert "agent_child_budget_used" not in detail and "workflow_budget_used" not in detail
+    listing = (await client.get("/api/tasks")).json()
+    assert all(
+        "agent_child_budget_used" not in item and "workflow_budget_used" not in item for item in listing["items"]
+    )
+
+    # A recorded 0 is a real fact; the two counters project independently.
+    metered = BackendRef(RefKind.TASK, "hecate", str(env["tasks"][1].id))
+    store.apply_task_state(
+        metered,
+        TaskLifecycleState.RUNNING,
+        expected_revision=0,
+        extra_update={"agent_child_budget_used": 0, "workflow_budget_used": 250},
+    )
+    # Invalid shapes (bool, negative) are withheld instead of coerced.
+    unmetered_ref = BackendRef(RefKind.RUN, "hecate", str(uuid.uuid4()))
+    row = env["tasks"][2]
+    store.submit_task(
+        key=IdempotencyKey(str(row.id), str(env["admin_ctx"].user_id), str(row.workspace_id), "c" * 64),
+        task_ref=BackendRef(RefKind.TASK, "hecate", str(row.id)),
+        run_ref=unmetered_ref,
+        input_payload={"goal": row.goal},
+    )
+    store.apply_task_state(
+        BackendRef(RefKind.TASK, "hecate", str(row.id)),
+        TaskLifecycleState.RUNNING,
+        expected_revision=0,
+        extra_update={"agent_child_budget_used": True, "workflow_budget_used": -5},
+    )
+
+    before = await _snapshot(env)
+    metered_detail = (await client.get(f"/api/tasks/{env['tasks'][1].id}")).json()
+    assert metered_detail["agent_child_budget_used"] == 0
+    assert metered_detail["workflow_budget_used"] == 250
+    invalid_detail = (await client.get(f"/api/tasks/{env['tasks'][2].id}")).json()
+    assert "agent_child_budget_used" not in invalid_detail
+    assert "workflow_budget_used" not in invalid_detail
+    assert await _snapshot(env) == before, "a detail GET must not write durable facts"
+
+    # The role gate governs access, not field presence: a VIEWER reads the
+    # same recorded counters.
+    env["holder"]["ctx"] = replace(env["admin_ctx"], role=WorkspaceRole.VIEWER)
+    viewer_detail = (await client.get(f"/api/tasks/{env['tasks'][1].id}")).json()
+    assert viewer_detail["agent_child_budget_used"] == 0
+    assert viewer_detail["workflow_budget_used"] == 250
+    listing = (await client.get("/api/tasks")).json()
+    assert all(
+        "agent_child_budget_used" not in item and "workflow_budget_used" not in item for item in listing["items"]
+    )

@@ -7,6 +7,7 @@ A controller task can delegate work to child tasks through the controlled `agent
 - The accepted-call count (`agent_children.accepted_calls`). A recorded `0` is a real fact and is shown as such — it is different from the summary being absent.
 - When the task currently has a recorded agent-child wait, its consumption summary (`agent_children.pending`): the call alias, the call identity, the child task reference and whether the callback was consumed.
 - When no wait is currently bound, the panel says so explicitly. The API summarizes only the current wait; it promises no call history, and the panel claims none.
+- The child-execution budget lines (`agent_child_budget_used`, `workflow_budget_used`) — see below.
 
 ## What the child side shows
 
@@ -21,6 +22,14 @@ A controller task can delegate work to child tasks through the controlled `agent
 
 Never infer a child's outcome from the parent's wait state: an unconsumed wait may belong to a child that is still running or already finished.
 
+## What the budget lines mean
+
+The **子执行累计预算（已记入父任务）** block always renders two independent lines — Agent 子调用 (`agent_child_budget_used`) and Workflow Controller 子步骤 (`workflow_budget_used`) — so an old task reads 未记录 instead of silently looking like zero.
+
+- Each line is the parent's persisted, cumulative spend for that child-execution kind: agent-child usage is folded in when the child's wake callback is consumed; workflow usage is folded in when a step's verified callback is consumed, and only steps with a declared budget slice meter.
+- A recorded `0` is a real fact and is shown as `0`. 未记录 means the counter was never recorded (a pre-feature task, or no metered child execution yet) — it is not zero, and the two counters handle their missing states independently.
+- The figures are already consumed accounting entries on the parent. They are not a real-time balance, do not cover the task's full usage (parent-side model calls are not child-execution spend), and are not a verified bill. The child task's own detail remains the place to read the child's outcome.
+
 ## Navigation and reference validation
 
 Relationship references are recorded data echoed by the API. A local link is generated only when the reference re-validates locally: the right `kind`, the supported platform issuer (`hecate`) on both the reference and the task detail being viewed, and a UUID id. Matching external issuer domains do not map external identifiers to local tasks. Anything else renders as recorded text with an explicit note instead of a guessed link. A relationship reference never grants access: child and parent details stay behind the platform's workspace/role read gate, and opening the link is an ordinary authorized navigation, not a delegation of permission.
@@ -28,7 +37,7 @@ Relationship references are recorded data echoed by the API. A local link is gen
 ## What the panel does not do
 
 - It never issues a POST: no human input, resume, cancel or callback submission. The existing agent-child wait stays read-only.
-- It shows no child status, no call history and no budget facts. Budget semantics belong to the child-budget slice and are not promised here.
+- It shows no child status and no call history. The budget lines are parent-side recorded totals only; they say nothing about any single child call or step.
 - Absence of the summaries means "no recorded relationship information" — possibly a task from before the feature — and never "delegation is disabled".
 - The section is task-scoped and stays put when the selected Run changes; run-scoped verdicts remain in the run panels.
 

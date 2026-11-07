@@ -174,6 +174,19 @@ export interface TaskDetail {
   agent_child_parent?: AgentChildParentStamp;
   /** Parent side of delegation; absent = no recorded delegation surface. */
   agent_children?: AgentChildrenSummary;
+  /**
+   * Cumulative Agent-child usage already recorded against this parent task,
+   * folded in by consumed child callbacks. Present only when the counter was
+   * recorded — a recorded `0` is real; absence means 未记录. It is a
+   * persisted accounting figure, never a real-time balance or verified bill.
+   */
+  agent_child_budget_used?: number;
+  /**
+   * Cumulative workflow-controller-step usage recorded against this parent
+   * task through verified step callbacks; only steps with a declared budget
+   * slice meter. Present only when recorded — absence means 未记录.
+   */
+  workflow_budget_used?: number;
   /** Server-owned live-supplement composer capability; absent = the task
    * carries no live-input surface at all (non-controller or legacy). */
   live_input?: TaskLiveInputCapability;
