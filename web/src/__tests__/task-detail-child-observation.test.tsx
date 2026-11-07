@@ -20,7 +20,19 @@ vi.mock("next/link", () => ({
 }));
 
 import TaskDetailPage from "../app/(dashboard)/ops-center/tasks/[id]/page";
-import { type AgentChildrenSummary, type TaskDetail } from "@/lib/task-types";
+import { type AgentChildrenSummary, type TaskDetail, type WorkflowStepsSummary } from "@/lib/task-types";
+
+const STEP0_CHILD = "33333333-3333-4333-8333-333333333333";
+
+function workflowStepsOf(overrides: Partial<WorkflowStepsSummary> = {}): WorkflowStepsSummary {
+  return {
+    steps: [
+      { index: 0, goal: "research the stock", mode: "controller", child_task_id: STEP0_CHILD, callback_applied: true },
+      { index: 1, goal: "write the summary", mode: "chat", waiting: { consumed: false } },
+    ],
+    ...overrides,
+  };
+}
 
 const CHILD_ID = "22222222-2222-4222-8222-222222222222";
 const PARENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -370,6 +382,114 @@ describe("TaskDetailPage child-execution budget lines", () => {
     expect(screen.getByTestId("child-budget-workflow-used").textContent).toContain(
       "Workflow Controller 子步骤：未记录",
     );
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+});
+
+describe("TaskDetailPage workflow step observation", () => {
+  it("renders the declared step list at task level and keeps it across run switching", async () => {
+    apiMock.get.mockImplementation(
+      detailRoute(
+        "task-1",
+        detailOf("task-1", {
+          runs: [
+            {
+              run_id: "run-a",
+              attempt_no: 1,
+              deployment_id: "dep-1",
+              backend_ref: {},
+              projection: { state: "succeeded", result_preview: "first" },
+              event_cursor: 1,
+            },
+            {
+              run_id: "run-b",
+              attempt_no: 2,
+              deployment_id: "dep-1",
+              backend_ref: {},
+              projection: { state: "failed", result_preview: "second" },
+              event_cursor: 2,
+            },
+          ],
+          workflow_steps: workflowStepsOf(),
+        }),
+      ),
+    );
+    render(<TaskDetailPage />);
+    const section = await screen.findByTestId("task-child-observation-section");
+    expect(within(section).getByTestId("workflow-step-0").textContent).toContain("research the stock");
+    expect(
+      within(section).getByTestId("workflow-step-0-child-link").getAttribute("href"),
+    ).toBe(`/ops-center/tasks/${STEP0_CHILD}`);
+    expect(within(section).getByTestId("workflow-step-0-callback").textContent).toContain("回调已消费");
+    expect(within(section).getByTestId("workflow-step-1-waiting").textContent).toContain("当前等待回调消费");
+
+    await userEvent.click(screen.getByRole("button", { name: "Run #1" }));
+    expect(within(section).getByTestId("workflow-step-0-child-link").getAttribute("href")).toBe(
+      `/ops-center/tasks/${STEP0_CHILD}`,
+    );
+    expect(within(section).getByTestId("workflow-step-1-waiting").textContent).toContain("当前等待回调消费");
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
+  it("navigates from a workflow child back to its parent via the recorded stamp", async () => {
+    apiMock.get.mockImplementation(
+      detailRoute("task-1", {
+        ...detailOf("task-1"),
+        workflow_parent: { parent_task_ref: LOCAL_PARENT_REF, step_index: 0 },
+      }),
+    );
+    render(<TaskDetailPage />);
+    const section = await screen.findByTestId("task-child-observation-section");
+    expect(within(section).getByTestId("workflow-child-parent-step-index").textContent).toContain("步骤序号：0");
+    expect(within(section).getByTestId("workflow-child-parent-link").getAttribute("href")).toBe(
+      `/ops-center/tasks/${PARENT_ID}`,
+    );
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
+  it("replaces the step list on a successful refresh instead of merging histories", async () => {
+    let current = detailOf("task-1", { workflow_steps: workflowStepsOf() });
+    apiMock.get.mockImplementation((path: string) =>
+      path === "/api/tasks/task-1" ? Promise.resolve(current) : panelResponse(path),
+    );
+    render(<TaskDetailPage />);
+    expect(await screen.findByTestId("workflow-step-0")).toBeInTheDocument();
+    current = detailOf("task-1");
+    await userEvent.click(screen.getByRole("button", { name: "刷新任务" }));
+    // A plain task carries no workflow summary at all: the whole panel
+    // switches to the absent state instead of keeping stale steps.
+    expect(await screen.findByTestId("agent-observation-absent")).toBeInTheDocument();
+    expect(screen.queryByTestId("workflow-step-list")).not.toBeInTheDocument();
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
+  it("never carries a previous task's workflow steps into the next task's view", async () => {
+    let resolveOld: (detail: TaskDetail) => void = () => {};
+    const oldResponse = new Promise<TaskDetail>((resolve) => {
+      resolveOld = resolve;
+    });
+    apiMock.get.mockImplementation((path: string) => {
+      if (path === "/api/tasks/task-1") return oldResponse;
+      if (path === "/api/tasks/task-2") {
+        return Promise.resolve(
+          detailOf("task-2", {
+            workflow_steps: workflowStepsOf({ steps: [{ index: 0, goal: "only step", mode: "chat" }] }),
+          }),
+        );
+      }
+      return panelResponse(path);
+    });
+    const view = render(<TaskDetailPage />);
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith("/api/tasks/task-1"));
+    routeState.id = "task-2";
+    view.rerender(<TaskDetailPage />);
+    expect((await screen.findByTestId("workflow-step-0")).textContent).toContain("only step");
+    await act(async () => {
+      resolveOld(detailOf("task-1", { workflow_steps: workflowStepsOf() }));
+    });
+    // The late task-1 step facts never bleed into the task-2 view.
+    expect(screen.getByTestId("workflow-step-0").textContent).toContain("only step");
+    expect(screen.queryByTestId("workflow-step-1")).not.toBeInTheDocument();
     expect(apiMock.post).not.toHaveBeenCalled();
   });
 });

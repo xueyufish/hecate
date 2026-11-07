@@ -8,6 +8,9 @@ import {
   type AgentChildrenSummary,
   type AgentTaskRef,
   type TaskDetail,
+  type WorkflowParentStamp,
+  type WorkflowStepObservation,
+  type WorkflowStepsSummary,
 } from "@/lib/task-types";
 
 /**
@@ -31,6 +34,13 @@ import {
  * in by consumed/verified callbacks. A recorded `0` is real and is shown
  * as such; 未记录 means the counter was never recorded. They are not a
  * real-time balance, not the task's full usage, and not verified billing.
+ *
+ * The workflow step list is the same kind of task-level recorded fact:
+ * declared steps (index, goal, mode) joined with the parent's persisted
+ * submission/callback/marker facts. A child link renders only for a
+ * submitted child that re-verified inside this workspace; consumption
+ * facts never imply the child succeeded, and the child's lifecycle and
+ * delivery verdict stay on the child task's own detail page.
  */
 
 const ABSENT_HINT =
@@ -58,6 +68,21 @@ const BUDGET_HEADING = "子执行累计预算（已记入父任务）";
 const BUDGET_SCOPE_NOTE =
   "两个数字分别是 Agent 子调用与 Workflow Controller 子步骤已记入父任务的累计用量：只在对应的子执行回调被消费后累加并持久化。它们不是实时余额，不覆盖本任务全部用量，也不是已核实的账单；“未记录”表示该计数从未记入，与有效 0 不同。";
 
+const WORKFLOW_SCOPE_NOTE =
+  "步骤列表按声明顺序展示任务级记录事实：提交记录、当前等待、回调消费与持久化标记（按原记录原样显示）。回调已消费不代表子任务成功，也不代表父任务目标通过；子任务的生命周期与交付验收请通过子任务详情查看。缺失字段表示该事实未记录，不是否定。";
+
+const WORKFLOW_UNREADABLE_NOTE =
+  "持久化的 Workflow 声明无法解析：步骤列表不可用。不能据此推断步骤从未存在，也不能推断声明已被修改。";
+
+const WORKFLOW_UNSUPPORTED_NOTE =
+  "当前存储不支持读取步骤提交记录：步骤仅展示声明与已记录的消费/标记事实，无法定位已提交的子任务。";
+
+const WORKFLOW_WAITING_NOTE = "当前等待回调消费：该步骤已提交且其回调尚未消费。";
+
+const WORKFLOW_WAITING_CONSUMED_NOTE = "当前等待的回调已消费。";
+
+const WORKFLOW_WAITING_UNKNOWN_NOTE = "当前等待绑定该步骤：消费状态未记录。";
+
 function recordedCount(value: number | undefined): string {
   return typeof value === "number" && Number.isSafeInteger(value) ? String(value) : "未记录";
 }
@@ -79,6 +104,126 @@ function ChildBudgetView({ detail }: { detail: TaskDetail }) {
       </div>
       <p className="text-xs text-muted-foreground" data-testid="child-budget-note">
         {BUDGET_SCOPE_NOTE}
+      </p>
+    </div>
+  );
+}
+
+/** Both lines of the workflow section render from recorded facts only:
+ * a child link exists iff the submitted child re-verified here, and the
+ * persisted markers are echoed verbatim instead of being paraphrased. */
+function WorkflowStepFacts({ step, issuerDomain }: { step: WorkflowStepObservation; issuerDomain: string }) {
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs" data-testid={`workflow-step-${step.index}-facts`}>
+      {step.child_task_id && (
+        <RefLink
+          taskRef={{ kind: "task", issuer_domain: issuerDomain, id: step.child_task_id }}
+          issuerDomain={issuerDomain}
+          label="查看子任务详情 →"
+          testId={`workflow-step-${step.index}-child-link`}
+        />
+      )}
+      {step.waiting && (
+        <span data-testid={`workflow-step-${step.index}-waiting`}>
+          {step.waiting.consumed === true
+            ? WORKFLOW_WAITING_CONSUMED_NOTE
+            : step.waiting.consumed === false
+              ? WORKFLOW_WAITING_NOTE
+              : WORKFLOW_WAITING_UNKNOWN_NOTE}
+        </span>
+      )}
+      {step.callback_applied && <span data-testid={`workflow-step-${step.index}-callback`}>回调已消费</span>}
+      {step.step_state && (
+        <span className="font-mono" data-testid={`workflow-step-${step.index}-state`}>
+          记录标记：{step.step_state}
+        </span>
+      )}
+      {step.child_unverified && (
+        <span data-testid={`workflow-step-${step.index}-unverified`}>
+          提交记录无法在本工作区核验：已隐藏子任务引用
+        </span>
+      )}
+      {step.submission_read_failed && (
+        <span data-testid={`workflow-step-${step.index}-read-failed`}>
+          步骤提交记录读取失败，请刷新重试
+        </span>
+      )}
+      {step.binding_inconsistent && (
+        <span data-testid={`workflow-step-${step.index}-inconsistent`}>记录事实不一致：持久化事实指向的子任务不一致</span>
+      )}
+      {step.no_submission && <span data-testid={`workflow-step-${step.index}-no-submission`}>未找到提交记录</span>}
+    </div>
+  );
+}
+
+function WorkflowStepsView({ summary, issuerDomain }: { summary: WorkflowStepsSummary; issuerDomain: string }) {
+  return (
+    <div className="space-y-3" data-testid="workflow-steps-view">
+      {summary.declaration_unreadable && (
+        <p className="text-xs text-muted-foreground" data-testid="workflow-steps-unreadable">
+          {WORKFLOW_UNREADABLE_NOTE}
+        </p>
+      )}
+      {summary.submissions_unsupported && (
+        <p className="text-xs text-muted-foreground" data-testid="workflow-steps-unsupported">
+          {WORKFLOW_UNSUPPORTED_NOTE}
+        </p>
+      )}
+      {!summary.declaration_unreadable && (
+        <ul className="space-y-2" data-testid="workflow-step-list">
+          {summary.steps.map((step) => (
+            <li key={step.index} className="space-y-1 rounded border p-3" data-testid={`workflow-step-${step.index}`}>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+                <span className="font-medium" data-testid={`workflow-step-${step.index}-index`}>
+                  #{step.index}
+                </span>
+                <span className="text-muted-foreground" data-testid={`workflow-step-${step.index}-mode`}>
+                  {step.mode}
+                </span>
+                <span className="break-all">{step.goal}</span>
+              </div>
+              <WorkflowStepFacts step={step} issuerDomain={issuerDomain} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground" data-testid="workflow-steps-scope-note">
+        {WORKFLOW_SCOPE_NOTE}
+      </p>
+    </div>
+  );
+}
+
+function WorkflowChildParentView({ stamp, issuerDomain }: { stamp: WorkflowParentStamp; issuerDomain: string }) {
+  return (
+    <div className="space-y-3" data-testid="workflow-child-parent-view">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <span className="text-muted-foreground" data-testid="workflow-child-parent-step-index">
+          步骤序号：{typeof stamp.step_index === "number" ? stamp.step_index : "未记录"}
+        </span>
+      </div>
+      {stamp.parent_unverified && (
+        <p className="text-xs text-muted-foreground" data-testid="workflow-child-parent-unverified">
+          父任务无法在本工作区核验：已隐藏父任务引用
+        </p>
+      )}
+      {stamp.binding_inconsistent && (
+        <p className="text-xs text-muted-foreground" data-testid="workflow-child-parent-inconsistent">
+          父子任务绑定不一致：已隐藏父任务引用
+        </p>
+      )}
+      {stamp.parent_task_ref && !stamp.parent_unverified && !stamp.binding_inconsistent && (
+        <div data-testid="workflow-child-parent-ref">
+          <RefLink
+            taskRef={stamp.parent_task_ref}
+            issuerDomain={issuerDomain}
+            label="← 返回父任务详情"
+            testId="workflow-child-parent-link"
+          />
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground" data-testid="workflow-child-parent-note">
+        父任务引用只标识本步骤的提交来源：它不授予权限，也不代表父任务目标已通过。本任务自身的生命周期与交付验收由本页其它面板呈现。
       </p>
     </div>
   );
@@ -183,7 +328,9 @@ function ChildDelegationView({ stamp, issuerDomain }: { stamp: AgentChildParentS
 export function TaskChildObservationPanel({ detail }: { detail: TaskDetail }) {
   const parentSummary = detail.agent_children;
   const childStamp = detail.agent_child_parent;
-  if (!parentSummary && !childStamp) {
+  const workflowSteps = detail.workflow_steps;
+  const workflowStamp = detail.workflow_parent;
+  if (!parentSummary && !childStamp && !workflowSteps && !workflowStamp) {
     return (
       <div className="space-y-1" data-testid="agent-observation-panel" aria-live="polite">
         <p className="text-sm text-muted-foreground" data-testid="agent-observation-absent">
@@ -206,6 +353,18 @@ export function TaskChildObservationPanel({ detail }: { detail: TaskDetail }) {
         <div className="space-y-1" data-testid="agent-observation-child-section">
           <p className="text-sm font-medium">子任务视角（被委派）</p>
           <ChildDelegationView stamp={childStamp} issuerDomain={detail.issuer_domain} />
+        </div>
+      )}
+      {workflowSteps && (
+        <div className="space-y-1" data-testid="agent-observation-workflow-section">
+          <p className="text-sm font-medium">Workflow 步骤（任务级）</p>
+          <WorkflowStepsView summary={workflowSteps} issuerDomain={detail.issuer_domain} />
+        </div>
+      )}
+      {workflowStamp && (
+        <div className="space-y-1" data-testid="agent-observation-workflow-child-section">
+          <p className="text-sm font-medium">Workflow 子任务视角</p>
+          <WorkflowChildParentView stamp={workflowStamp} issuerDomain={detail.issuer_domain} />
         </div>
       )}
       <ChildBudgetView detail={detail} />
