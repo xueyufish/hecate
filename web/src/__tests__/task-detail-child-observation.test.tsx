@@ -282,3 +282,94 @@ describe("TaskDetailPage parent-child observation section", () => {
     expect(apiMock.post).not.toHaveBeenCalled();
   });
 });
+
+describe("TaskDetailPage child-execution budget lines", () => {
+  it("renders recorded figures at task level and keeps them across run switching", async () => {
+    apiMock.get.mockImplementation(
+      detailRoute(
+        "task-1",
+        detailOf("task-1", {
+          runs: [
+            {
+              run_id: "run-a",
+              attempt_no: 1,
+              deployment_id: "dep-1",
+              backend_ref: {},
+              projection: { state: "succeeded", result_preview: "first" },
+              event_cursor: 1,
+            },
+            {
+              run_id: "run-b",
+              attempt_no: 2,
+              deployment_id: "dep-1",
+              backend_ref: {},
+              projection: { state: "failed", result_preview: "second" },
+              event_cursor: 2,
+            },
+          ],
+          agent_child_budget_used: 1200,
+          workflow_budget_used: 0,
+        }),
+      ),
+    );
+    render(<TaskDetailPage />);
+    const section = await screen.findByTestId("task-child-observation-section");
+    expect(within(section).getByTestId("child-budget-agent-used").textContent).toContain("Agent 子调用：1200");
+    // A recorded 0 is a real fact, shown as 0 — never as 未记录.
+    expect(within(section).getByTestId("child-budget-workflow-used").textContent).toContain(
+      "Workflow Controller 子步骤：0",
+    );
+    expect(within(section).getByTestId("child-budget-note").textContent).toContain("不是实时余额");
+
+    await userEvent.click(screen.getByRole("button", { name: "Run #1" }));
+    expect(within(section).getByTestId("child-budget-agent-used").textContent).toContain("Agent 子调用：1200");
+    expect(within(section).getByTestId("child-budget-workflow-used").textContent).toContain(
+      "Workflow Controller 子步骤：0",
+    );
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
+  it("replaces the budget figures on a successful refresh instead of merging histories", async () => {
+    let current = detailOf("task-1", { agent_child_budget_used: 5, workflow_budget_used: 10 });
+    apiMock.get.mockImplementation((path: string) =>
+      path === "/api/tasks/task-1" ? Promise.resolve(current) : panelResponse(path),
+    );
+    render(<TaskDetailPage />);
+    expect((await screen.findByTestId("child-budget-agent-used")).textContent).toContain("Agent 子调用：5");
+    current = detailOf("task-1");
+    await userEvent.click(screen.getByRole("button", { name: "刷新任务" }));
+    expect((await screen.findByTestId("child-budget-agent-used")).textContent).toContain("Agent 子调用：未记录");
+    expect(screen.getByTestId("child-budget-workflow-used").textContent).toContain(
+      "Workflow Controller 子步骤：未记录",
+    );
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+
+  it("never carries a previous task's budgets into the next task's view", async () => {
+    let resolveOld: (detail: TaskDetail) => void = () => {};
+    const oldResponse = new Promise<TaskDetail>((resolve) => {
+      resolveOld = resolve;
+    });
+    apiMock.get.mockImplementation((path: string) => {
+      if (path === "/api/tasks/task-1") return oldResponse;
+      if (path === "/api/tasks/task-2") {
+        return Promise.resolve(detailOf("task-2", { agent_child_budget_used: 7 }));
+      }
+      return panelResponse(path);
+    });
+    const view = render(<TaskDetailPage />);
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith("/api/tasks/task-1"));
+    routeState.id = "task-2";
+    view.rerender(<TaskDetailPage />);
+    expect((await screen.findByTestId("child-budget-agent-used")).textContent).toContain("Agent 子调用：7");
+    await act(async () => {
+      resolveOld(detailOf("task-1", { agent_child_budget_used: 1200, workflow_budget_used: 300 }));
+    });
+    // The late task-1 figures never bleed into the task-2 view.
+    expect(screen.getByTestId("child-budget-agent-used").textContent).toContain("Agent 子调用：7");
+    expect(screen.getByTestId("child-budget-workflow-used").textContent).toContain(
+      "Workflow Controller 子步骤：未记录",
+    );
+    expect(apiMock.post).not.toHaveBeenCalled();
+  });
+});

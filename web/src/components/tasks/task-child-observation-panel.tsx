@@ -25,6 +25,12 @@ import {
  * panels). `consumed=true` does not mean the child succeeded and does not
  * mean the parent's goal passed. The API summarizes only the CURRENT
  * wait; the panel claims no call history.
+ *
+ * The budget lines are the parent's persisted cumulative child-execution
+ * usage (agent-child calls and workflow controller steps), already folded
+ * in by consumed/verified callbacks. A recorded `0` is real and is shown
+ * as such; 未记录 means the counter was never recorded. They are not a
+ * real-time balance, not the task's full usage, and not verified billing.
  */
 
 const ABSENT_HINT =
@@ -46,6 +52,37 @@ const SCOPE_NOTE =
   "父子调用摘要是任务级记录，不随所选 Run 切换。当前 API 只提供调用计数与当前等待摘要，不承诺完整调用历史；本面板不显示子任务状态，也不要从父任务的等待状态推断子任务结果。";
 
 const REF_INVALID_NOTE = "引用无法在本平台定位：未生成本地链接，仅按记录原样展示。";
+
+const BUDGET_HEADING = "子执行累计预算（已记入父任务）";
+
+const BUDGET_SCOPE_NOTE =
+  "两个数字分别是 Agent 子调用与 Workflow Controller 子步骤已记入父任务的累计用量：只在对应的子执行回调被消费后累加并持久化。它们不是实时余额，不覆盖本任务全部用量，也不是已核实的账单；“未记录”表示该计数从未记入，与有效 0 不同。";
+
+function recordedCount(value: number | undefined): string {
+  return typeof value === "number" && Number.isSafeInteger(value) ? String(value) : "未记录";
+}
+
+/** Both budget lines always render so a pre-feature task reads 未记录
+ * instead of silently looking like zero. Each counter handles its own
+ * missing state; neither line is ever derived from the other. */
+function ChildBudgetView({ detail }: { detail: TaskDetail }) {
+  return (
+    <div className="space-y-1" data-testid="child-budget-view">
+      <p className="text-sm font-medium">{BUDGET_HEADING}</p>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <span data-testid="child-budget-agent-used">
+          Agent 子调用：{recordedCount(detail.agent_child_budget_used)}
+        </span>
+        <span data-testid="child-budget-workflow-used">
+          Workflow Controller 子步骤：{recordedCount(detail.workflow_budget_used)}
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground" data-testid="child-budget-note">
+        {BUDGET_SCOPE_NOTE}
+      </p>
+    </div>
+  );
+}
 
 function RefText({ taskRef }: { taskRef: AgentTaskRef | null }) {
   const recorded = taskRef ? JSON.stringify(taskRef) : null;
@@ -153,6 +190,7 @@ export function TaskChildObservationPanel({ detail }: { detail: TaskDetail }) {
           无已记录的父子调用信息
         </p>
         <p className="text-xs text-muted-foreground">{ABSENT_HINT}</p>
+        <ChildBudgetView detail={detail} />
       </div>
     );
   }
@@ -170,6 +208,7 @@ export function TaskChildObservationPanel({ detail }: { detail: TaskDetail }) {
           <ChildDelegationView stamp={childStamp} issuerDomain={detail.issuer_domain} />
         </div>
       )}
+      <ChildBudgetView detail={detail} />
       <p className="text-xs text-muted-foreground" data-testid="agent-observation-scope-note">
         {SCOPE_NOTE}
       </p>

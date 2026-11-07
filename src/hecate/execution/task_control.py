@@ -806,6 +806,18 @@ class TaskControlService:
                     "consumed": wait.get("consumed"),
                 }
             detail["agent_children"] = summary
+        if record is not None:
+            # Whitelisted projection of the parent's persisted cumulative
+            # child-execution spend, already folded in by consumed agent-child
+            # wakes and verified workflow step callbacks. Absence means the
+            # counter was never recorded (a pre-feature task, or steps without
+            # a budget declaration) — it is NOT zero; a recorded 0 IS real.
+            # Invalid shapes are withheld rather than coerced, and this GET
+            # writes nothing.
+            for key in ("agent_child_budget_used", "workflow_budget_used"):
+                value = (record.extra or {}).get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    detail[key] = value
         continuation = (record.extra or {}).get("continuation") if record else None
         if isinstance(continuation, dict) and isinstance(continuation.get("attempts"), list):
             # Minimal read-only continuation summary: trigger reason,
