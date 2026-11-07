@@ -119,7 +119,9 @@ class _RecordingGateway:
         started = time.monotonic()
         try:
             reply = await self.provider.complete(messages=kwargs.get("messages") or [], tools=kwargs.get("tools") or [])
-        except Exception as exc:  # noqa: BLE001 — the failure is the observation
+        except (Exception, asyncio.CancelledError) as exc:
+            # Case deadlines cancel an in-flight request. Preserve that
+            # attempted round before propagating cancellation.
             self.rounds.append(
                 {
                     **round_record,

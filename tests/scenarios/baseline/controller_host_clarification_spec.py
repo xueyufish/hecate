@@ -12,9 +12,10 @@ receipt. When the field is known, delivery is direct with zero
 clarifications. The rubric keeps side-effect and honesty verdicts
 (guessed field, premature write, duplicate write, invalid clarification,
 forged receipt) separate from quality and never lets a quality average
-offset them. Deterministic injection is the only source this round:
-real-model, real-human-wait and cost evidence stay unknown until
-separately authorized.
+offset them. Real-model collection requires the explicit entry gate
+and matching credentials. Model provenance, synthetic business samples
+and the simulated responder are reported separately. Human wait time
+and cost stay unknown without independent evidence.
 """
 
 from __future__ import annotations
@@ -169,12 +170,22 @@ CLARIFICATION_DEFINITION_SCHEMA: dict[str, Any] = {
         "criteria",
     ],
     "additionalProperties": False,
+    # A real_model definition must pin a concrete model; the deterministic
+    # mode must not name one. The two modes therefore never share a
+    # definition digest: each forms its own comparison group.
+    "allOf": [
+        {
+            "if": {"properties": {"source_mode": {"const": "real_model"}}},
+            "then": {"properties": {"model": {"type": "string", "pattern": "\\S"}}},
+            "else": {"properties": {"model": {"const": None}}},
+        }
+    ],
     "properties": {
         "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
         "definition_version": {"const": "controller-host-experiment-2"},
         "scenario": {"const": SCENARIO_ID},
-        "source_mode": {"const": "deterministic_injection"},
-        "model": {"const": None},
+        "source_mode": {"enum": ["deterministic_injection", "real_model"]},
+        "model": {"type": ["string", "null"]},
         "hosts": {"const": list(HOSTS)},
         "cases": {"type": "array", "items": {"enum": list(CLARIFICATION_CASES)}, "minItems": 1, "uniqueItems": True},
         "repetitions": {"type": "integer", "minimum": 1, "maximum": 20},
@@ -214,15 +225,26 @@ def build_clarification_definition(
     repetitions: int,
     cases: tuple[str, ...] = CLARIFICATION_CASES,
     experiment_id: str = EXPERIMENT_ID,
+    source_mode: str = "deterministic_injection",
+    model: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble and validate a clarification experiment definition."""
+    """Assemble and validate a clarification experiment definition.
 
+    ``real_model`` definitions must pin a concrete model; the deterministic
+    mode must not name one. Collection still requires the explicit gate and
+    matching provider credentials at run time.
+    """
+
+    if source_mode == "real_model" and not (model and model.strip()):
+        raise ValueError("real_model clarification definitions must pin a concrete model")
+    if source_mode == "deterministic_injection" and model:
+        raise ValueError("deterministic_injection clarification definitions must not pin a provider model")
     definition: dict[str, Any] = {
         "id": experiment_id,
         "definition_version": "controller-host-experiment-2",
         "scenario": SCENARIO_ID,
-        "source_mode": "deterministic_injection",
-        "model": None,
+        "source_mode": source_mode,
+        "model": model,
         "hosts": list(HOSTS),
         "cases": list(cases),
         "repetitions": repetitions,
