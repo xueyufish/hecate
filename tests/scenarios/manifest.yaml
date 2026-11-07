@@ -433,3 +433,16 @@ recorded_tracks:
       real-model record exists yet - an operator must choose the model
       and confirm the call budget before any real collection
     ci_gate: false
+  - id: controller_host_feedback
+    tier: 2
+    runner: tests/scenarios/baseline/run_controller_feedback_baseline.py
+    record: tests/scenarios/baselines/controller_host_experiment_controller-host-feedback-baseline-20261107T112717324988Z-5948c0.json
+    status: skipped
+    reason: >-
+      committed record is the deterministic-injection feedback aggregate
+      (scenario platform_feedback; correction, no-reorder and
+      unknown-write evidence with test-side business counters); the two
+      quality cases accept the gated real-model entry but no real-model
+      record exists yet - an operator must choose the model and confirm
+      the call budget before any real collection
+    ci_gate: false
