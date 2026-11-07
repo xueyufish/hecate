@@ -396,6 +396,86 @@ async def test_declared_slices_persist_and_accumulate_on_the_parent(harness, llm
     assert final.lifecycle_state.value == "succeeded", final.extra
 
 
+async def test_task_detail_projects_the_workflow_budget_and_keeps_unmetered_steps_unrecorded(harness, llm_stub) -> None:
+    """The detail GET mirrors the persisted step-spend; steps without a
+    declared slice never produce a counter, and reads move nothing."""
+
+    from hecate.execution.task_control import TaskControlService
+
+    agent_id = await _agent_with_tools(harness, "workflow-budget-detail-agent")
+    parent = await _submit_workflow(
+        harness,
+        agent_id,
+        [_controller_step("research the stock", budget_units=50000)],
+        budget_units=50000,
+    )
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    child_ref, _index = (await asyncio.to_thread(_children_of, harness, parent.task_ref))[0]
+    assert await worker.dispatch_once(child_ref) is True
+    assert await worker.dispatch_once(parent.task_ref) is True
+
+    state = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    used = (state.extra or {}).get("workflow_budget_used")
+    assert isinstance(used, int) and used > 0, state.extra
+
+    async def detail_of(task_ref):
+        async with harness["session_factory"]() as db:
+            service = TaskControlService(
+                db,
+                store=harness["store"],
+                recorder=harness["store"],
+                backend="postgres",
+                ledger_source="core",
+                session_factory=harness["session_factory"],
+            )
+            return await service.get_task_detail(WS, uuid.UUID(task_ref.id))
+
+    first = await detail_of(parent.task_ref)
+    assert first["workflow_budget_used"] == used
+    assert "agent_child_budget_used" not in first
+    # The child step's own detail carries no parent counter.
+    child_detail = await detail_of(child_ref)
+    assert "workflow_budget_used" not in child_detail
+
+    assert await detail_of(parent.task_ref) == first
+    after = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    assert (after.extra or {}).get("workflow_budget_used") == used
+    assert after.revision == state.revision
+
+
+async def test_an_unmetered_controller_step_never_records_a_budget_counter(harness, llm_stub) -> None:
+    """No declared slice → no reservation and no counter: the detail stays
+    unrecorded instead of reading zero."""
+
+    from hecate.execution.task_control import TaskControlService
+
+    agent_id = await _agent_with_tools(harness, "workflow-unmetered-agent")
+    parent = await _submit_workflow(harness, agent_id, [_controller_step("research the stock")])
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    child_ref, _index = (await asyncio.to_thread(_children_of, harness, parent.task_ref))[0]
+    assert await worker.dispatch_once(child_ref) is True
+    assert await worker.dispatch_once(parent.task_ref) is True
+
+    state = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    # The callback was consumed; a single-step workflow converges outright.
+    assert "0" in ((state.extra or {}).get("_workflow_callbacks") or {}), state.extra
+    assert (state.extra or {}).get("workflow_budget_used") is None
+    assert await _holds(harness, parent.task_ref) == []
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        detail = await service.get_task_detail(WS, uuid.UUID(parent.task_ref.id))
+    assert "workflow_budget_used" not in detail
+
+
 async def test_insufficient_workspace_budget_refuses_before_the_child_exists(harness) -> None:
     from hecate.models.quota import QuotaModel
     from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE

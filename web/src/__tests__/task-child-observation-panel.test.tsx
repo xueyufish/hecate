@@ -185,3 +185,43 @@ describe("TaskChildObservationPanel", () => {
     expect(note.textContent).toContain("不要从父任务的等待状态推断子任务结果");
   });
 });
+
+describe("TaskChildObservationPanel child-execution budgets", () => {
+  it("renders both recorded budget lines with their semantics note", () => {
+    render(
+      <TaskChildObservationPanel
+        detail={detailOf({ agent_children: childrenOf(), agent_child_budget_used: 1200, workflow_budget_used: 300 })}
+      />,
+    );
+    expect(screen.getByTestId("child-budget-agent-used").textContent).toContain("Agent 子调用：1200");
+    expect(screen.getByTestId("child-budget-workflow-used").textContent).toContain("Workflow Controller 子步骤：300");
+    const note = screen.getByTestId("child-budget-note");
+    expect(note.textContent).toContain("已记入父任务的累计用量");
+    expect(note.textContent).toContain("不是实时余额");
+    expect(note.textContent).toContain("不是已核实的账单");
+    expect(note.textContent).toContain("与有效 0 不同");
+  });
+
+  it("keeps a recorded zero visible instead of reading it as unrecorded", () => {
+    render(
+      <TaskChildObservationPanel
+        detail={detailOf({ agent_children: { accepted_calls: 1 }, agent_child_budget_used: 0 })}
+      />,
+    );
+    expect(screen.getByTestId("child-budget-agent-used").textContent).toContain("Agent 子调用：0");
+    expect(screen.getByTestId("child-budget-agent-used").textContent).not.toContain("未记录");
+    // The other counter keeps its own missing state.
+    expect(screen.getByTestId("child-budget-workflow-used").textContent).toContain(
+      "Workflow Controller 子步骤：未记录",
+    );
+  });
+
+  it("shows 未记录 for both counters on a pre-feature task without relationship facts", () => {
+    render(<TaskChildObservationPanel detail={detailOf()} />);
+    expect(screen.getByTestId("agent-observation-absent")).toBeInTheDocument();
+    expect(screen.getByTestId("child-budget-agent-used").textContent).toContain("Agent 子调用：未记录");
+    expect(screen.getByTestId("child-budget-workflow-used").textContent).toContain(
+      "Workflow Controller 子步骤：未记录",
+    );
+  });
+});

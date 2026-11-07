@@ -1468,6 +1468,47 @@ async def test_budget_slice_bounds_the_child_and_accumulates_on_the_parent(harne
     assert revisions[0]["content"]["budget"] == child_budget
 
 
+async def test_task_detail_projects_the_recorded_child_budget_and_reads_without_writes(harness, llm_stub) -> None:
+    """The detail GET whitelists the parent's cumulative spend; absence and
+    zero stay distinct, and a repeat read moves nothing."""
+    target_id = await _add_agent(harness, "worker-agent")
+    declaration = _declaration_of(harness, target_id)
+    declaration["budget_units"] = 10000
+    declaration["targets"][0]["budget_units"] = 5000
+    parent = await _submit_parent(harness, declaration)
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    child_ref, _stamp = _children_of(harness, parent.task_ref)[0]
+
+    # Accepted but not yet consumed: the counter was never recorded.
+    async with harness["session_factory"]() as db:
+        pending = await _service_of(harness, db).get_task_detail(WS, uuid.UUID(parent.task_ref.id))
+    assert "agent_child_budget_used" not in pending
+
+    assert await worker.dispatch_once(child_ref) is True
+    assert await worker.dispatch_once(parent.task_ref) is True
+    state = harness["store"].get_task_state(parent.task_ref)
+    recorded = (state.extra or {}).get("agent_child_budget_used")
+    assert isinstance(recorded, int) and recorded > 0
+
+    async with harness["session_factory"]() as db:
+        first = await _service_of(harness, db).get_task_detail(WS, uuid.UUID(parent.task_ref.id))
+    assert first["agent_child_budget_used"] == recorded
+    # The spend accumulates on the parent only; the child's own detail
+    # carries no such counter.
+    async with harness["session_factory"]() as db:
+        child_detail = await _service_of(harness, db).get_task_detail(WS, uuid.UUID(child_ref.id))
+    assert "agent_child_budget_used" not in child_detail
+    assert "workflow_budget_used" not in first
+
+    async with harness["session_factory"]() as db:
+        second = await _service_of(harness, db).get_task_detail(WS, uuid.UUID(parent.task_ref.id))
+    assert second == first
+    after = harness["store"].get_task_state(parent.task_ref)
+    assert (after.extra or {}).get("agent_child_budget_used") == recorded
+    assert after.revision == state.revision
+
+
 async def test_restart_in_an_independent_process_recovers_the_lost_callback(harness, llm_stub, monkeypatch) -> None:
     """A fresh interpreter converges the same parent-child facts, no duplicates."""
 
