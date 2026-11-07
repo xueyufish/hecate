@@ -476,6 +476,222 @@ async def test_an_unmetered_controller_step_never_records_a_budget_counter(harne
     assert "workflow_budget_used" not in detail
 
 
+async def _detail_of(harness, task_ref) -> dict:
+    from hecate.execution.task_control import TaskControlService
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        return await service.get_task_detail(WS, uuid.UUID(task_ref.id))
+
+
+async def test_task_detail_lists_declared_steps_with_recorded_facts(harness, llm_stub) -> None:
+    """A real mixed workflow projects each declared step in order with its
+    recorded facts: the submitted child (verified against the child's own
+    parent stamp), the current wait binding, and consumed callbacks that
+    stay recorded after the parent advances. Chat and controller modes
+    alike; repeated reads write nothing."""
+    agent_id = await _agent_with_tools(harness, "workflow-observe-agent")
+    parent = await _submit_workflow(
+        harness,
+        agent_id,
+        [_controller_step("research the stock", budget_units=50000), {"goal": "write the summary"}],
+    )
+    worker = _worker_of(harness)
+    assert await worker.dispatch_once(parent.task_ref) is True
+    children = await asyncio.to_thread(_children_of, harness, parent.task_ref)
+    assert [index for _ref, index in children] == [0]
+
+    detail = await _detail_of(harness, parent.task_ref)
+    steps = detail["workflow_steps"]["steps"]
+    assert [step["index"] for step in steps] == [0, 1]
+    assert steps[0]["mode"] == "controller" and steps[0]["goal"] == "research the stock"
+    assert steps[0]["child_task_id"] == children[0][0].id
+    assert steps[0]["waiting"] == {"consumed": False}
+    assert "callback_applied" not in steps[0]
+    assert steps[1]["mode"] == "chat" and steps[1]["goal"] == "write the summary"
+    assert steps[1]["no_submission"] is True and "child_task_id" not in steps[1]
+
+    child_detail = await _detail_of(harness, children[0][0])
+    assert child_detail["workflow_parent"]["step_index"] == 0
+    assert child_detail["workflow_parent"]["parent_task_ref"]["id"] == parent.task_ref.id
+
+    assert await worker.dispatch_once(children[0][0]) is True
+    assert await worker.dispatch_once(parent.task_ref) is True
+    children = await asyncio.to_thread(_children_of, harness, parent.task_ref)
+    assert [index for _ref, index in children] == [0, 1]
+
+    detail = await _detail_of(harness, parent.task_ref)
+    steps = detail["workflow_steps"]["steps"]
+    assert steps[0]["callback_applied"] is True and steps[0]["child_task_id"]
+    assert steps[1]["waiting"] == {"consumed": False} and steps[1]["child_task_id"] == children[1][0].id
+    assert "no_submission" not in steps[1]
+    child1_detail = await _detail_of(harness, children[1][0])
+    assert child1_detail["workflow_parent"]["step_index"] == 1
+
+    assert await worker.dispatch_once(children[1][0]) is True
+    assert await worker.dispatch_once(parent.task_ref) is True
+    final = await _detail_of(harness, parent.task_ref)
+    assert all(step["callback_applied"] for step in final["workflow_steps"]["steps"])
+    assert final["workflow_steps"]["steps"][1]["waiting"] == {"consumed": True}
+    assert "waiting" not in final["workflow_steps"]["steps"][0]
+    assert await _detail_of(harness, parent.task_ref) == final
+
+
+async def test_task_detail_reports_markers_unreadable_declaration_and_unsupported_surface(harness) -> None:
+    """Undispatched steps read as no-submission; close/reconcile markers
+    echo verbatim; a declaration that no longer parses states itself; and
+    a store without the submission surface says so instead of guessing."""
+    from hecate.contracts.execution.durable import IdempotencyKey
+    from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
+    from hecate.contracts.execution.references import BackendRef, RefKind
+    from hecate.execution.task_control import TaskControlService, task_ref_of
+    from hecate.execution.task_run_registry import TaskRunRegistry
+
+    agent_id = await _agent_with_tools(harness, "workflow-marker-agent")
+    parent = await _submit_workflow(harness, agent_id, [{"goal": "first"}, {"goal": "second"}])
+    steps = (await _detail_of(harness, parent.task_ref))["workflow_steps"]["steps"]
+    assert all(step["no_submission"] for step in steps)
+    assert all("step_state" not in step for step in steps)
+
+    state = await asyncio.to_thread(harness["store"].get_task_state, parent.task_ref)
+    await asyncio.to_thread(
+        harness["store"].update_task_extra,
+        parent.task_ref,
+        {"workflow_step_states": {"0": "closed_unexecuted", "1": "held_for_reconciliation"}},
+        expected_revision=state.revision,
+    )
+    steps = (await _detail_of(harness, parent.task_ref))["workflow_steps"]["steps"]
+    assert steps[0]["step_state"] == "closed_unexecuted"
+    assert steps[1]["step_state"] == "held_for_reconciliation"
+
+    # A parent whose persisted workflow block no longer parses: the GET
+    # survives with an explicit state instead of failing or inventing steps.
+    chain = IdentityChain(
+        initiator=str(OWNER),
+        principal_id=str(agent_id),
+        workload=WorkloadIdentity(
+            deployment=BackendRef(RefKind.DEPLOYMENT, "hecate", str(agent_id)),
+            workload_id="hecate:workflow-observe",
+        ),
+        audience="hecate:test",
+    )
+    async with harness["session_factory"]() as db:
+        broken = await TaskRunRegistry(db).create_task(
+            goal="broken workflow", initiator_ref=chain.to_dict(), workspace_id=WS
+        )
+        await db.commit()
+    await asyncio.to_thread(
+        harness["store"].submit_task,
+        key=IdempotencyKey(str(broken.id), str(OWNER), str(WS), "e" * 64),
+        task_ref=task_ref_of(broken.id),
+        run_ref=BackendRef(RefKind.RUN, "hecate", str(uuid.uuid4())),
+        input_payload={"workflow": "not-an-object"},
+    )
+    broken_detail = await _detail_of(harness, task_ref_of(broken.id))
+    assert broken_detail["workflow_steps"] == {"steps": [], "declaration_unreadable": True}
+
+    class _NoSubmissionSurface:
+        """Delegates everything except the submission lookup surface."""
+
+        def __init__(self, inner) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name):
+            if name == "submission_for_key":
+                raise AttributeError(name)
+            return getattr(self._inner, name)
+
+    async with harness["session_factory"]() as db:
+        service = TaskControlService(
+            db,
+            store=_NoSubmissionSurface(harness["store"]),
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        )
+        detail = await service.get_task_detail(WS, uuid.UUID(parent.task_ref.id))
+    summary = detail["workflow_steps"]
+    assert summary["submissions_unsupported"] is True
+    assert all(step["child_unverified"] for step in summary["steps"])
+    assert summary["steps"][0]["step_state"] == "closed_unexecuted"
+
+
+async def test_workflow_observation_keeps_submission_read_failure_distinct(harness, monkeypatch) -> None:
+    """A failed lookup cannot establish that a step was never submitted."""
+    agent_id = await _agent_with_tools(harness, "workflow-read-failure-agent")
+    parent = await _submit_workflow(harness, agent_id, [{"goal": "first"}])
+
+    def failed_lookup(key):
+        raise RuntimeError("submission storage unavailable")
+
+    monkeypatch.setattr(harness["store"], "submission_for_key", failed_lookup)
+    step = (await _detail_of(harness, parent.task_ref))["workflow_steps"]["steps"][0]
+    assert step["submission_read_failed"] is True
+    assert "no_submission" not in step and "child_task_id" not in step
+
+
+@pytest.mark.parametrize("corruption", ("callback", "wait", "kind", "issuer", "boolean_index"))
+async def test_workflow_observation_hides_contradicted_child_links(harness, llm_stub, monkeypatch, corruption) -> None:
+    """A matching UUID alone cannot validate a workflow relationship."""
+    from dataclasses import replace
+
+    from hecate.contracts.execution.references import BackendRef, RefKind
+
+    agent_id = await _agent_with_tools(harness, "workflow-binding-agent")
+    parent = await _submit_workflow(harness, agent_id, [{"goal": "first"}, {"goal": "second"}])
+    assert await _worker_of(harness).dispatch_once(parent.task_ref) is True
+    child_ref, _index = (await asyncio.to_thread(_children_of, harness, parent.task_ref))[0]
+    state = harness["store"].get_task_state(parent.task_ref)
+    if corruption in ("callback", "wait"):
+        foreign_ref = BackendRef(RefKind.TASK, "hecate", str(uuid.uuid4()))
+        if corruption == "callback":
+            update = {"_workflow_callbacks": {"0": {"child_task_id": foreign_ref.id, "applied_fact_id": "cmd-other"}}}
+        else:
+            wait = state.extra["wait"]
+            update = {
+                "wait": {**wait, "contract_ref": {**wait["contract_ref"], "await_task_ref": foreign_ref.to_dict()}}
+            }
+        harness["store"].update_task_extra(parent.task_ref, update, expected_revision=state.revision)
+    elif corruption in ("kind", "issuer"):
+        lookup = harness["store"].submission_for_key
+
+        def corrupted_lookup(key):
+            association = lookup(key)
+            if association is None:
+                return None
+            ref = (
+                BackendRef(RefKind.RUN, "hecate", child_ref.id)
+                if corruption == "kind"
+                else BackendRef(RefKind.TASK, "foreign", child_ref.id)
+            )
+            return replace(association, task_ref=ref)
+
+        monkeypatch.setattr(harness["store"], "submission_for_key", corrupted_lookup)
+    else:
+        read_input = harness["store"].get_task_input
+
+        def corrupted_input(ref):
+            payload = read_input(ref)
+            if ref == child_ref:
+                return {**payload, "workflow_parent": {**payload["workflow_parent"], "step_index": False}}
+            return payload
+
+        monkeypatch.setattr(harness["store"], "get_task_input", corrupted_input)
+    step = (await _detail_of(harness, parent.task_ref))["workflow_steps"]["steps"][0]
+    assert "child_task_id" not in step
+    assert any(
+        step.get(flag) is True for flag in ("binding_inconsistent", "child_unverified", "submission_read_failed")
+    )
+
+
 async def test_insufficient_workspace_budget_refuses_before_the_child_exists(harness) -> None:
     from hecate.models.quota import QuotaModel
     from hecate.ops.budget_reservations import MODEL_TOKEN_UNIT_SCALE

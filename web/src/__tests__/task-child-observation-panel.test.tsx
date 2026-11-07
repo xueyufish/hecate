@@ -17,7 +17,13 @@ vi.mock("next/link", () => ({
 }));
 
 import { TaskChildObservationPanel } from "../components/tasks/task-child-observation-panel";
-import { localTaskLinkFromRef, type AgentChildrenSummary, type TaskDetail } from "@/lib/task-types";
+import {
+  localTaskLinkFromRef,
+  type AgentChildrenSummary,
+  type TaskDetail,
+  type WorkflowParentStamp,
+  type WorkflowStepsSummary,
+} from "@/lib/task-types";
 
 const CHILD_ID = "22222222-2222-4222-8222-222222222222";
 const PARENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -223,5 +229,146 @@ describe("TaskChildObservationPanel child-execution budgets", () => {
     expect(screen.getByTestId("child-budget-workflow-used").textContent).toContain(
       "Workflow Controller 子步骤：未记录",
     );
+  });
+});
+
+describe("TaskChildObservationPanel workflow steps", () => {
+  const STEP0_CHILD = "33333333-3333-4333-8333-333333333333";
+
+  function stepsOf(overrides: Partial<WorkflowStepsSummary> = {}): WorkflowStepsSummary {
+    return {
+      steps: [
+        { index: 0, goal: "research the stock", mode: "controller", child_task_id: STEP0_CHILD, callback_applied: true },
+        { index: 1, goal: "write the summary", mode: "chat", waiting: { consumed: false } },
+      ],
+      ...overrides,
+    };
+  }
+
+  function stampOf(overrides: Partial<WorkflowParentStamp> = {}): WorkflowParentStamp {
+    return { parent_task_ref: { kind: "task", issuer_domain: "hecate", id: PARENT_ID }, step_index: 0, ...overrides };
+  }
+
+  it("renders declared steps in order with mode, goal and a validated child link", () => {
+    render(<TaskChildObservationPanel detail={detailOf({ workflow_steps: stepsOf() })} />);
+    expect(screen.queryByTestId("agent-observation-absent")).not.toBeInTheDocument();
+    expect(screen.getByTestId("workflow-step-0").textContent).toContain("#0");
+    expect(screen.getByTestId("workflow-step-0-mode").textContent).toContain("controller");
+    expect(screen.getByTestId("workflow-step-0").textContent).toContain("research the stock");
+    expect(screen.getByTestId("workflow-step-0-child-link").getAttribute("href")).toBe(
+      `/ops-center/tasks/${STEP0_CHILD}`,
+    );
+    expect(screen.getByTestId("workflow-step-1-mode").textContent).toContain("chat");
+    expect(screen.queryByTestId("workflow-step-1-child-link")).not.toBeInTheDocument();
+    const note = screen.getByTestId("workflow-steps-scope-note");
+    expect(note.textContent).toContain("回调已消费不代表子任务成功");
+    expect(note.textContent).toContain("缺失字段表示该事实未记录");
+  });
+
+  it("separates the current wait, the consumption fact and verbatim markers", () => {
+    render(
+      <TaskChildObservationPanel
+        detail={detailOf({
+          workflow_steps: stepsOf({
+            steps: [
+              { index: 0, goal: "a", mode: "chat", callback_applied: true, step_state: "held_for_reconciliation" },
+              { index: 1, goal: "b", mode: "chat", waiting: { consumed: true } },
+              { index: 2, goal: "c", mode: "controller", waiting: { consumed: null } },
+              { index: 3, goal: "d", mode: "chat", step_state: "closed_unexecuted" },
+            ],
+          }),
+        })}
+      />,
+    );
+    expect(screen.getByTestId("workflow-step-0-callback").textContent).toContain("回调已消费");
+    expect(screen.getByTestId("workflow-step-0-state").textContent).toContain("记录标记：held_for_reconciliation");
+    expect(screen.getByTestId("workflow-step-1-waiting").textContent).toContain("当前等待的回调已消费");
+    expect(screen.getByTestId("workflow-step-1-waiting").textContent).not.toContain("尚未推进");
+    expect(screen.getByTestId("workflow-step-2-waiting").textContent).toContain("消费状态未记录");
+    expect(screen.getByTestId("workflow-step-3-state").textContent).toContain("记录标记：closed_unexecuted");
+  });
+
+  it("renders unverifiable and contradicted facts without inventing a child link", () => {
+    render(
+      <TaskChildObservationPanel
+        detail={detailOf({
+          workflow_steps: stepsOf({
+            steps: [
+              { index: 0, goal: "a", mode: "chat", child_unverified: true },
+              { index: 1, goal: "b", mode: "chat", binding_inconsistent: true },
+              { index: 2, goal: "c", mode: "chat", no_submission: true },
+            ],
+          }),
+        })}
+      />,
+    );
+    expect(screen.getByTestId("workflow-step-0-unverified").textContent).toContain("无法在本工作区核验");
+    expect(screen.getByTestId("workflow-step-1-inconsistent").textContent).toContain("记录事实不一致");
+    expect(screen.getByTestId("workflow-step-2-no-submission").textContent).toContain("未找到提交记录");
+    expect(screen.queryByTestId(/workflow-step-\d+-child-link$/)).not.toBeInTheDocument();
+    expect(linkSpy).not.toHaveBeenCalled();
+  });
+
+  it("states an unreadable declaration and an unsupported submission surface", async () => {
+    const first = render(
+      <TaskChildObservationPanel
+        detail={detailOf({ workflow_steps: stepsOf({ declaration_unreadable: true, steps: [] }) })}
+      />,
+    );
+    expect(screen.getByTestId("workflow-steps-unreadable").textContent).toContain("无法解析");
+    expect(screen.queryByTestId("workflow-step-list")).not.toBeInTheDocument();
+    first.unmount();
+
+    render(<TaskChildObservationPanel detail={detailOf({ workflow_steps: stepsOf({ submissions_unsupported: true }) })} />);
+    expect(screen.getByTestId("workflow-steps-unsupported").textContent).toContain("不支持读取步骤提交记录");
+    expect(screen.getByTestId("workflow-step-0").textContent).toContain("#0");
+  });
+
+  it("shows a failed submission read without claiming the submission is absent", () => {
+    render(
+      <TaskChildObservationPanel
+        detail={detailOf({
+          workflow_steps: stepsOf({ steps: [{ index: 0, goal: "a", mode: "chat", submission_read_failed: true }] }),
+        })}
+      />,
+    );
+    expect(screen.getByTestId("workflow-step-0-read-failed").textContent).toContain("读取失败");
+    expect(screen.queryByTestId("workflow-step-0-no-submission")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("workflow-step-0-child-link")).not.toBeInTheDocument();
+  });
+
+  it.each(["parent_unverified", "binding_inconsistent"] as const)(
+    "withholds navigation for a %s parent relationship",
+    (flag) => {
+      render(<TaskChildObservationPanel detail={detailOf({ workflow_parent: stampOf({ [flag]: true }) })} />);
+      expect(screen.queryByTestId("workflow-child-parent-link")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("workflow-child-parent-ref")).not.toBeInTheDocument();
+      expect(linkSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("renders the workflow child-side stamp with the back-to-parent navigation", () => {
+    render(<TaskChildObservationPanel detail={detailOf({ workflow_parent: stampOf() })} />);
+    expect(screen.getByTestId("workflow-child-parent-step-index").textContent).toContain("步骤序号：0");
+    expect(screen.getByTestId("workflow-child-parent-link").getAttribute("href")).toBe(
+      `/ops-center/tasks/${PARENT_ID}`,
+    );
+    expect(screen.getByTestId("workflow-child-parent-note").textContent).toContain("它不授予权限");
+  });
+
+  it("falls back to recorded text for an invalid parent stamp ref", () => {
+    render(
+      <TaskChildObservationPanel
+        detail={detailOf({ workflow_parent: stampOf({ parent_task_ref: { kind: "task", issuer_domain: "hecate", id: "not-a-uuid" } }) })}
+      />,
+    );
+    expect(screen.queryByTestId("workflow-child-parent-link")).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-ref-unlinked")).toBeInTheDocument();
+    expect(linkSpy).not.toHaveBeenCalled();
+  });
+
+  it("renders a recorded 未记录 step index instead of inventing one", () => {
+    render(<TaskChildObservationPanel detail={detailOf({ workflow_parent: { parent_task_ref: LOCAL_REF } })} />);
+    expect(screen.getByTestId("workflow-child-parent-step-index").textContent).toContain("步骤序号：未记录");
   });
 });

@@ -135,6 +135,66 @@ export interface AgentChildrenSummary {
   pending?: AgentChildPendingCall | null;
 }
 
+/**
+ * One recorded workflow step observation: the declaration fields the page
+ * needs plus the parent's persisted step facts. Every optional field absent
+ * means "never recorded" — never false; recorded markers are shown
+ * verbatim.
+ */
+export interface WorkflowStepObservation {
+  /** 0-based position in the declared step list. */
+  index: number;
+  goal: string;
+  /** Recorded execution mode (`chat` default / `controller`). */
+  mode: string;
+  /** Verified submitted child task id. Absent = none could be verified
+   * here, which is NOT the same as "no submission happened" — the flag
+   * fields below carry that distinction. */
+  child_task_id?: string;
+  /** The step's verified callback was consumed (consumption fact only). */
+  callback_applied?: boolean;
+  /** Verbatim persisted marker (`closed_unexecuted` /
+   * `held_for_reconciliation`); absent = no marker recorded. */
+  step_state?: string;
+  /** The parent's CURRENT wait binds this step. */
+  waiting?: { consumed?: boolean | null };
+  /** A submission reference exists but could not be verified in this
+   * workspace (missing, soft-deleted, foreign child) or cannot be read. */
+  child_unverified?: boolean;
+  /** The submission lookup failed; absence of a submission is unknown. */
+  submission_read_failed?: boolean;
+  /** Recorded facts contradict each other (stamp/callback mismatch). */
+  binding_inconsistent?: boolean;
+  /** No committed submission and no consumed callback recorded. */
+  no_submission?: boolean;
+}
+
+/**
+ * Task-level workflow step observation projected by the read-only detail
+ * GET. Absent = the task declares no workflow; present always carries the
+ * declared steps with whatever facts exist.
+ */
+export interface WorkflowStepsSummary {
+  steps: WorkflowStepObservation[];
+  /** The durable store cannot read step submissions here. */
+  submissions_unsupported?: boolean;
+  /** The recorded workflow declaration no longer parses. */
+  declaration_unreadable?: boolean;
+}
+
+/**
+ * Child side of a workflow step: the durable parent stamp the step was
+ * submitted under. Absent = this task is not a recorded workflow step.
+ */
+export interface WorkflowParentStamp {
+  parent_task_ref?: AgentTaskRef | null;
+  step_index?: number | null;
+  /** The parent could not be verified within the current workspace. */
+  parent_unverified?: boolean;
+  /** The stamp contradicts the parent's declaration or submission. */
+  binding_inconsistent?: boolean;
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Matches the task issuer in execution.task_control, independently of any
 // imported task's provenance. Equal foreign issuers do not map remote IDs.
@@ -187,6 +247,10 @@ export interface TaskDetail {
    * slice meter. Present only when recorded — absence means 未记录.
    */
   workflow_budget_used?: number;
+  /** Task-level workflow step list; absent = this task declares no workflow. */
+  workflow_steps?: WorkflowStepsSummary;
+  /** Child side of a workflow step; absent = not a recorded workflow child. */
+  workflow_parent?: WorkflowParentStamp;
   /** Server-owned live-supplement composer capability; absent = the task
    * carries no live-input surface at all (non-controller or legacy). */
   live_input?: TaskLiveInputCapability;
