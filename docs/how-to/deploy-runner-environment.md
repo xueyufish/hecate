@@ -111,6 +111,68 @@ Installed file contents and changes while serving are outside its scope.
 Existing `--host` starts without the composition flags retain their
 current behavior.
 
+## Offline lifecycle acceptance (step11/16)
+
+The signed release lifecycle — A cold start → graceful stop → switch to
+B → rollback to A → cold start again — has a repeatable acceptance drill:
+`tests/scenarios/test_runner_offline_lifecycle.py`. It executes the guide
+end to end on one standalone single-host profile with a real wheelhouse
+and asserts the properties an operator relies on:
+
+- **Preparation before isolation.** The wheelhouse delivery is prepared
+  (`runner_env_prepare.py`) and handed to the drill through
+  `HECATE_LIFECYCLE_DELIVERY`. The isolated phase never resolves or
+  downloads dependencies: it installs from the locked delivery with the
+  standalone installer (`runner_env_install.py`) into a clean venv and
+  runs the installer, the Runner, the acceptance client and the stub
+  business API in the same namespace.
+- **Cold start and authorized reads.** The drill installs and activates
+  signed artifacts A and B, composes each deployment manifest from the
+  install receipt, and cold starts from the installed interpreter with
+  `-I`. Each start is verified with `/healthz`, one real authorized
+  inventory read against the stub business API, and a durable SQLite
+  terminal record resolvable by the run's Task/Run identity.
+- **Switch refuses the stale composition.** With B active, A's earlier
+  composition must refuse before serving: the process exits with the
+  refusal diagnostic, `active.json` and its generation stay unchanged,
+  and the host lock is released (the correct composition boots next).
+- **Rollback preserves history and replays nothing.** After rolling back
+  to A with the current generation, the original Task/Run identities —
+  including the run that B served — still resolve over HTTP with their
+  original results and event facts. The stub business API's call log is
+  the replay witness: startup, the switch, the refusal and the historical
+  queries make zero business calls; only new acceptance reads advance it.
+- **Evidence.** The drill writes `lifecycle-evidence.json` (isolation
+  mode, observed interfaces, per-phase run identities and business-call
+  counts). Under `HECATE_LIFECYCLE_ISOLATION=loopback-only` it additionally
+  asserts that Linux exposes only the loopback interface.
+  CI retains the JSON as the `runner-offline-lifecycle-evidence` artifact
+  and prints passing-test evidence in its log.
+
+CI runs the drill inside a loopback-only network namespace in the
+`runtime-wheel-clean-install` job:
+
+```bash
+sudo unshare --net -- bash -c '
+  set -euo pipefail
+  ip link set lo up
+  ip -o link show                      # the namespace boundary, for the log
+  exec runuser -u "$1" -- env \
+    HECATE_LIFECYCLE_ISOLATION=loopback-only \
+    HECATE_LIFECYCLE_DELIVERY="$2/offline_delivery" \
+    "$3/.venv/bin/python" -m pytest \
+    "$3/tests/scenarios/test_runner_offline_lifecycle.py" -q -rA \
+    --timeout=900 -p no:cacheprovider --basetemp="$2/runner-lifecycle"
+' lifecycle-drill "$(id -un)" "$RUNNER_TEMP" "$PWD"
+```
+
+The drill runs the same way on a workstation without a namespace (the
+evidence then records `host-namespace`); only the Linux namespace run is
+the offline acceptance. Both runs share the tested scope: the Linux/Windows
+single-host standalone Runner profile with local SQLite and the local
+business stub — not production authentication, real models, or
+cross-host topologies.
+
 ## Release scope
 
 - The wheelhouse is frozen at preparation time. Rebuild it from the

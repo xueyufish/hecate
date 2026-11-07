@@ -101,7 +101,14 @@ def _read_digest(delivery: Path) -> str:
 class _DeploymentStack:
     """Release host + trust policy + installed interpreter + HTTP helpers."""
 
-    def __init__(self, tmp_root: Path, offline_python: Path, delivery: Path, business_port: int) -> None:
+    def __init__(
+        self,
+        tmp_root: Path,
+        offline_python: Path,
+        delivery: Path,
+        business_port: int,
+        durable: dict | None = None,
+    ) -> None:
         from hecate_runner.artifact_signing import generate_keypair
 
         self.root = tmp_root
@@ -110,7 +117,7 @@ class _DeploymentStack:
         private_pem, public_pem = generate_keypair()
         self.public_pem = public_pem.decode("ascii")
         self.host = tmp_root / "host"
-        runner_harness._write_profile(self.host, business_api_port=business_port)
+        runner_harness._write_profile(self.host, business_api_port=business_port, durable=durable)
         self.policy_path = tmp_root / "artifact-trust.json"
         self._write_policy()
 
@@ -162,6 +169,17 @@ class _DeploymentStack:
             str(self.host),
             "--release",
             sha,
+            "--expected-generation",
+            str(self._generation),
+        )
+        self._generation = json.loads(self.pointer())["generation"]
+
+    def rollback(self) -> None:
+        """Roll back using the last observed pointer generation."""
+        self._release_cli(
+            "rollback",
+            "--host",
+            str(self.host),
             "--expected-generation",
             str(self._generation),
         )

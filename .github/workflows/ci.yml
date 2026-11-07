@@ -339,6 +339,38 @@ jobs:
         run: |
           "$RUNNER_TEMP/clean_venv/bin/hecate-runner" --help > /dev/null
           echo "runner console script OK"
+      - name: Install the test environment for the lifecycle drill
+        run: python scripts/dev.py sync
+      # step11/16 offline deployment acceptance: the full signed release
+      # lifecycle (A cold start → switch to B → stale-composition refusal →
+      # B cold start → rollback to A → historical terminal records, no
+      # replayed business calls) inside a loopback-only network namespace.
+      # The wheelhouse was prepared and downloaded on the host above; the
+      # drill only installs from the locked delivery, so the isolated phase
+      # resolves no dependencies. The namespace exposes exactly `lo` (brought
+      # up as root before dropping privileges), and the drill asserts that
+      # boundary and records it in its evidence JSON.
+      - name: Run the release lifecycle drill in the loopback-only namespace
+        run: |
+          sudo unshare --net -- bash -c '
+            set -euo pipefail
+            ip link set lo up
+            echo "== interfaces inside the drill namespace (must be lo only):"
+            ip -o link show
+            exec runuser -u "$1" -- env \
+              HECATE_LIFECYCLE_ISOLATION=loopback-only \
+              HECATE_LIFECYCLE_DELIVERY="$2/offline_delivery" \
+              "$3/.venv/bin/python" -m pytest \
+              "$3/tests/scenarios/test_runner_offline_lifecycle.py" \
+              -q -rA --timeout=900 -p no:cacheprovider --basetemp="$2/runner-lifecycle"
+          ' lifecycle-drill "$(id -un)" "$RUNNER_TEMP" "$GITHUB_WORKSPACE"
+      - name: Preserve the lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-offline-lifecycle-evidence
+          path: ${{ runner.temp }}/runner-lifecycle/**/lifecycle-evidence.json
+          if-no-files-found: warn
 
   docker-sandbox-smoke:
     needs: changes
