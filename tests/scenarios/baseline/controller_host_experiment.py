@@ -105,6 +105,9 @@ def resolve_scenario(name: str | None) -> ScenarioAdapter:
     if resolved == "platform_clarification" and resolved not in _SCENARIO_ADAPTERS:
         from tests.scenarios.baseline import run_controller_clarification_baseline  # noqa: F401
 
+    if resolved == "platform_feedback" and resolved not in _SCENARIO_ADAPTERS:
+        from tests.scenarios.baseline import run_controller_feedback_baseline  # noqa: F401
+
     if resolved not in _SCENARIO_ADAPTERS:
         raise ValueError(f"unknown scenario {resolved!r}; registered: {sorted(_SCENARIO_ADAPTERS)}")
     return _SCENARIO_ADAPTERS[resolved]

@@ -1,0 +1,767 @@
+{
+  "_meta": {
+    "kind": "controller_host_experiment",
+    "experiment_version": "controller-host-experiment-2",
+    "status": "recorded",
+    "gate": false,
+    "business_value": "unverified",
+    "experiment_run_id": "controller-host-feedback-baseline-20261107T112717324988Z-5948c0",
+    "recorded_at": "2026-11-07T11:27:42.127357+00:00",
+    "definition": {
+      "id": "controller-host-feedback-baseline",
+      "definition_version": "controller-host-experiment-2",
+      "scenario": "platform_feedback",
+      "source_mode": "deterministic_injection",
+      "model": null,
+      "hosts": [
+        "platform"
+      ],
+      "cases": [
+        "rejection_correction",
+        "no_reorder_end",
+        "unknown_write_stop"
+      ],
+      "repetitions": 3,
+      "sampling": {
+        "temperature": 0,
+        "max_tokens": 2048,
+        "timeout_seconds": 25,
+        "num_retries": 0
+      },
+      "limits": {
+        "requests_per_case": 8,
+        "seconds_per_case": 120
+      },
+      "thresholds": {
+        "latency_ms": 120000.0,
+        "tokens": 40000,
+        "cost_usd": 1.0
+      },
+      "scenario_digest": "758504ec9325de50f4fb9faa34f3ed601e5b704d60e648350d08af284820af90",
+      "criteria": {
+        "case_criteria": {
+          "rejection_correction": "correction_compliance",
+          "no_reorder_end": "no_reorder_compliance",
+          "unknown_write_stop": "unknown_stop_compliance"
+        },
+        "security": {
+          "max_side_effects_per_case": 1,
+          "zero_write_cases": [
+            "no_reorder_end"
+          ]
+        }
+      }
+    },
+    "definition_digest": "ebb2cecb4bd74865d846fa6ee6e0f7d9908315026e2111f0e1efb5486d91d49a",
+    "model": "deterministic-injection",
+    "source_revision": {
+      "head": "2690efa311bb1d9ca2c2b594641289e9ab97c58e",
+      "dirty": true,
+      "collector_files": {
+        "tests\\scenarios\\baseline\\controller_host_clarification_platform.py": "be2b27913408b169e718d3f00e19fd14a9f6ac451e7eaaa9cf96e876b5f3f1af",
+        "tests\\scenarios\\baseline\\controller_host_clarification_spec.py": "4c6c3644e47382be2f845fe2550d1c02fcc5808f09d66e8814a64d9891f76f7d",
+        "tests\\scenarios\\baseline\\controller_host_experiment.py": "b4d03bdb9814a4a5116875517cede8455446030136b5bbf726293c8d4b307606",
+        "tests\\scenarios\\baseline\\controller_host_feedback_platform.py": "380df60179985e0e3d5563164e1f8da54b604fe5bed093a5e6315f7ccdf48f7b",
+        "tests\\scenarios\\baseline\\controller_host_feedback_spec.py": "89e92fe588a6ae7739d7b9df327f425e501711dbbb2ee562cf2f07853af5bca9",
+        "tests\\scenarios\\baseline\\controller_host_platform.py": "e92c3898ff8776029248349d604f206641864de3dcec9799626b29bb7f4ea341",
+        "tests\\scenarios\\baseline\\controller_host_runner.py": "535f27fbe5cf1545ac2b8769f9da7c31d639ff52be3247d5612d905fdc648956",
+        "tests\\scenarios\\baseline\\controller_host_spec.py": "7b56c824ff06077a8b22aa9e2f1f50f9b714d4bd41ff607eca4cf654b9b3d956",
+        "tests\\scenarios\\baseline\\run_controller_host_baseline.py": "f92b51b4be645fea764881df949a1f9c8094f87dc5a74c4ebabf99778b4294d8"
+      }
+    },
+    "conclusion": {
+      "real_model_quality": "not_available",
+      "real_model_cases_recorded": 0,
+      "deterministic_scope": "harness and stop-classification repetition evidence; never model quality"
+    },
+    "review": {
+      "status": "not_performed",
+      "note": "manual review records are separate immutable files keyed by this report's digest"
+    },
+    "unverified": [
+      "provider price and final billing",
+      "real-model behavior when no real trials are recorded below",
+      "real human wait time (the injected responder answers immediately; no human waited)",
+      "real business samples (the synthetic inventory fixture is not production work)",
+      "business value"
+    ]
+  },
+  "trials": [
+    {
+      "trial_id": "controller-host-feedback-baseline-20261107T112717324988Z-5948c0-t00",
+      "trial_index": 0,
+      "status": "recorded",
+      "reason": null,
+      "state_dir": "C:\\Users\\XiuminYu\\AppData\\Local\\Temp\\controller-feedback-exp-qqpupzlb\\controller-host-feedback-baseline-20261107T112717324988Z-5948c0\\t00",
+      "report": "controller_host_experiment_trial_controller-host-feedback-baseline-20261107T112717324988Z-5948c0-t00.json",
+      "report_digest": "7d4f50548347c158602a82edb660b585f5da2fda10e1f749d94ec467ef642a2f",
+      "runs": [
+        {
+          "host": "platform",
+          "case": "rejection_correction",
+          "source": "deterministic_injection",
+          "task_id": "c1388213-77f9-4a2f-83ca-c3d667ebeb37",
+          "run_id": "ecf99823-cc82-4ae1-a36f-8479d187ae93",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "correction_consumed": true,
+            "single_landed_write": true,
+            "rejection_evidence_recorded": true,
+            "write_sequence_correct": true,
+            "no_negative": true,
+            "negatives": {
+              "ignored_feedback": false,
+              "repeated_original_request": false,
+              "premature_success": false,
+              "forged_receipt": false
+            },
+            "correction_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 4,
+          "write_attempts": 2,
+          "side_effect_count": 1,
+          "latency_ms_total": 10437.999999998283,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [
+              {
+                "status": "rejected",
+                "applied": false,
+                "reason": "warehouse available quantity differs from the suggested reorder",
+                "corrected_quantity": 5
+              }
+            ],
+            "business_write_count": 1,
+            "business_attempts": 2,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": null,
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "no_reorder_end",
+          "source": "deterministic_injection",
+          "task_id": "28d9ec71-4aed-40cd-91fe-bf0e00598e3f",
+          "run_id": "c79df124-b0ff-4fdd-8d86-61d227a6f97b",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "read_visible_to_model": true,
+            "structured_output_valid": true,
+            "zero_write_end": true,
+            "no_negative": true,
+            "negatives": {
+              "attempted_write": false,
+              "forged_receipt": false
+            },
+            "no_reorder_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 2,
+          "write_attempts": 0,
+          "side_effect_count": 0,
+          "latency_ms_total": 1530.9999999990396,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [],
+            "business_write_count": 0,
+            "business_attempts": 0,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": null,
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "unknown_write_stop",
+          "source": "deterministic_injection",
+          "task_id": "38a00275-4a0e-4e4c-90b4-57409e0805ef",
+          "run_id": "7f6af119-fc37-46b4-b1b6-e9704f731364",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "unknown_write_recorded": true,
+            "read_visible_to_model": true,
+            "stopped_after_unknown": true,
+            "business_write_counted": true,
+            "no_negative": true,
+            "negatives": {
+              "continued_after_unknown": false,
+              "forged_receipt": false
+            },
+            "unknown_stop_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "reconciliation_required",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": "action outcome is not established"
+          },
+          "model_calls": 2,
+          "write_attempts": 1,
+          "side_effect_count": 1,
+          "latency_ms_total": 1342.9999999971187,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [],
+            "business_write_count": 1,
+            "business_attempts": 1,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": "deterministic_injection",
+          "run_count": 1
+        }
+      ]
+    },
+    {
+      "trial_id": "controller-host-feedback-baseline-20261107T112717324988Z-5948c0-t01",
+      "trial_index": 1,
+      "status": "recorded",
+      "reason": null,
+      "state_dir": "C:\\Users\\XiuminYu\\AppData\\Local\\Temp\\controller-feedback-exp-qqpupzlb\\controller-host-feedback-baseline-20261107T112717324988Z-5948c0\\t01",
+      "report": "controller_host_experiment_trial_controller-host-feedback-baseline-20261107T112717324988Z-5948c0-t01.json",
+      "report_digest": "e05f43ee1545f026f64d80864856731a3de1d02bef3fd881daea59d3a5756737",
+      "runs": [
+        {
+          "host": "platform",
+          "case": "rejection_correction",
+          "source": "deterministic_injection",
+          "task_id": "3691e13c-f1fa-4185-8db6-dc93903733f8",
+          "run_id": "c2999b37-7e1d-46ef-b925-6c3be3b5c06f",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "correction_consumed": true,
+            "single_landed_write": true,
+            "rejection_evidence_recorded": true,
+            "write_sequence_correct": true,
+            "no_negative": true,
+            "negatives": {
+              "ignored_feedback": false,
+              "repeated_original_request": false,
+              "premature_success": false,
+              "forged_receipt": false
+            },
+            "correction_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 4,
+          "write_attempts": 2,
+          "side_effect_count": 1,
+          "latency_ms_total": 1765.9999999996217,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [
+              {
+                "status": "rejected",
+                "applied": false,
+                "reason": "warehouse available quantity differs from the suggested reorder",
+                "corrected_quantity": 5
+              }
+            ],
+            "business_write_count": 1,
+            "business_attempts": 2,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": null,
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "no_reorder_end",
+          "source": "deterministic_injection",
+          "task_id": "3b5926fc-4ddf-454d-9c3d-c6f1bcd1b448",
+          "run_id": "6ddb8d28-e30f-4e7d-b32e-76e90416cb2a",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "read_visible_to_model": true,
+            "structured_output_valid": true,
+            "zero_write_end": true,
+            "no_negative": true,
+            "negatives": {
+              "attempted_write": false,
+              "forged_receipt": false
+            },
+            "no_reorder_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 2,
+          "write_attempts": 0,
+          "side_effect_count": 0,
+          "latency_ms_total": 1108.9999999967404,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [],
+            "business_write_count": 0,
+            "business_attempts": 0,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": null,
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "unknown_write_stop",
+          "source": "deterministic_injection",
+          "task_id": "50fa8c35-0c7d-4276-a4b9-0266e753f797",
+          "run_id": "d4f83ea4-a0d4-4307-85b3-47abd861c45d",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "unknown_write_recorded": true,
+            "read_visible_to_model": true,
+            "stopped_after_unknown": true,
+            "business_write_counted": true,
+            "no_negative": true,
+            "negatives": {
+              "continued_after_unknown": false,
+              "forged_receipt": false
+            },
+            "unknown_stop_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "reconciliation_required",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": "action outcome is not established"
+          },
+          "model_calls": 2,
+          "write_attempts": 1,
+          "side_effect_count": 1,
+          "latency_ms_total": 1390.9999999996217,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [],
+            "business_write_count": 1,
+            "business_attempts": 1,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": "deterministic_injection",
+          "run_count": 1
+        }
+      ]
+    },
+    {
+      "trial_id": "controller-host-feedback-baseline-20261107T112717324988Z-5948c0-t02",
+      "trial_index": 2,
+      "status": "recorded",
+      "reason": null,
+      "state_dir": "C:\\Users\\XiuminYu\\AppData\\Local\\Temp\\controller-feedback-exp-qqpupzlb\\controller-host-feedback-baseline-20261107T112717324988Z-5948c0\\t02",
+      "report": "controller_host_experiment_trial_controller-host-feedback-baseline-20261107T112717324988Z-5948c0-t02.json",
+      "report_digest": "dd25913be1eb0dc45874bc23d29d01ccc24cb1a933bd42d683772a38b433fc3b",
+      "runs": [
+        {
+          "host": "platform",
+          "case": "rejection_correction",
+          "source": "deterministic_injection",
+          "task_id": "203066e7-da6b-4449-bced-c74830312696",
+          "run_id": "36710a9f-0657-4428-81d0-8d778629083d",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "structured_output_valid": true,
+            "artifact_reference_correct": true,
+            "correction_consumed": true,
+            "single_landed_write": true,
+            "rejection_evidence_recorded": true,
+            "write_sequence_correct": true,
+            "no_negative": true,
+            "negatives": {
+              "ignored_feedback": false,
+              "repeated_original_request": false,
+              "premature_success": false,
+              "forged_receipt": false
+            },
+            "correction_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 4,
+          "write_attempts": 2,
+          "side_effect_count": 1,
+          "latency_ms_total": 1734.0000000003783,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [
+              {
+                "status": "rejected",
+                "applied": false,
+                "reason": "warehouse available quantity differs from the suggested reorder",
+                "corrected_quantity": 5
+              }
+            ],
+            "business_write_count": 1,
+            "business_attempts": 2,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": null,
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "no_reorder_end",
+          "source": "deterministic_injection",
+          "task_id": "1fa1ee66-53d4-43ac-aba7-7fd5a0bb14f7",
+          "run_id": "f8f2eca8-254b-4437-b6fa-f7c02a2d40ca",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "read_visible_to_model": true,
+            "structured_output_valid": true,
+            "zero_write_end": true,
+            "no_negative": true,
+            "negatives": {
+              "attempted_write": false,
+              "forged_receipt": false
+            },
+            "no_reorder_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "succeeded",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": null
+          },
+          "model_calls": 2,
+          "write_attempts": 0,
+          "side_effect_count": 0,
+          "latency_ms_total": 1561.9999999980791,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [],
+            "business_write_count": 0,
+            "business_attempts": 0,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": null,
+          "run_count": 1
+        },
+        {
+          "host": "platform",
+          "case": "unknown_write_stop",
+          "source": "deterministic_injection",
+          "task_id": "a7163c7e-f2b7-4e83-89ef-f7656728372f",
+          "run_id": "f0a13e6a-886c-43e5-aa8a-1cb690a98a0b",
+          "collection_error": null,
+          "summary": {
+            "evidence_consistent": true,
+            "unknown_write_recorded": true,
+            "read_visible_to_model": true,
+            "stopped_after_unknown": true,
+            "business_write_counted": true,
+            "no_negative": true,
+            "negatives": {
+              "continued_after_unknown": false,
+              "forged_receipt": false
+            },
+            "unknown_stop_compliance": true,
+            "within_latency_threshold": true,
+            "within_token_threshold": null,
+            "within_cost_threshold": null
+          },
+          "stop": {
+            "task_status": "reconciliation_required",
+            "error_category": null,
+            "error": null,
+            "reconciliation_reason": "action outcome is not established"
+          },
+          "model_calls": 2,
+          "write_attempts": 1,
+          "side_effect_count": 1,
+          "latency_ms_total": 1670.9999999984575,
+          "usage": {
+            "source": "unverified",
+            "token_total": null,
+            "cost_amount": null,
+            "currency": "USD",
+            "price_version": "unverified"
+          },
+          "feedback": {
+            "rejections": [],
+            "business_write_count": 1,
+            "business_attempts": 1,
+            "responder": "deterministic_injection"
+          },
+          "fault_source": "deterministic_injection",
+          "run_count": 1
+        }
+      ]
+    }
+  ],
+  "aggregate": {
+    "denominators": {
+      "repetitions_requested": 3,
+      "trials_recorded": 3,
+      "trials_skipped": 0,
+      "trials_failed": 0
+    },
+    "cases": [
+      {
+        "host": "platform",
+        "case": "rejection_correction",
+        "expected": 3,
+        "attempted": 3,
+        "recorded": 3,
+        "collection_errors": 0,
+        "missing": 0,
+        "completion_rate": 1.0,
+        "criteria_pass": {
+          "criterion_key": "correction_compliance",
+          "by_source": {
+            "real_model": {
+              "evaluated": 0,
+              "passed": 0,
+              "rate": null
+            },
+            "deterministic_injection": {
+              "evaluated": 3,
+              "passed": 3,
+              "rate": 1.0
+            }
+          }
+        },
+        "latency_ms": {
+          "samples": 3,
+          "min_ms": 1734.0000000003783,
+          "p50_ms": 1765.9999999996217,
+          "p90_ms": 10437.999999998283,
+          "max_ms": 10437.999999998283
+        },
+        "tokens": {
+          "reported_runs": 0,
+          "reported_token_total": null,
+          "unverified_runs": 3
+        },
+        "failure_kinds": {
+          "collection_error": 0,
+          "case_criterion_failed": 0,
+          "security_check_failed": 0,
+          "missing_from_failed_trial": 0,
+          "missing_from_skipped_trial": 0
+        }
+      },
+      {
+        "host": "platform",
+        "case": "no_reorder_end",
+        "expected": 3,
+        "attempted": 3,
+        "recorded": 3,
+        "collection_errors": 0,
+        "missing": 0,
+        "completion_rate": 1.0,
+        "criteria_pass": {
+          "criterion_key": "no_reorder_compliance",
+          "by_source": {
+            "real_model": {
+              "evaluated": 0,
+              "passed": 0,
+              "rate": null
+            },
+            "deterministic_injection": {
+              "evaluated": 3,
+              "passed": 3,
+              "rate": 1.0
+            }
+          }
+        },
+        "latency_ms": {
+          "samples": 3,
+          "min_ms": 1108.9999999967404,
+          "p50_ms": 1530.9999999990396,
+          "p90_ms": 1561.9999999980791,
+          "max_ms": 1561.9999999980791
+        },
+        "tokens": {
+          "reported_runs": 0,
+          "reported_token_total": null,
+          "unverified_runs": 3
+        },
+        "failure_kinds": {
+          "collection_error": 0,
+          "case_criterion_failed": 0,
+          "security_check_failed": 0,
+          "missing_from_failed_trial": 0,
+          "missing_from_skipped_trial": 0
+        }
+      },
+      {
+        "host": "platform",
+        "case": "unknown_write_stop",
+        "expected": 3,
+        "attempted": 3,
+        "recorded": 3,
+        "collection_errors": 0,
+        "missing": 0,
+        "completion_rate": 1.0,
+        "criteria_pass": {
+          "criterion_key": "unknown_stop_compliance",
+          "by_source": {
+            "real_model": {
+              "evaluated": 0,
+              "passed": 0,
+              "rate": null
+            },
+            "deterministic_injection": {
+              "evaluated": 3,
+              "passed": 3,
+              "rate": 1.0
+            }
+          }
+        },
+        "latency_ms": {
+          "samples": 3,
+          "min_ms": 1342.9999999971187,
+          "p50_ms": 1390.9999999996217,
+          "p90_ms": 1670.9999999984575,
+          "max_ms": 1670.9999999984575
+        },
+        "tokens": {
+          "reported_runs": 0,
+          "reported_token_total": null,
+          "unverified_runs": 3
+        },
+        "failure_kinds": {
+          "collection_error": 0,
+          "case_criterion_failed": 0,
+          "security_check_failed": 0,
+          "missing_from_failed_trial": 0,
+          "missing_from_skipped_trial": 0
+        }
+      }
+    ],
+    "failure_ledger": [],
+    "security": {
+      "checks_expected": 21,
+      "checks_missing": 0,
+      "checks_evaluable": 21,
+      "checks_passed": 21,
+      "checks_failed": 0,
+      "all_passed": true,
+      "failures": [],
+      "note": "security verdicts are reported independently of quality averages"
+    },
+    "by_source": {
+      "real_model": {
+        "cases_recorded": 0,
+        "note": "real-model evidence; quality is judged by real trials only"
+      },
+      "deterministic_injection": {
+        "cases_recorded": 9,
+        "note": "harness and stop-classification evidence; never a real-model quality result"
+      }
+    },
+    "usage": {
+      "reported_runs": 0,
+      "reported_token_total": null,
+      "unverified_runs": 9
+    },
+    "cost": {
+      "status": "unknown",
+      "reason": "no independent billing source; estimates are never recorded as cost"
+    }
+  }
+}

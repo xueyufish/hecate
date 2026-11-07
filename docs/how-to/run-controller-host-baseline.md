@@ -94,6 +94,25 @@ export BASELINE_MODEL=zai/glm-4.5-flash && export ZAI_API_KEY=...
 python -m tests.scenarios.baseline.run_controller_clarification_baseline --model zai/glm-4.5-flash
 ```
 
+## Feedback scenarios: the platform_feedback experiment
+
+`tests/scenarios/baseline/run_controller_feedback_baseline.py` registers an independent experiment scenario, `platform_feedback`, covering the business-feedback loop the other matrices do not. The cases use a shared synthetic dataset, tool contract, prompt pair and output schema on the real platform dispatch:
+
+- **rejection_correction** — the read suggests a quantity, the governed write is explicitly rejected by the business tool (`applied=false` plus the corrected quantity, zero side effects so far), and the model must consume that feedback: the resubmitted write uses the corrected quantity, exactly one write lands, and the artifact references the real receipt. Re-reading before resubmitting is allowed, never required.
+- **no_reorder_end** — the read states no reorder is needed; the model delivers directly with zero write attempts and zero side effects (pinned through the generic `zero_write_cases` security rule).
+- **unknown_write_stop** — the business write lands exactly once but its receipt is lost through the existing outcome-unknown path; the task settles in `reconciliation_required` with the recorded reason, further model calls and writes stop, and the test-side business counters stay in the record as independent evidence.
+
+Scoring binds each tool attempt to its receipt's tool and arguments, then checks that the business feedback reached the model through the corresponding assistant/tool message before the corrected proposal. Final delivery requires valid JSON and a model-visible successful receipt. The no-reorder case requires the actual stock result in the final model input; the unknown-write case requires its own pending ledger action with the matching arguments digest. Repeated rejected attempts fail the independent security check even when a later correction succeeds. Missing evidence leaves the corresponding safety checks unevaluable. The deterministic provider extracts quantities from the actual feedback, with changed-value and re-read regressions covering that behavior.
+
+The scenario uses `controller-host-feedback-rubric-2`. Its identity includes each case's read payload, rejection result and security rules. Historical records retain their original rubric and comparison group. Supplied real providers obey the same gate and credential checks as CLI-selected models and are used for the quality cases.
+
+The two quality cases reuse the real-model entry (gate plus matching credential, `--model` or a `real_model` definition); the unknown-write case is always the deterministic fault injection and carries `fault_source: deterministic_injection` on every run. Model source, business-sample source and fault source are labeled separately; failures and missing samples stay in the denominators.
+
+```bash
+python -m tests.scenarios.baseline.run_controller_feedback_baseline            # repeated experiment (deterministic)
+python -m tests.scenarios.baseline.run_controller_feedback_baseline --print-default-definition
+```
+
 ## What a record does not certify
 
 - `gate` stays `false` and `business_value` stays `unverified` on every record; nothing here is a production or release certificate.
@@ -104,4 +123,4 @@ python -m tests.scenarios.baseline.run_controller_clarification_baseline --model
 
 ## Verification pointers
 
-Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The clarification scenario's invariants (paired identity, park/wake/resume behavior, negative verdicts, deferred real-model boundary) are asserted in `tests/scenarios/test_controller_clarification_report.py` under the `controller_host_clarification` recorded track. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).
+Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The clarification scenario's invariants (paired identity, park/wake/resume behavior, negative verdicts, deferred real-model boundary) are asserted in `tests/scenarios/test_controller_clarification_report.py` under the `controller_host_clarification` recorded track. The feedback scenario's invariants (three-case identity, correction/no-reorder/unknown-stop behavior, negative verdicts, quality-case-only real entry) are asserted in `tests/scenarios/test_controller_feedback_report.py` under the `controller_host_feedback` recorded track. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).
