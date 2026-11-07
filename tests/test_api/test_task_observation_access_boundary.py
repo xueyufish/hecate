@@ -499,3 +499,147 @@ async def test_budget_projection_is_whitelisted_recorded_only_and_role_preserved
     assert all(
         "agent_child_budget_used" not in item and "workflow_budget_used" not in item for item in listing["items"]
     )
+
+
+async def test_workflow_step_observation_is_gated_readonly_and_binding_verified(env):
+    """The workflow summary rides the authorized detail GET: a verified
+    submitted child surfaces as an id, while missing, foreign, soft-deleted
+    and wrongly stamped children stay hidden behind explicit states. The
+    close/reconcile markers echo verbatim, the list stays clean, every
+    authorized role reads the same facts, and reads write nothing."""
+    from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
+    from hecate.execution.task_run_registry import TaskRunRegistry
+    from hecate.execution.workflow_child import WorkflowChildTaskAdapter
+
+    client, store, db, ctx = env["client"], env["store"], env["db"], env["admin_ctx"]
+    registry = TaskRunRegistry(db)
+    chain = IdentityChain(
+        initiator=str(ctx.user_id),
+        principal_id=str(ctx.user_id),
+        workload=WorkloadIdentity(
+            deployment=BackendRef(RefKind.DEPLOYMENT, "hecate", str(uuid.uuid4())),
+            workload_id="hecate:workflow-observe",
+        ),
+        audience="hecate:test",
+    )
+
+    async def new_task(goal: str, workspace_id):
+        row = await registry.create_task(goal=goal, initiator_ref=chain.to_dict(), workspace_id=workspace_id)
+        await db.commit()
+        return row
+
+    parent = await new_task("workflow observation", DEFAULT_WORKSPACE_ID)
+    parent_ref = BackendRef(RefKind.TASK, "hecate", str(parent.id))
+    store.submit_task(
+        key=IdempotencyKey(str(parent.id), str(ctx.user_id), str(DEFAULT_WORKSPACE_ID), "d" * 64),
+        task_ref=parent_ref,
+        run_ref=BackendRef(RefKind.RUN, "hecate", str(uuid.uuid4())),
+        input_payload={
+            "goal": "workflow observation",
+            "workflow": {"steps": [{"goal": "s0"}, {"goal": "s1"}, {"goal": "s2"}, {"goal": "s3"}, {"goal": "s4"}]},
+        },
+    )
+
+    async def submit_step_child(index: int, child_row, *, stamp: dict):
+        store.submit_task(
+            key=IdempotencyKey(
+                WorkflowChildTaskAdapter.submission_key(parent_ref, index),
+                str(ctx.user_id),
+                str(DEFAULT_WORKSPACE_ID),
+                "f" * 64,
+            ),
+            task_ref=BackendRef(RefKind.TASK, "hecate", str(child_row.id)),
+            run_ref=BackendRef(RefKind.RUN, "hecate", str(uuid.uuid4())),
+            input_payload={"goal": f"step {index}", **({"workflow_parent": stamp} if stamp else {})},
+        )
+
+    # Step 0: a correctly stamped, visible child.
+    child0 = await new_task("step child 0", DEFAULT_WORKSPACE_ID)
+    correct_stamp = {"task_ref": parent_ref.to_dict(), "step_index": 0}
+    await submit_step_child(0, child0, stamp=correct_stamp)
+    # Step 1: a same-workspace child whose stamp names another step —
+    # provably contradicted, hidden.
+    child1 = await new_task("step child 1", DEFAULT_WORKSPACE_ID)
+    await submit_step_child(1, child1, stamp={"task_ref": parent_ref.to_dict(), "step_index": 99})
+    # Step 2: a correctly stamped child in ANOTHER workspace — invisible
+    # here, hidden behind unverifiable.
+    child2 = await new_task("step child 2", env["other"].id)
+    await submit_step_child(2, child2, stamp=correct_stamp | {"step_index": 2})
+    # Step 3: a correctly stamped child that is soft-deleted — hidden.
+    child3 = await new_task("step child 3", DEFAULT_WORKSPACE_ID)
+    await submit_step_child(3, child3, stamp=correct_stamp | {"step_index": 3})
+    child3.deleted = True
+    await db.commit()
+    # Step 4: never submitted. The reclaim sweep closed it.
+
+    store.apply_task_state(
+        parent_ref,
+        TaskLifecycleState.RUNNING,
+        expected_revision=0,
+        extra_update={
+            "wait": {
+                "wake_kind": "provide_input",
+                "contract_ref": {
+                    "await_task_ref": BackendRef(RefKind.TASK, "hecate", str(child0.id)).to_dict(),
+                    "step_index": 0,
+                },
+                "wait_token": "workflow-observe-token",
+                "consumed": False,
+            }
+        },
+    )
+    state = store.get_task_state(parent_ref)
+    store.update_task_extra(
+        parent_ref,
+        {
+            "_workflow_callbacks": {"0": {"child_task_id": str(child0.id), "applied_fact_id": "cmd-0"}},
+            "workflow_step_states": {"2": "held_for_reconciliation", "4": "closed_unexecuted"},
+        },
+        expected_revision=state.revision,
+    )
+
+    before = await _snapshot(env)
+    detail = (await client.get(f"/api/tasks/{parent.id}")).json()
+    summary = detail["workflow_steps"]
+    assert "submissions_unsupported" not in summary and "declaration_unreadable" not in summary
+    steps = summary["steps"]
+    assert [step["index"] for step in steps] == [0, 1, 2, 3, 4]
+    assert [step["mode"] for step in steps] == ["chat"] * 5
+    assert steps[0]["child_task_id"] == str(child0.id)
+    assert steps[0]["callback_applied"] is True
+    assert steps[0]["waiting"] == {"consumed": False}
+    assert "child_unverified" not in steps[0] and "binding_inconsistent" not in steps[0]
+    assert steps[1]["binding_inconsistent"] is True and "child_task_id" not in steps[1]
+    assert steps[2]["child_unverified"] is True and steps[2]["step_state"] == "held_for_reconciliation"
+    assert steps[3]["child_unverified"] is True and "child_task_id" not in steps[3]
+    assert steps[4]["no_submission"] is True and steps[4]["step_state"] == "closed_unexecuted"
+    # The child side echoes its stamp verbatim on its own detail.
+    child_detail = (await client.get(f"/api/tasks/{child0.id}")).json()
+    assert child_detail["workflow_parent"]["step_index"] == 0
+    assert child_detail["workflow_parent"]["parent_task_ref"]["id"] == str(parent.id)
+    # The list projection stays clean.
+    listing = (await client.get("/api/tasks")).json()
+    assert all("workflow_steps" not in item and "workflow_parent" not in item for item in listing["items"])
+    assert await _snapshot(env) == before, "a detail GET must not write durable facts"
+
+    env["holder"]["ctx"] = replace(ctx, role=WorkspaceRole.VIEWER)
+    viewer = (await client.get(f"/api/tasks/{parent.id}")).json()
+    assert viewer["workflow_steps"] == summary
+    # Non-workflow tasks carry no summary at all — absence is the state.
+    plain = (await client.get(f"/api/tasks/{env['task'].id}")).json()
+    assert "workflow_steps" not in plain and "workflow_parent" not in plain
+
+    # The child's workspace cannot use its stamp to reveal a foreign parent.
+    env["holder"]["ctx"] = replace(ctx, workspace_id=env["other"].id, org_id=env["other"].org_id)
+    foreign_parent = (await client.get(f"/api/tasks/{child2.id}")).json()
+    assert foreign_parent["workflow_parent"]["parent_unverified"] is True
+    assert "parent_task_ref" not in foreign_parent["workflow_parent"]
+    env["holder"]["ctx"] = ctx
+    wrong_step = (await client.get(f"/api/tasks/{child1.id}")).json()
+    assert wrong_step["workflow_parent"]["binding_inconsistent"] is True
+    assert "parent_task_ref" not in wrong_step["workflow_parent"]
+    parent.deleted = True
+    await db.commit()
+    deleted_parent = (await client.get(f"/api/tasks/{child0.id}")).json()
+    assert deleted_parent["workflow_parent"]["parent_unverified"] is True
+    assert "parent_task_ref" not in deleted_parent["workflow_parent"]

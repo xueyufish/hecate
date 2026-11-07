@@ -12,6 +12,18 @@ A controller task can delegate work to child tasks through the controlled `agent
 ## What the child side shows
 
 - The delegation stamp the task was accepted under (`agent_child_parent`): the call alias, the call identity and the parent task reference, with a back-to-parent navigation link.
+- For a task that was submitted as a workflow step, the verified parent relationship (`workflow_parent`) carries the parent task reference and the step index, with back-to-parent navigation. The parent must be visible in the current workspace and its declared step and committed submission must bind this child. Unavailable parents and inconsistent bindings have explicit states with the parent reference withheld.
+
+## What the workflow step list shows
+
+A task whose recorded input declares a `workflow` block carries a task-level **Workflow 步骤（任务级）** section in the same panel. Steps render in declaration order with the page-needed declaration fields (index, goal, mode) joined with the parent's persisted facts:
+
+- **Submitted child** — located through the step's stable submission identity and only surfaced after the child re-verifies against its own persisted `workflow_parent` stamp inside this workspace. A child that is missing, soft-deleted, in another workspace, or stamped for a different parent/step is hidden behind an explicit 提交记录无法核验 state — the id is never guessed.
+- **Recorded wait** — when the parent's recorded wait and the verified submission bind the same step and child, its consumption state shows on that step. A consumed wait may remain recorded after the workflow has ended. The parent's lifecycle records its current state.
+- **Callback consumed** — the step's verified callback was consumed. A consumption fact only: it never means the child succeeded and never means the parent's goal passed.
+- **Persisted markers** — `closed_unexecuted` and `held_for_reconciliation` are echoed verbatim (记录标记：…) as the reclaim sweep recorded them.
+
+A successful lookup without a submission or callback/wait binding reads 未找到提交记录. A failed lookup offers a refresh retry, a workflow block that no longer parses reads as its own unreadable state, and a store without the submission lookup surface says so. Conflicting submission, callback or wait references hide the child link and show an inconsistent binding. The list stays with the task when the selected Run changes, and the child's lifecycle and delivery verdict remain on the child task's own detail page.
 
 ## The four facts that stay separate
 
@@ -43,4 +55,4 @@ Relationship references are recorded data echoed by the API. A local link is gen
 
 ## Verification pointers
 
-Component behavior (fact branches, consumption states, reference-validation matrix) is pinned in `web/src/__tests__/task-child-observation-panel.test.tsx`; page integration (navigation, run-switch stability, stale refresh, late-response isolation, no writes) in `web/src/__tests__/task-detail-child-observation.test.tsx`. The served fields are covered by `tests/test_execution/test_agent_child_run.py` and the read boundary by `tests/test_api/test_task_observation_access_boundary.py`.
+Component behavior (fact branches, consumption states, reference-validation matrix, workflow step states) is pinned in `web/src/__tests__/task-child-observation-panel.test.tsx`; page integration (navigation, run-switch stability, stale refresh, late-response isolation, no writes) in `web/src/__tests__/task-detail-child-observation.test.tsx`. The served fields are covered by `tests/test_execution/test_agent_child_run.py`, `tests/test_execution/test_workflow_controller_steps.py` and the read boundary (including the workflow negative matrix) by `tests/test_api/test_task_observation_access_boundary.py`.

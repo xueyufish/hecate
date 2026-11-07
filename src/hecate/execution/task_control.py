@@ -792,6 +792,10 @@ class TaskControlService:
                 "call_id": task_input["agent_child_parent"].get("call_id"),
                 "parent_task_ref": task_input["agent_child_parent"].get("task_ref"),
             }
+        if isinstance(task_input.get("workflow_parent"), dict):
+            detail["workflow_parent"] = await self._workflow_parent_summary(
+                workspace_id, t_ref, task_input["workflow_parent"]
+            )
         if record is not None and (record.extra or {}).get("agent_child_calls") is not None:
             # The parent side: the accepted-call count and, when a wait is
             # bound, its live consumption facts (the child's own state is
@@ -818,6 +822,12 @@ class TaskControlService:
                 value = (record.extra or {}).get(key)
                 if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                     detail[key] = value
+        if record is not None and task_input.get("workflow") is not None:
+            # Parent side: the declared step list joined with the parent's
+            # persisted step facts. Non-workflow tasks carry no summary at
+            # all — absence is the "no workflow declared" state, never an
+            # empty list pretending nothing was declared.
+            detail["workflow_steps"] = await self._workflow_steps_summary(workspace_id, t_ref, task_input, record, wait)
         continuation = (record.extra or {}).get("continuation") if record else None
         if isinstance(continuation, dict) and isinstance(continuation.get("attempts"), list):
             # Minimal read-only continuation summary: trigger reason,
@@ -844,6 +854,191 @@ class TaskControlService:
                 ],
             }
         return detail
+
+    async def _workflow_steps_summary(
+        self,
+        workspace_id: uuid.UUID,
+        parent_ref: BackendRef,
+        task_input: dict[str, Any],
+        record: Any,
+        wait: Any,
+    ) -> dict[str, Any]:
+        """Read-only workflow step observation joined from persisted facts.
+
+        Per declared step (in declaration order): the page-needed
+        declaration fields (index, goal, mode), the committed submission
+        child located through the adapter's stable submission key, the
+        consumed-callback ledger, the verbatim close/reconcile markers and
+        the CURRENT wait binding. The child id is surfaced only when the
+        binding re-verifies against the child's own durable ``workflow_parent``
+        stamp inside this workspace — a missing, soft-deleted, foreign or
+        wrongly stamped child stays hidden behind ``child_unverified``.
+        Callback consumption facts, the child's lifecycle and its delivery
+        verdict remain separate surfaces; this GET writes nothing.
+        """
+        from hecate.execution.workflow_child import WorkflowChildTaskAdapter
+
+        try:
+            plan = WorkflowChildTaskAdapter.plan({"workflow": task_input.get("workflow")})
+        except ValueError:
+            # A declaration that no longer parses stays visible as its own
+            # state instead of failing the whole GET or guessing steps.
+            return {"steps": [], "declaration_unreadable": True}
+        extra = record.extra or {}
+        callbacks = extra.get("_workflow_callbacks")
+        callbacks = callbacks if isinstance(callbacks, dict) else {}
+        markers = extra.get("workflow_step_states")
+        markers = markers if isinstance(markers, dict) else {}
+        lookup = getattr(self._store, "submission_for_key", None)
+        contract = wait.get("contract_ref") if isinstance(wait, dict) else None
+        contract = contract if isinstance(contract, dict) else {}
+        wait_index = contract.get("step_index")
+        wait_binds = (
+            isinstance(wait, dict)
+            and wait.get("wake_kind") == "provide_input"
+            and type(wait_index) is int
+            and isinstance(contract.get("await_task_ref"), dict)
+        )
+        steps: list[dict[str, Any]] = []
+        for index, step in enumerate(plan.steps):
+            entry: dict[str, Any] = {
+                "index": index,
+                "goal": str(step.get("goal", "")),
+                "mode": str(step.get("mode", "chat")),
+            }
+            child_id: str | None = None
+            if lookup is None:
+                # Without the association surface no submission can be
+                # located; the declaration still renders with its own state.
+                entry["child_unverified"] = True
+            else:
+                try:
+                    association = await asyncio.to_thread(
+                        lookup, WorkflowChildTaskAdapter.submission_key(parent_ref, index)
+                    )
+                except Exception:  # noqa: BLE001 — the association surface itself failed
+                    entry["submission_read_failed"] = True
+                else:
+                    if association is None:
+                        if isinstance(callbacks.get(str(index)), dict) or (wait_binds and wait_index == index):
+                            entry["child_unverified"] = True
+                        else:
+                            entry["no_submission"] = True
+                    else:
+                        verdict, child_id = await self._verified_step_child(
+                            workspace_id, association.task_ref, index, parent_ref
+                        )
+                        if verdict == "unverified":
+                            entry["child_unverified"] = True
+                        elif verdict == "inconsistent":
+                            entry["binding_inconsistent"] = True
+            applied = callbacks.get(str(index))
+            if isinstance(applied, dict):
+                recorded_child = applied.get("child_task_id")
+                fact_id = applied.get("applied_fact_id")
+                if (
+                    not isinstance(recorded_child, str)
+                    or not recorded_child
+                    or not isinstance(fact_id, str)
+                    or not fact_id
+                ):
+                    entry["binding_inconsistent"] = True
+                else:
+                    entry["callback_applied"] = True
+                if child_id is not None and recorded_child != child_id:
+                    entry["binding_inconsistent"] = True
+            marker = markers.get(str(index))
+            if marker in (_WORKFLOW_STEP_CLOSED, _WORKFLOW_STEP_HELD):
+                entry["step_state"] = marker
+            if wait_binds and wait_index == index and child_id is not None:
+                if contract["await_task_ref"] != task_ref_of(uuid.UUID(child_id)).to_dict():
+                    entry["binding_inconsistent"] = True
+                else:
+                    consumed = wait.get("consumed")
+                    entry["waiting"] = {"consumed": consumed if isinstance(consumed, bool) else None}
+            if entry.get("binding_inconsistent"):
+                entry.pop("waiting", None)
+            elif child_id is not None:
+                entry["child_task_id"] = child_id
+            steps.append(entry)
+        summary: dict[str, Any] = {"steps": steps}
+        if lookup is None:
+            summary["submissions_unsupported"] = True
+        return summary
+
+    async def _verified_step_child(
+        self, workspace_id: uuid.UUID, child_ref: BackendRef, index: int, parent_ref: BackendRef
+    ) -> tuple[str, str | None]:
+        """Re-verify one submitted step child against its persisted stamp.
+
+        Returns ``ok`` with the child id only when the child resolves
+        inside this workspace, is alive, and its own durable
+        ``workflow_parent`` stamp names this parent and step index.
+        Everything else stays hidden: ``unverified`` (a reference the GET
+        cannot prove either way) or ``inconsistent`` (provably
+        contradicted facts) — an unverifiable reference is never surfaced.
+        """
+        if child_ref.kind is not RefKind.TASK or child_ref.issuer_domain != PLATFORM_ISSUER:
+            return "unverified", None
+        try:
+            child_id = uuid.UUID(str(child_ref.id))
+        except ValueError:
+            return "unverified", None
+        try:
+            child = await self._get_task(workspace_id, child_id)
+        except TaskControlNotFoundError:
+            return "unverified", None
+        payload = await asyncio.to_thread(self._store.get_task_input, child_ref) or {}
+        stamp = payload.get("workflow_parent")
+        if (
+            not isinstance(stamp, dict)
+            or stamp.get("task_ref") != parent_ref.to_dict()
+            or type(stamp.get("step_index")) is not int
+            or stamp.get("step_index") != index
+        ):
+            return "inconsistent", None
+        return "ok", str(child.id)
+
+    async def _workflow_parent_summary(
+        self, workspace_id: uuid.UUID, child_ref: BackendRef, stamp: dict[str, Any]
+    ) -> dict[str, Any]:
+        from hecate.execution.workflow_child import WorkflowChildTaskAdapter
+
+        summary: dict[str, Any] = {}
+        index = stamp.get("step_index")
+        raw_parent = stamp.get("task_ref")
+        if type(index) is not int or index < 0 or not isinstance(raw_parent, dict):
+            return {"binding_inconsistent": True}
+        summary["step_index"] = index
+        try:
+            parent_ref = BackendRef.from_dict(raw_parent)
+            parent_id = uuid.UUID(parent_ref.id)
+        except (KeyError, TypeError, ValueError):
+            return {**summary, "binding_inconsistent": True}
+        if parent_ref != task_ref_of(parent_id):
+            return {**summary, "binding_inconsistent": True}
+        try:
+            await self._get_task(workspace_id, parent_id)
+        except TaskControlNotFoundError:
+            return {**summary, "parent_unverified": True}
+        parent_input = await asyncio.to_thread(self._store.get_task_input, parent_ref) or {}
+        try:
+            plan = WorkflowChildTaskAdapter.plan(parent_input)
+        except ValueError:
+            return {**summary, "binding_inconsistent": True}
+        if plan is None or index >= len(plan.steps):
+            return {**summary, "binding_inconsistent": True}
+        lookup = getattr(self._store, "submission_for_key", None)
+        if lookup is None:
+            return {**summary, "parent_unverified": True}
+        try:
+            association = await asyncio.to_thread(lookup, WorkflowChildTaskAdapter.submission_key(parent_ref, index))
+        except Exception:  # noqa: BLE001 — do not expose a parent whose binding cannot be read
+            return {**summary, "parent_unverified": True}
+        if association is None or association.task_ref != child_ref:
+            return {**summary, "binding_inconsistent": True}
+        summary["parent_task_ref"] = parent_ref.to_dict()
+        return summary
 
     async def list_tasks(
         self,
