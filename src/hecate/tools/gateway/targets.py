@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from ipaddress import ip_address
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -33,7 +34,6 @@ from hecate.tools.gateway.errors import (
 
 logger = logging.getLogger(__name__)
 
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
@@ -56,7 +56,10 @@ def validate_base_url(base_url: str) -> None:
     host = (parsed.hostname or "").lower()
     if not host:
         raise EgressPolicyError("URL has no host")
-    is_loopback = host in _LOOPBACK_HOSTS or host.startswith("127.")
+    try:
+        is_loopback = ip_address(host).is_loopback
+    except ValueError:
+        is_loopback = host == "localhost"
     if parsed.scheme == "http" and not is_loopback:
         raise EgressPolicyError("HTTPS is required for non-loopback hosts")
 

@@ -71,38 +71,39 @@ class TestGatewayIdentityHeaders:
     async def test_executor_merges_identity_headers(self) -> None:
         import httpx
 
+        from hecate.models.gateway_target import GatewayTargetModel
+        from hecate.models.tool import ToolModel
         from hecate.tools.gateway.executor import RestToolExecutor
 
-        captured: dict = {}
+        captured = {}
 
-        class _StubClient:
-            async def request(self, method: str, url: str, **kwargs):
-                captured["headers"] = dict(kwargs.get("headers") or {})
-                return httpx.Response(200, json={"ok": True})
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["headers"] = dict(request.headers)
+            return httpx.Response(200, json={"ok": True})
 
-        class _Tool:
-            name = "query"
-            deleted = False
-
-        class _Target:
-            name = "t"
-            base_url = "https://target.example.com"
-            credentials = {"headers": {"authorization": "Bearer brokered"}}
-
-        executor = RestToolExecutor(client=_StubClient())  # type: ignore[arg-type]
-        import unittest.mock as mock
-
-        with mock.patch(
-            "hecate.tools.gateway.executor._extract_gateway_meta",
-            return_value={"method": "POST", "path": "/query", "path_params": [], "body_params": []},
-        ):
-            result = await executor.execute(
-                _Tool(),  # type: ignore[arg-type]
-                _Target(),  # type: ignore[arg-type]
+        tool = ToolModel(
+            name="query",
+            parameters={
+                "x-gateway": {
+                    "method": "POST",
+                    "path": "/query",
+                    "path_params": [],
+                    "body_params": [],
+                }
+            },
+        )
+        target = GatewayTargetModel(
+            name="t",
+            base_url="https://target.example.com",
+            credentials={"headers": {"authorization": "Bearer brokered"}},
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            result = await RestToolExecutor(client=client).execute(
+                tool,
+                target,
                 {"sku": "1"},
                 identity_headers={"x-hecate-actor": "apikey:7"},
             )
         assert result == {"ok": True}
-        # Brokered credentials stay; verified identity rides its own headers.
         assert captured["headers"]["authorization"] == "Bearer brokered"
         assert captured["headers"]["x-hecate-actor"] == "apikey:7"
