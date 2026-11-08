@@ -192,32 +192,38 @@ async def _run_case(host: str, case: str, provider: Any, root: Path) -> dict[str
         else:
             observation = await controller_host_runner.run_runner_case(case, provider, root)
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
-        observation = {
-            "task_status": None,
-            "final_content": None,
-            "error_category": None,
-            "error": None,
-            "reconciliation_reason": None,
-            "model_calls": None,
-            "rounds": [],
-            "tool_calls": [],
-            "tool_receipts": [],
-            "ledger_actions": [],
-            "write_attempts": None,
-            "side_effect_count": None,
-            "approval": None,
-            "rebuild": {"performed": False},
-            "post_resume_model_input_has_receipt": None,
-            "latency_ms_total": (time.monotonic() - started) * 1000,
-            "collection_error": f"{type(exc).__name__}: {exc}",
-            "usage": {
-                "source": "unverified",
-                "token_total": None,
-                "cost_amount": None,
-                "currency": "USD",
-                "price_version": "unverified",
-            },
-        }
+        # A case-budget cancellation arrives as TimeoutError with the
+        # driver's evidence attached; keep it instead of an empty record.
+        attached = getattr(exc, "observation", None)
+        if isinstance(attached, dict):
+            observation = attached
+        else:
+            observation = {
+                "task_status": None,
+                "final_content": None,
+                "error_category": None,
+                "error": None,
+                "reconciliation_reason": None,
+                "model_calls": None,
+                "rounds": [],
+                "tool_calls": [],
+                "tool_receipts": [],
+                "ledger_actions": [],
+                "write_attempts": None,
+                "side_effect_count": None,
+                "approval": None,
+                "rebuild": {"performed": False},
+                "post_resume_model_input_has_receipt": None,
+                "latency_ms_total": (time.monotonic() - started) * 1000,
+                "collection_error": controller_host_platform.collection_error(exc),
+                "usage": {
+                    "source": "unverified",
+                    "token_total": None,
+                    "cost_amount": None,
+                    "currency": "USD",
+                    "price_version": "unverified",
+                },
+            }
     summary = spec.score_run(case, host, observation)
     summary.update(
         {
@@ -262,6 +268,7 @@ async def _run_case(host: str, case: str, provider: Any, root: Path) -> dict[str
         "write_attempts": observation.get("write_attempts"),
         "side_effect_count": observation.get("side_effect_count"),
         "usage": observation.get("usage"),
+        "diagnostics": observation.get("diagnostics"),
     }
 
 

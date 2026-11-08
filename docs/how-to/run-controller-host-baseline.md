@@ -113,6 +113,20 @@ python -m tests.scenarios.baseline.run_controller_feedback_baseline            #
 python -m tests.scenarios.baseline.run_controller_feedback_baseline --print-default-definition
 ```
 
+## Failure diagnostics in trial records
+
+Every platform run (all three scenario families) carries a versioned `diagnostics` block in its trial record, so a model-call failure can be attributed instead of guessed from a terminal state name:
+
+- `version` — the diagnostic format identifier `controller-failure-diagnostics-1`; older trial records may omit the block.
+- `end_reason` — `terminal_state_observed`, `case_deadline_exceeded` or `collection_exception`. A timeout is attributed to the case deadline only when that deadline actually expired.
+- `collection_error_type`, `round_error_types` — exception class metadata, including cleanup cancellation. These do not establish that a provider charged for a request or that an SDK retried it; round errors may also originate from collector limits.
+- `task_state` — the durable lifecycle state read from the task row at collection end.
+- `dispatch_attempts`, `dispatch_starts` — nonnegative integer worker counters. `last_error` indicates redacted text and `last_error_digest` permits equality checks without copying it. `requeued_reason` retains only a recognized worker reason; arbitrary values remain unknown. These facts supplement a `reconciliation_required` whose `reconciliation_reason` is null without inventing its cause.
+- `last_run_id` — best-effort identity of the task's run row.
+- `diagnostic_error` — why a diagnostic read itself failed or stayed partial; it never overwrites the collection failure it describes.
+
+Diagnostic reads have their own bounded deadline outside the case execution budget, so a slow diagnostic cannot turn an observed completion into a case timeout. Reads are allow-listed: no credentials, request headers, exception messages or raw provider response bodies are copied. Missing or failed reads leave facts unknown and preserve the original collection error type. Known Task/Run identity, completed rounds, receipts and side-effect counters survive provider exceptions and case timeouts. The collector cancels and joins its background dispatch tasks before taking the final trace snapshot, retaining the cancelled in-flight attempt as well as earlier completed rounds. The task state is an observed durable fact, not a terminal state invented from a collector deadline. The aggregate projection excludes diagnostics; the full block lives in the trial records pinned by digest. Historical trial and aggregate bytes remain unchanged, and their missing facts cannot be backfilled from new fault-injection runs.
+
 ## What a record does not certify
 
 - `gate` stays `false` and `business_value` stays `unverified` on every record; nothing here is a production or release certificate.

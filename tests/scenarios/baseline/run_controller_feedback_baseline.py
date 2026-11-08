@@ -34,6 +34,7 @@ from tests.scenarios.baseline import controller_host_feedback_platform as driver
 from tests.scenarios.baseline import controller_host_feedback_spec as fspec
 from tests.scenarios.baseline import controller_host_spec as spec
 from tests.scenarios.baseline import run_controller_host_baseline as collector
+from tests.scenarios.baseline.controller_host_platform import collection_error
 from tests.scenarios.baseline.run_controller_host_baseline import LiteLLMProvider, _BoundedProvider
 
 BASELINE_DIR = collector.BASELINE_DIR
@@ -98,38 +99,45 @@ async def _run_case(case: str, provider: Any, root: Path) -> dict[str, Any]:
     try:
         observation = await driver.run_feedback_case(case, provider, root)
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
-        observation = {
-            "task_id": None,
-            "run_id": None,
-            "run_count": None,
-            "rounds": [],
-            "tool_receipts": [],
-            "tool_calls": [],
-            "business_calls": [],
-            "ledger_actions": [],
-            "final_content": None,
-            "model_calls": None,
-            "write_attempts": None,
-            "side_effect_count": None,
-            "approval": None,
-            "rebuild": {"performed": False},
-            "stop": {"task_status": None, "error_category": None, "error": None, "reconciliation_reason": None},
-            "latency_ms_total": (time.monotonic() - started) * 1000,
-            "collection_error": f"{type(exc).__name__}: {exc}",
-            "feedback": {
-                "rejections": [],
-                "business_write_count": None,
-                "business_attempts": None,
-                "responder": "deterministic_injection",
-            },
-            "usage": {
-                "source": "unverified",
-                "token_total": None,
-                "cost_amount": None,
-                "currency": "USD",
-                "price_version": "unverified",
-            },
-        }
+        # A case-budget cancellation arrives as TimeoutError with the
+        # driver's evidence attached; keep it instead of an empty record.
+        attached = getattr(exc, "observation", None)
+        if isinstance(attached, dict):
+            observation = attached
+        else:
+            observation = {
+                "task_id": None,
+                "run_id": None,
+                "run_count": None,
+                "rounds": [],
+                "tool_receipts": [],
+                "tool_calls": [],
+                "business_calls": [],
+                "ledger_actions": [],
+                "final_content": None,
+                "model_calls": None,
+                "write_attempts": None,
+                "side_effect_count": None,
+                "approval": None,
+                "rebuild": {"performed": False},
+                "stop": {"task_status": None, "error_category": None, "error": None, "reconciliation_reason": None},
+                "latency_ms_total": (time.monotonic() - started) * 1000,
+                "collection_error": collection_error(exc),
+                "feedback": {
+                    "rejections": [],
+                    "business_write_count": None,
+                    "business_attempts": None,
+                    "responder": "deterministic_injection",
+                },
+                "diagnostics": None,
+                "usage": {
+                    "source": "unverified",
+                    "token_total": None,
+                    "cost_amount": None,
+                    "currency": "USD",
+                    "price_version": "unverified",
+                },
+            }
     summary = fspec.score_feedback_run(case, observation)
     summary["within_latency_threshold"] = (
         observation.get("latency_ms_total") is not None
@@ -171,6 +179,7 @@ async def _run_case(case: str, provider: Any, root: Path) -> dict[str, Any]:
         "side_effect_count": observation.get("side_effect_count"),
         "usage": observation.get("usage"),
         "feedback": observation.get("feedback") or {},
+        "diagnostics": observation.get("diagnostics"),
     }
 
 
