@@ -250,6 +250,15 @@ jobs:
           name: managed-wait-resource-evidence
           path: ${{ runner.temp }}/wait-resource-evidence/*.json
           if-no-files-found: warn
+      - name: Verify approval decision concurrency and recovery on PostgreSQL
+        env:
+          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+        run: |
+          # Approval decisions across independent processes: the ready-file
+          # approve/reject race, the decision→resume crash window healed by
+          # a substitute recovery consumer, competing consumers plus an API
+          # replay, and late cancel/revocation/expiry convergence.
+          python scripts/dev.py test tests/test_execution/test_approval_decision_postgres.py -q -rA --timeout=420 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with

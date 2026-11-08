@@ -118,5 +118,51 @@ Deterministic coverage includes a real governed Controller path: two identical
 parameter calls require distinct approvals, fresh workers replay old actions,
 each approved binding is consumed by its exact invocation, and rejection executes
 no protected call. Migration DDL and retained-audit tests complement ORM-backed
-tests. PostgreSQL concurrency, full migration-chain checks and real-provider
-quality remain separate verification scopes; skipped checks do not certify them.
+tests. Full migration-chain checks and real-provider quality remain separate
+verification scopes; skipped checks do not certify them.
+
+## PostgreSQL concurrency and process-recovery acceptance
+
+`tests/test_execution/test_approval_decision_postgres.py` runs the decision
+chain against real PostgreSQL with competing independent processes
+(`HECATE_STEP6_POSTGRES_URL` selects the server; without it the module
+reports explicit skips). The subprocess workers use the production Controller,
+policy, action ledger and approval consumer with scripted model and business-tool
+responses. The HTTP gate test scripts the execution boundary and exercises the
+production request authorization and decision service.
+
+- Processes racing approve/reject validate the original wait before a shared
+  barrier releases either writer. They yield one authoritative decision and
+  one operation record. The loser
+  receives `ALREADY_DECIDED`, and the winner's operation id replays the
+  recorded facts while a changed body conflicts.
+- A process killed after the decision commit but before the resume is
+  healed by a substitute `ApprovalResumeRecovery` consumer. A fresh
+  connection confirms the committed phase-one facts first, and a replacement
+  worker resumes the same Task and Run after the original worker stops.
+- Recovery consumers both reach the pending operation before a barrier releases
+  them alongside a retry of the same decision service operation. They converge
+  on one resume command and one business call. The authority records the exact
+  invocation that consumed its binding, and model-call traces detect repeated
+  decisions.
+- A cancel recorded after the decision commit rejects the resume and
+  preserves the decision and its audit trail. A revoked or expired
+  authority refuses the decision without recording one, and the expired
+  wait converges without a business call.
+- Revoking or expiring authority after both the decision and resume commit,
+  while the worker is stopped, prevents the protected call after restart.
+  The committed approval and operation remain available for audit.
+
+Run it against a disposable server. Every test works inside its own schema.
+
+```bash
+.venv/Scripts/python.exe scripts/dev.py sync --profile postgres
+HECATE_STEP6_POSTGRES_URL=postgresql+psycopg://hecate:hecate@localhost:5432/hecate \
+  .venv/Scripts/python.exe scripts/dev.py test \
+  tests/test_execution/test_approval_decision_postgres.py -q -rA \
+  --timeout=420 --timeout-method=thread -p no:cacheprovider
+```
+
+CI runs this module in the PostgreSQL step6 job after the wait-resource
+drill. A local run on a machine without the server is a skip, never a
+pass; the SQLite suite remains the contract tier.
