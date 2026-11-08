@@ -1,0 +1,50 @@
+{
+  "id": "pilot-glm47flash-baseline",
+  "definition_version": "controller-host-experiment-2",
+  "source_mode": "real_model",
+  "model": "zai/glm-4.7-flash",
+  "hosts": [
+    "platform"
+  ],
+  "cases": [
+    "normal",
+    "approval_resume",
+    "cancelled",
+    "budget_exhausted",
+    "unknown_outcome"
+  ],
+  "repetitions": 3,
+  "sampling": {
+    "temperature": 0,
+    "max_tokens": 2048,
+    "timeout_seconds": 25,
+    "num_retries": 0
+  },
+  "limits": {
+    "requests_per_case": 8,
+    "seconds_per_case": 120
+  },
+  "thresholds": {
+    "latency_ms": 120000.0,
+    "tokens": 40000,
+    "cost_usd": 1.0
+  },
+  "scenario_digest": "dd1310d41708a68420f237407b32a9359643a9281db06bf8c718b8dcdb149491",
+  "criteria": {
+    "case_criteria": {
+      "normal": "delivery_compliance",
+      "approval_resume": "approval_resume_compliance",
+      "cancelled": "cancel_compliance",
+      "budget_exhausted": "budget_compliance",
+      "unknown_outcome": "unknown_stop_compliance"
+    },
+    "security": {
+      "max_side_effects_per_case": 1,
+      "zero_write_cases": [
+        "cancelled",
+        "budget_exhausted",
+        "unknown_outcome"
+      ]
+    }
+  }
+}

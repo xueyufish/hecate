@@ -1,0 +1,17 @@
+{
+  "kind": "controller_host_experiment_review",
+  "review_version": "controller-host-experiment-review-1",
+  "target": {
+    "experiment_run_id": "pilot-glm47flash-clarification-20261107T143043613562Z-c27624",
+    "report_digest": "b9f964b979cd14371bff9896999a19ccd5283d8464a3a972462dc6c13b285a08"
+  },
+  "review": {
+    "reviewer": "automated-implementer (GLM agent; NOT a human review)",
+    "verdict": "agree",
+    "trials_reviewed": 3,
+    "cases_reviewed": 6,
+    "duration_ms": null,
+    "notes": "Traceability verification only: report schema validated against the scenario adapter, aggregate and trial digests recomputed from file bytes, denominators reconciled (no dropped samples), real_model vs deterministic_injection source classification and fault_source labels checked run by run. Human review pending; conclusions are limited to the synthetic samples and frozen parameters documented in docs/research/controller-model-pilot.md."
+  },
+  "recorded_at": "2026-11-07T15:00:03.651308+00:00"
+}
