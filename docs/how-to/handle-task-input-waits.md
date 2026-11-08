@@ -107,6 +107,49 @@ and tasks outside the running state.
   tasks, non-running states and non-platform stores reject the command
   with a stated reason — never a fake success and never the wake path.
 
+## Cross-process recovery acceptance
+
+The running-supplement drill uses an authenticated loopback TCP API and
+separate worker processes over persistent SQL. Model and business-tool
+outputs are deterministic doubles. A model-call barrier proves receipt
+returns while the old call is in flight. Another barrier pauses only after
+the real binding transaction commits, allowing the parent to kill the
+worker before consumption without racing a transient delivery state.
+
+The tests verify both recovery windows, identical concurrent submissions,
+changed-content and stale-revision refusal, cancellation and completion
+settlement, and no resurrection after worker replacement. JWT requests use
+the production authentication chain; independent membership changes revoke
+old tokens, and VIEWER and cross-workspace requests cannot replay a command.
+Control fields cannot be submitted as supplement content. Existing suites
+retain the unsupported-host and child-task negative cases.
+
+Recovery preserves the Run, committed decisions, action execution counts,
+cumulative turn limit and absolute deadline. This top-level profile has no
+declared monetary slice in the drill; model fees remain unknown. It does
+not certify real-model quality, managed Runner input, or child-budget billing.
+
+Run the local SQLite WAL tier with the worktree's development environment:
+
+```bash
+python scripts/dev.py test tests/test_execution/test_live_input_restart.py -q
+```
+
+For PostgreSQL, install the declared profile with
+`python scripts/dev.py sync --profile postgres` and set
+`HECATE_STEP6_POSTGRES_URL` to a dedicated test database using the
+`postgresql+psycopg` driver. Each test owns and removes its own schema.
+Run the same test command. SQLite results do not certify PostgreSQL.
+
+Set `HECATE_LIVE_INPUT_EVIDENCE_DIR` to retain one uniquely named JSON file
+per test outside pytest's temporary directory. Evidence includes database
+tier, code version and dirty status, source digests, worker PIDs, Task/Run
+references, command/revision correlation, decision digests, action keys and
+execution counts. It excludes credentials, tokens and business content.
+The files are written during teardown, including after a failed assertion.
+CI's `step6-continuation-pg` job runs the PostgreSQL tier and retains these
+files as `live-input-restart-evidence`; missing evidence fails the upload.
+
 ## Contract rules
 
 - The tool declares its input request: `status: "input_required"` plus a
