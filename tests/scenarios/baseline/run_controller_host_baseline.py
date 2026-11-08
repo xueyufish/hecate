@@ -30,8 +30,95 @@ from tests.scenarios.baseline import controller_host_spec as spec
 
 BASELINE_DIR = Path(__file__).resolve().parent.parent / "baselines"
 REAL_MODE_GATE_ENV = "HECATE_RUN_CONTROLLER_HOST_BASELINE"
+# Opt-in cross-process request budget: set to a JSON file path holding
+# {"remaining": N}; every real provider API call consumes one unit.
+REQUEST_BUDGET_ENV = "HECATE_COLLECTOR_REQUEST_BUDGET"
 # Pre-registered real-mode sampling; identical for both hosts.
 SAMPLING = dict(spec.SAMPLING)
+
+
+class RequestBudgetPool:
+    """Optional cross-process budget for real provider API calls.
+
+    Armed by pointing ``HECATE_COLLECTOR_REQUEST_BUDGET`` at a JSON file
+    (``{"remaining": N}``). Every ``LiteLLMProvider.complete`` call
+    consumes one unit and an exhausted pool refuses further calls, so a
+    pilot's reruns stay inside its declared request budget across
+    processes. Concurrent consumers fail closed while another consumer
+    holds the sidecar lock. A crash can leave that lock behind; an
+    operator must establish that no consumer is active before removing
+    it. Unarmed (no variable) the pool is inert and nothing is read or
+    written.
+    """
+
+    @staticmethod
+    def _path() -> Path | None:
+        value = os.environ.get(REQUEST_BUDGET_ENV)
+        # Resolving the mutable file can hold a Windows handle that blocks
+        # another consumer's atomic replacement before it acquires the lock.
+        return Path(value).absolute() if value else None
+
+    @classmethod
+    def armed(cls) -> bool:
+        """Return whether a shared request budget has been configured."""
+
+        return cls._path() is not None
+
+    @classmethod
+    def remaining(cls) -> int | None:
+        """Read the nonnegative integer balance, refusing malformed state."""
+
+        path = cls._path()
+        if path is None:
+            return None
+        return cls._read_remaining(path)
+
+    @staticmethod
+    def _read_remaining(path: Path) -> int:
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(document, dict):
+                raise ValueError("pool must be a JSON object")
+            remaining = document["remaining"]
+            if type(remaining) is not int or remaining < 0:
+                raise ValueError("remaining must be a nonnegative integer")
+            return remaining
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise RuntimeError(f"collector request budget pool unreadable: {exc}") from exc
+
+    @classmethod
+    def consume(cls) -> None:
+        """Take one unit; refuse (raise) when the pool is exhausted."""
+
+        path = cls._path()
+        if path is None:
+            return
+        lock = path.with_name(f".{path.name}.lock")
+        try:
+            descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError as exc:
+            raise RuntimeError("collector request budget pool locked; verify the active consumer") from exc
+        except OSError as exc:
+            raise RuntimeError(f"collector request budget pool unavailable: {exc}") from exc
+        temp: Path | None = None
+        try:
+            os.close(descriptor)
+            remaining = cls._read_remaining(path)
+            if remaining == 0:
+                raise RuntimeError("collector request budget exhausted")
+            descriptor, filename = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+            temp = Path(filename)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                json.dump({"remaining": remaining - 1}, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temp, path)
+        finally:
+            try:
+                if temp is not None:
+                    temp.unlink(missing_ok=True)
+            finally:
+                lock.unlink()
 
 
 class LiteLLMProvider:
@@ -39,7 +126,8 @@ class LiteLLMProvider:
 
     The adapter converts the provider response only; it never selects or
     edits tool calls. Usage and the provider-reported model version are
-    recorded verbatim; a missing version stays ``unverified``.
+    recorded verbatim; a missing version stays ``unverified``. Each call
+    consumes one unit from the optional request budget pool.
     """
 
     def __init__(self, model: str) -> None:
@@ -49,6 +137,7 @@ class LiteLLMProvider:
     async def complete(self, *, messages: list[dict], tools: list[dict]) -> dict[str, Any]:
         from litellm import acompletion
 
+        RequestBudgetPool.consume()
         provider_kwargs: dict[str, Any] = {}
         if not self.model.startswith(("zai/", "zhipu/", "anthropic/")):
             provider_kwargs["api_key"] = os.environ["OPENAI_API_KEY"]

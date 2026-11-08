@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
+from types import SimpleNamespace
 
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
@@ -218,6 +221,173 @@ async def test_provider_request_limit_is_enforced() -> None:
         await provider.complete(messages=[], tools=[])
     with pytest.raises(RuntimeError, match="limit"):
         await provider.complete(messages=[], tools=[])
+
+
+async def test_request_budget_pool_is_inert_when_unarmed(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv(collector.REQUEST_BUDGET_ENV, raising=False)
+    provider = collector.LiteLLMProvider("zai/unused")
+
+    class _Message:
+        content = "ok"
+        tool_calls = None
+
+    class _Choice:
+        message = _Message()
+
+    class _Response:
+        choices = [_Choice()]
+        model = "fake-budget-model"
+        usage = None
+
+    async def fake_acompletion(**kwargs):
+        return _Response()
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    # No pool file is consulted or created; the call passes through.
+    reply = await provider.complete(messages=[], tools=[])
+    assert reply["provider_model"] == "fake-budget-model"
+    assert collector.RequestBudgetPool.remaining() is None
+    assert collector.RequestBudgetPool.armed() is False
+
+
+async def test_request_budget_pool_consumes_across_instances(tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "budget.json"
+    pool.write_text(json.dumps({"remaining": 3}), encoding="utf-8")
+    monkeypatch.setenv(collector.REQUEST_BUDGET_ENV, str(pool))
+
+    calls = []
+
+    async def fake_acompletion(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=None, tool_calls=[]))],
+            usage=None,
+            model="fake",
+        )
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    first, second = collector.LiteLLMProvider("zai/unused"), collector.LiteLLMProvider("zai/unused")
+    await first.complete(messages=[], tools=[])
+    assert collector.RequestBudgetPool.remaining() == 2
+    await second.complete(messages=[], tools=[])
+    assert json.loads(pool.read_text(encoding="utf-8")) == {"remaining": 1}
+    await first.complete(messages=[], tools=[])
+    assert collector.RequestBudgetPool.remaining() == 0
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        await second.complete(messages=[], tools=[])
+    # The exhausted pool still reads as zero; no negative write happened.
+    assert collector.RequestBudgetPool.remaining() == 0
+    assert len(calls) == 3
+
+
+async def test_request_budget_pool_charges_failed_provider_calls(tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "budget.json"
+    pool.write_text(json.dumps({"remaining": 1}), encoding="utf-8")
+    monkeypatch.setenv(collector.REQUEST_BUDGET_ENV, str(pool))
+    calls = []
+
+    async def fake_acompletion(**kwargs):
+        calls.append(kwargs)
+        raise TimeoutError("provider timeout")
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    provider = collector.LiteLLMProvider("zai/unused")
+    with pytest.raises(TimeoutError, match="provider timeout"):
+        await provider.complete(messages=[], tools=[])
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        await provider.complete(messages=[], tools=[])
+    assert len(calls) == 1
+    assert collector.RequestBudgetPool.remaining() == 0
+
+
+@pytest.mark.parametrize("balance", [True, False, -1, 1.5, "3", None])
+def test_request_budget_pool_refuses_invalid_balance(balance, tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "budget.json"
+    original = json.dumps({"remaining": balance})
+    pool.write_text(original, encoding="utf-8")
+    monkeypatch.setenv(collector.REQUEST_BUDGET_ENV, str(pool))
+    with pytest.raises(RuntimeError, match="unreadable"):
+        collector.RequestBudgetPool.consume()
+    assert pool.read_text(encoding="utf-8") == original
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["budget.json"]
+
+
+def test_request_budget_pool_refuses_locked_pool(tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "budget.json"
+    pool.write_text(json.dumps({"remaining": 1}), encoding="utf-8")
+    lock = tmp_path / ".budget.json.lock"
+    lock.touch()
+    monkeypatch.setenv(collector.REQUEST_BUDGET_ENV, str(pool))
+    with pytest.raises(RuntimeError, match="pool locked"):
+        collector.RequestBudgetPool.consume()
+    assert collector.RequestBudgetPool.remaining() == 1
+    assert lock.exists()
+
+
+def test_request_budget_pool_write_failure_preserves_balance(tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "budget.json"
+    pool.write_text(json.dumps({"remaining": 1}), encoding="utf-8")
+    monkeypatch.setenv(collector.REQUEST_BUDGET_ENV, str(pool))
+
+    def fail_replace(source, destination):
+        raise OSError("replacement refused")
+
+    monkeypatch.setattr(collector.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replacement refused"):
+        collector.RequestBudgetPool.consume()
+    assert collector.RequestBudgetPool.remaining() == 1
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["budget.json"]
+
+
+def test_request_budget_pool_is_shared_between_processes(tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "budget.json"
+    pool.write_text(json.dumps({"remaining": 5}), encoding="utf-8")
+    monkeypatch.setenv(collector.REQUEST_BUDGET_ENV, str(pool))
+    script = """
+import time
+from tests.scenarios.baseline.run_controller_host_baseline import RequestBudgetPool
+count = 0
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline:
+    try:
+        RequestBudgetPool.consume()
+        count += 1
+    except RuntimeError as error:
+        if 'exhausted' in str(error):
+            break
+        if 'pool locked' not in str(error):
+            raise
+        time.sleep(0.01)
+else:
+    raise RuntimeError('budget workers did not finish')
+print(count)
+"""
+    processes = [
+        subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for _ in range(2)
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    assert [process.returncode for process in processes] == [0, 0], results
+    assert sum(int(stdout.strip()) for stdout, _ in results) == 5
+    assert collector.RequestBudgetPool.remaining() == 0
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["budget.json"]
+
+
+def test_request_budget_pool_refuses_unreadable_file(tmp_path, monkeypatch) -> None:
+    pool = tmp_path / "budget.json"
+    pool.write_text("not-json", encoding="utf-8")
+    monkeypatch.setenv(collector.REQUEST_BUDGET_ENV, str(pool))
+    with pytest.raises(RuntimeError, match="unreadable"):
+        collector.RequestBudgetPool.remaining()
+    with pytest.raises(RuntimeError, match="unreadable"):
+        collector.RequestBudgetPool.consume()
 
 
 async def test_provider_token_limit_is_enforced() -> None:
