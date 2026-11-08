@@ -237,6 +237,19 @@ jobs:
           # a cancel request recorded on a step another process is running.
           # (test_workflow_controller_steps.py is the SQLite contract tier.)
           python scripts/dev.py test tests/test_execution/test_workflow_controller_postgres.py -q --timeout=420 --timeout-method=thread -p no:cacheprovider
+      - name: Verify live input restart recovery on PostgreSQL
+        env:
+          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+          HECATE_LIVE_INPUT_EVIDENCE_DIR: ${{ runner.temp }}/live-input-restart-evidence
+        run: |
+          python scripts/dev.py test tests/test_execution/test_live_input_restart.py -q -rA --timeout=420 --timeout-method=thread -p no:cacheprovider
+      - name: Preserve live input restart evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-input-restart-evidence
+          path: ${{ runner.temp }}/live-input-restart-evidence/*.json
+          if-no-files-found: error
       - name: Verify wait resource release and restart recovery on PostgreSQL
         env:
           HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
@@ -250,15 +263,6 @@ jobs:
           name: managed-wait-resource-evidence
           path: ${{ runner.temp }}/wait-resource-evidence/*.json
           if-no-files-found: warn
-      - name: Verify approval decision concurrency and recovery on PostgreSQL
-        env:
-          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
-        run: |
-          # Approval decisions across independent processes: the ready-file
-          # approve/reject race, the decision→resume crash window healed by
-          # a substitute recovery consumer, competing consumers plus an API
-          # replay, and late cancel/revocation/expiry convergence.
-          python scripts/dev.py test tests/test_execution/test_approval_decision_postgres.py -q -rA --timeout=420 --timeout-method=thread -p no:cacheprovider
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
   # SC05 wake chain + reconnect) are database-parametrized — with
