@@ -14,7 +14,9 @@ persisted SQLite state.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -435,12 +437,131 @@ async def _observation_base(
     }
 
 
-def _fallback_observation(
-    gateway: _RecordingGateway, registry: _SyntheticRegistry, started: float, error: Exception
-) -> dict[str, Any]:
+DIAGNOSTIC_FIELDS = ("dispatch_attempts", "dispatch_starts", "last_error", "requeued_reason")
+DIAGNOSTIC_VERSION = "controller-failure-diagnostics-1"
+DIAGNOSTIC_TIMEOUT_SECONDS = 2.0
+
+
+def exception_type(error: BaseException) -> str:
+    """Return bounded exception metadata without its potentially secret text."""
+
+    name = type(error).__name__
+    return name if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,99}", name) else "Exception"
+
+
+def collection_error(error: BaseException) -> str:
+    """Describe a failed collection without copying provider or SQL bodies."""
+
+    return f"{exception_type(error)}: collection failed"
+
+
+def _empty_diagnostics(end_reason: str) -> dict[str, Any]:
+    if end_reason not in {"terminal_state_observed", "case_deadline_exceeded", "collection_exception"}:
+        end_reason = "collection_exception"
     return {
-        "task_id": None,
-        "run_id": None,
+        "version": DIAGNOSTIC_VERSION,
+        "end_reason": end_reason,
+        "collection_error_type": None,
+        "task_state": None,
+        "last_run_id": None,
+        "last_error_digest": None,
+        "round_error_types": [],
+        "diagnostic_error": None,
+        **{field: None for field in DIAGNOSTIC_FIELDS},
+    }
+
+
+async def read_task_diagnostics(
+    environment: Any, task_uuid: uuid.UUID | None, end_reason: str, *, error: BaseException | None = None
+) -> dict[str, Any]:
+    """Read bounded, content-safe durable facts without masking case errors."""
+
+    diagnostics = _empty_diagnostics(end_reason)
+    diagnostics["collection_error_type"] = exception_type(error) if error is not None else None
+    if task_uuid is None:
+        diagnostics["diagnostic_error"] = "task identity unavailable"
+        return diagnostics
+    stage = "task state"
+    try:
+        from hecate_durable.contracts.references import BackendRef, RefKind
+
+        async with asyncio.timeout(DIAGNOSTIC_TIMEOUT_SECONDS):
+            t_ref = BackendRef(RefKind.TASK, "hecate", str(task_uuid))
+            record = await asyncio.to_thread(environment.store.get_task_state, t_ref)
+            if record is None:
+                diagnostics["diagnostic_error"] = "task row not found"
+                return diagnostics
+            state = record.lifecycle_state.value
+            diagnostics["task_state"] = (
+                state if state in TERMINAL_STATES | {"queued", "running", "waiting_input", "waiting_approval"} else None
+            )
+            extra = record.extra or {}
+            for field in ("dispatch_attempts", "dispatch_starts"):
+                value = extra.get(field)
+                diagnostics[field] = value if type(value) is int and value >= 0 else None
+            last_error = extra.get("last_error")
+            if isinstance(last_error, str):
+                diagnostics["last_error"] = "redacted"
+                diagnostics["last_error_digest"] = hashlib.sha256(last_error.encode("utf-8")).hexdigest()
+            reason = extra.get("requeued_reason")
+            diagnostics["requeued_reason"] = "dispatch lease expired" if reason == "dispatch lease expired" else None
+            stage = "run rows"
+            runs = await environment.run_rows(task_uuid)
+            diagnostics["last_run_id"] = str(uuid.UUID(str(runs[-1].id))) if runs else None
+        return diagnostics
+    except Exception as exc:  # noqa: BLE001 — never mask the original failure
+        diagnostics["diagnostic_error"] = f"{stage}: {exception_type(exc)}"
+        return diagnostics
+
+
+async def _cancel_case_tasks(previous_tasks: set[asyncio.Task]) -> None:
+    from hecate.execution.task_control import _background_tasks
+
+    pending = tuple(_background_tasks - previous_tasks)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*pending, return_exceptions=True)
+
+
+def _refresh_recording(observation: dict[str, Any], gateway: _RecordingGateway, registry: Any) -> None:
+    # Cancellation is recorded by the gateway during task cleanup. Snapshot
+    # afterwards so every attempted call, including the in-flight one, survives.
+    observation.update(
+        rounds=list(gateway.rounds),
+        model_calls=len(gateway.rounds),
+        tool_calls=list(registry.calls),
+        tool_receipts=list(registry.receipts),
+        write_attempts=registry.write_attempts,
+        side_effect_count=registry.side_effects,
+        usage=_usage(gateway.rounds),
+    )
+    diagnostics = observation.get("diagnostics")
+    if diagnostics is not None:
+        diagnostics["round_error_types"] = [
+            name
+            for entry in gateway.rounds
+            if isinstance(name := entry.get("error_type"), str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,99}", name)
+        ]
+
+
+def _fallback_observation(
+    gateway: _RecordingGateway,
+    registry: _SyntheticRegistry,
+    started: float,
+    error: Exception,
+    *,
+    task_id: str | None = None,
+    run_id: str | None = None,
+    diagnostics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The failure record: known identity, evidence and diagnostics survive
+    the exception; only the delivery fields stay unknown."""
+
+    diagnostics = diagnostics or _empty_diagnostics("collection_exception")
+    diagnostics["collection_error_type"] = exception_type(error)
+    return {
+        "task_id": task_id,
+        "run_id": run_id or diagnostics.get("last_run_id"),
         "run_count": None,
         "task_status": None,
         "final_content": None,
@@ -457,8 +578,9 @@ def _fallback_observation(
         "approval": None,
         "rebuild": {"performed": False},
         "post_resume_model_input_has_receipt": None,
+        "diagnostics": diagnostics,
         "latency_ms_total": (time.monotonic() - started) * 1000,
-        "collection_error": f"{type(error).__name__}: {error}",
+        "collection_error": collection_error(error),
     }
 
 
@@ -476,11 +598,13 @@ async def run_platform_case(case: str, provider: Any, root: Path) -> dict[str, A
     patch = _SeamPatch(registry, gateway, event_store)
     started = time.monotonic()
     observation: dict[str, Any] = {}
+    task_id: uuid.UUID | None = None
     from hecate.execution.task_control import _background_tasks
 
     previous_tasks = set(_background_tasks)
+    deadline = asyncio.timeout(CASE_TIME_BUDGET_SECONDS)
     try:
-        async with asyncio.timeout(CASE_TIME_BUDGET_SECONDS):
+        async with deadline:
             patch.patch()
             worker = environment.make_worker()
             agent_id = await environment._seed(with_approval_rule=case in ("approval_resume", "cancelled"))
@@ -616,14 +740,26 @@ async def run_platform_case(case: str, provider: Any, root: Path) -> dict[str, A
             observation["side_effect_count"] = registry.side_effects
             observation["usage"] = _usage(gateway.rounds)
             observation["collection_error"] = None
+        observation["diagnostics"] = await read_task_diagnostics(environment, task_id, "terminal_state_observed")
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
-        observation = _fallback_observation(gateway, registry, started, exc)
+        # The known identity survives the failure; the durable-fact read is
+        # best-effort and must not mask the original error.
+        await _cancel_case_tasks(previous_tasks)
+        end_reason = "case_deadline_exceeded" if deadline.expired() else "collection_exception"
+        diagnostics = await read_task_diagnostics(environment, task_id, end_reason, error=exc)
+        observation = _fallback_observation(
+            gateway,
+            registry,
+            started,
+            exc,
+            task_id=str(task_id) if task_id is not None else None,
+            run_id=observation.get("run_id"),
+            diagnostics=diagnostics,
+        )
         observation["usage"] = _usage(gateway.rounds)
     finally:
-        pending = tuple(_background_tasks - previous_tasks)
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+        await _cancel_case_tasks(previous_tasks)
+        _refresh_recording(observation, gateway, registry)
         patch.unpatch()
         await environment.close()
     return observation

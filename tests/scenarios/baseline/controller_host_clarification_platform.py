@@ -98,14 +98,16 @@ async def run_clarification_case(case: str, provider: Any, root: Path) -> dict[s
     patch = platform_driver._SeamPatch(registry, gateway, event_store, tool_definitions=cspec.tool_definitions())
     started = time.monotonic()
     observation: dict[str, Any] = {}
+    task_id: uuid.UUID | None = None
     from hecate.execution.task_control import _background_tasks
 
     previous_tasks = set(_background_tasks)
     states = {"waiting_input", *platform_driver.TERMINAL_STATES}
     parks: list[dict[str, Any]] = []
     pre_park_rounds = 0
+    deadline = asyncio.timeout(platform_driver.CASE_TIME_BUDGET_SECONDS)
     try:
-        async with asyncio.timeout(platform_driver.CASE_TIME_BUDGET_SECONDS):
+        async with deadline:
             patch.patch()
             worker = environment.make_worker()
             agent_id = await environment._seed(with_approval_rule=False, persona=cspec.SYSTEM_PROMPT)
@@ -223,8 +225,22 @@ async def run_clarification_case(case: str, provider: Any, root: Path) -> dict[s
                 "responder": "deterministic_injection",
             }
             observation["collection_error"] = None
+        observation["diagnostics"] = await platform_driver.read_task_diagnostics(
+            environment, task_id, "terminal_state_observed"
+        )
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
-        observation = platform_driver._fallback_observation(gateway, registry, started, exc)
+        await platform_driver._cancel_case_tasks(previous_tasks)
+        end_reason = "case_deadline_exceeded" if deadline.expired() else "collection_exception"
+        diagnostics = await platform_driver.read_task_diagnostics(environment, task_id, end_reason, error=exc)
+        observation = platform_driver._fallback_observation(
+            gateway,
+            registry,
+            started,
+            exc,
+            task_id=str(task_id) if task_id is not None else None,
+            run_id=observation.get("run_id"),
+            diagnostics=diagnostics,
+        )
         observation["business_calls"] = list(registry.calls)
         observation["usage"] = platform_driver._usage(gateway.rounds)
         observation["clarification"] = {
@@ -235,10 +251,8 @@ async def run_clarification_case(case: str, provider: Any, root: Path) -> dict[s
             "responder": "deterministic_injection",
         }
     finally:
-        pending = tuple(_background_tasks - previous_tasks)
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
+        await platform_driver._cancel_case_tasks(previous_tasks)
+        platform_driver._refresh_recording(observation, gateway, registry)
         patch.unpatch()
         await environment.close()
     return observation
