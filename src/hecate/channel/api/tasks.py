@@ -6,6 +6,12 @@ Task lifecycle surface over :class:`TaskControlService`:
   task/run references. ``wait=true`` is the synchronous wait view on the
   same Task/Run; otherwise the execution proceeds in-process (dev
   dispatch) and the client follows progress via the event views.
+  ``result_delivery: "rest_inbox"`` binds the asynchronous result inbox
+  to the submission (async, non-stream submissions only).
+- ``GET /api/tasks/{id}/result-inbox`` — the submitter's cursor-resumable
+  notification page over the platform event projection; read-only,
+  re-gated on workspace, visibility, VIEWER floor and the submission-time
+  source binding on every call.
 - ``GET /api/tasks`` / ``GET /api/tasks/{id}`` — workspace-scoped queries
   with the lifecycle projection.
 - ``GET /api/runs/{run_id}/actions`` — scoped action-ledger summaries.
@@ -82,6 +88,7 @@ class TaskSubmitRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, max_length=512)
     wait: bool = False
     stream: bool = False
+    result_delivery: Literal["rest_inbox"] | None = None
 
 
 class TaskSubmitResponse(BaseModel):
@@ -94,6 +101,7 @@ class TaskSubmitResponse(BaseModel):
     replayed: bool
     result: dict[str, Any] | None = None
     reason: str | None = None
+    result_delivery: str | None = None
 
 
 class CommandRequest(BaseModel):
@@ -199,7 +207,7 @@ def _workspace_id(ctx: AuthContext) -> uuid.UUID:
 
 
 def _submit_response(result: Any) -> dict[str, Any]:
-    return {
+    response = {
         "task_id": uuid.UUID(result.task_ref.id),
         "run_id": uuid.UUID(result.run_ref.id),
         "issuer_domain": result.task_ref.issuer_domain,
@@ -208,6 +216,11 @@ def _submit_response(result: Any) -> dict[str, Any]:
         "result": result.result,
         "reason": result.reason,
     }
+    if result.result_delivery is not None:
+        # Bound submissions only: unbound submissions keep the exact legacy
+        # response shape, and the key's presence is the binding's signal.
+        response["result_delivery"] = result.result_delivery
+    return response
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -229,6 +242,8 @@ async def submit_task(
         ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
     except WorkspaceRoleRequiredError as exc:
         raise _error("FORBIDDEN", exc.message, status.HTTP_403_FORBIDDEN) from exc
+    if body.result_delivery is not None and ctx.auth_method != "jwt":
+        raise _error("INVALID_REQUEST", "result inbox requires JWT authentication", 422)
     try:
         result = await service.submit(
             workspace_id=workspace_id,
@@ -239,6 +254,7 @@ async def submit_task(
             idempotency_key=body.idempotency_key,
             wait=body.wait,
             stream=body.stream,
+            result_delivery=body.result_delivery,
         )
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
@@ -297,6 +313,47 @@ async def get_task(task_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> dic
     workspace_id = await _task_read_gate(ctx, service, task_id)
     try:
         return await service.get_task_detail(workspace_id, task_id)
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+
+
+@router.get("/{task_id}/result-inbox")
+async def read_task_result_inbox(
+    task_id: uuid.UUID,
+    service: ServiceDep,
+    ctx: AuthDep,
+    cursor: Annotated[str | None, Query(max_length=256)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict[str, Any]:
+    """The REST submitter's asynchronous result inbox (one bounded page).
+
+    Read-only over the platform event projection: notifications carry
+    stable identities, types, Task/Run references, status and
+    permission-protected view entries — never payloads, tokens or
+    previews; the authorized result facts live behind the run detail
+    view. Every read re-verifies workspace, task visibility, the VIEWER
+    floor and the source binding recorded at submission time; a foreign,
+    missing, soft-deleted or non-submitter inbox is one indistinguishable
+    404. Resuming never dispatches, cancels or wakes the task.
+    """
+    workspace_id = await _task_read_gate(ctx, service, None)
+    from hecate.execution.task_control import TaskControlNotFoundError
+    from hecate.execution.task_result_inbox import ResultInboxCursorError, TaskResultInboxService
+
+    if ctx.auth_method != "jwt":
+        raise _error("NOT_FOUND", "result inbox not found", status.HTTP_404_NOT_FOUND)
+    try:
+        return await TaskResultInboxService(service).read_page(
+            workspace_id=workspace_id,
+            task_id=task_id,
+            user_id=ctx.user_id,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ResultInboxCursorError as exc:
+        raise _error("INVALID_CURSOR", str(exc), 422) from exc
+    except TaskControlNotFoundError as exc:
+        raise _error("NOT_FOUND", "result inbox not found", status.HTTP_404_NOT_FOUND) from exc
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc
 

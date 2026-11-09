@@ -1,0 +1,141 @@
+# Read task results through the REST result inbox
+
+A JWT user can submit a platform-local top-level Controller task and
+retrieve its results after disconnecting. The inbox is scoped to one
+Task, its original Run and the authenticated submitter.
+
+## Submit and resume
+
+Send `result_delivery: "rest_inbox"` in the `POST /api/tasks` body with
+`input.controller_loop: true`, `wait: false` and `stream: false`. The
+server persists the source binding with the submission. An identical
+idempotency replay returns the original Task and Run. Changing the
+delivery option under the same key returns `409`. The option requires
+a JWT user and a platform-local top-level Controller task.
+
+Read `GET /api/tasks/{task_id}/result-inbox` with the same JWT identity.
+Each read checks current workspace membership, the VIEWER floor, the
+original submitter and the visibility of the Task and its bound Run.
+Unavailable inboxes return `404`. The cursor is scoped to that Run.
+
+Each response contains `notifications`, `next_cursor` and `has_more`.
+Process and save the page before advancing your checkpoint. An empty
+page can advance the cursor past progress events. Drain while
+`has_more` is true and poll from the returned cursor afterward.
+Retry a failed request with your last saved cursor. Re-reading can
+return the same notice ID, so store notices by ID.
+
+## Notification vocabulary
+
+| Type | Category | Meaning | View |
+|---|---|---|---|
+| `result_ready` | `result` | The Run delivery projection is committed | Run detail |
+| `task_stopped` | `stop` | The Task failed or was cancelled | Task and Run detail |
+| `approval_required` | `needs_attention` | Approval history, open while the current authority is pending | Task approval |
+| `input_required` | `needs_attention` | Current, unconsumed human input wait | Task detail and commands |
+| `reconciliation_required` | `needs_attention` | A recorded reconciliation requirement with its current status | Pending reconciliation |
+
+Successful delivery uses the committed Run terminal projection. Failed
+or cancelled delivery uses the Task's recorded transition. Both carry
+one task-keyed completion ID. The normal outbox worker advances
+visibility. Inbox reads perform no task operations.
+
+A notice contains its identity, state, Task/Run references and view
+links. Retrieve the result preview and verified acceptance view through
+the existing authorized Run detail endpoint. To refresh a pending-work
+display, rebuild it from a fresh scan and replace the old snapshot.
+A resolved input wait disappears, while approval history can report
+`resolved`. The linked control views enforce their own action permissions.
+
+## Copyable REST client
+
+Set `HECATE_JWT`, `HECATE_AGENT_ID` and `HECATE_REQUEST_KEY`. Use a
+separate checkpoint path for each request. The example keeps the cursor
+and merged notices in one local checkpoint so a new process can resume.
+
+```python
+import json
+import os
+import time
+from pathlib import Path
+
+import httpx
+
+BASE = os.environ.get("HECATE_URL", "http://127.0.0.1:8000")
+CHECKPOINT = Path(os.environ.get("HECATE_INBOX_CHECKPOINT", "result-inbox.json"))
+HEADERS = {"Authorization": f"Bearer {os.environ['HECATE_JWT']}"}
+
+
+def save(state: dict) -> None:
+    temp = CHECKPOINT.with_suffix(".tmp")
+    temp.write_text(json.dumps(state), encoding="utf-8")
+    temp.replace(CHECKPOINT)
+
+
+def submit() -> dict:
+    with httpx.Client(base_url=BASE, headers=HEADERS, timeout=15) as client:
+        response = client.post(
+            "/api/tasks",
+            json={
+                "goal": "Prepare the inventory summary",
+                "agent_id": os.environ["HECATE_AGENT_ID"],
+                "input": {
+                    "controller_loop": True,
+                    "messages": [{"role": "user", "content": "Summarize current stock."}],
+                },
+                "idempotency_key": os.environ["HECATE_REQUEST_KEY"],
+                "result_delivery": "rest_inbox",
+            },
+        )
+        response.raise_for_status()
+        return {"task_id": response.json()["task_id"], "cursor": None, "notices": {}}
+
+
+def main() -> None:
+    state = json.loads(CHECKPOINT.read_text(encoding="utf-8")) if CHECKPOINT.exists() else submit()
+    save(state)
+    while True:
+        params = {"limit": 50}
+        if state["cursor"] is not None:
+            params["cursor"] = state["cursor"]
+        with httpx.Client(base_url=BASE, headers=HEADERS, timeout=15) as client:
+            response = client.get(f"/api/tasks/{state['task_id']}/result-inbox", params=params)
+            response.raise_for_status()
+            page = response.json()
+            for note in page["notifications"]:
+                state["notices"][note["notification_id"]] = note
+            state["cursor"] = page["next_cursor"]
+            save(state)
+
+            for note in page["notifications"]:
+                if note.get("status") == "open":
+                    print(note["type"], note["views"])
+            completion = state["notices"].get(f"completion:{state['task_id']}")
+            if completion and completion["type"] == "task_stopped":
+                print("Task stopped", completion["state"])
+                return
+            if completion:
+                result = client.get(completion["views"]["run_detail"])
+                result.raise_for_status()
+                run = result.json()
+                print(run["projection"]["result_preview"])
+                print(run.get("delivery_acceptance"))
+                return
+        if not page["has_more"]:
+            time.sleep(2.0)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+## Verify the profile
+
+```bash
+python scripts/dev.py test tests/test_api/test_task_result_inbox.py -q
+```
+
+The tests exercise SQLite projection recovery and a loopback TCP client
+with real JWT checks, deterministic model and tool output, and the
+production Task/Run persistence path. Set `HECATE_INBOX_EVIDENCE_DIR` to
+retain the drill evidence with the checkout SHA and source digests.

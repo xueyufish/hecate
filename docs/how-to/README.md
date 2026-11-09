@@ -34,6 +34,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Approval wait expiry](approval-wait-expiry.md)** — what happens when an approval wait outlives its deadline: who converges it, which facts survive, and what expiry never does.
 - **[Run the Controller two-host model baseline](run-controller-host-baseline.md)** — collect the recorded platform-vs-runner Controller baseline (deterministic matrix, gated real collection), read the record, and know what it does not certify.
 - **[Observe parent-child task relationships](observe-parent-child-tasks.md)** — read the recorded delegation facts on both task sides, navigate between parent and child details, and keep callback consumption separate from child success and parent verdicts.
+- **[Read task results through the REST result inbox](rest-result-inbox.md)** — submit a task with `result_delivery: "rest_inbox"`, disconnect, then consume cursor-resumable result/approval/stop notifications as the same JWT submitter from anywhere.
 
 ## Versioning and lifecycle
 
