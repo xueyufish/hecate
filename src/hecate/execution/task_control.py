@@ -83,6 +83,8 @@ from hecate.models.task import TaskModel
 logger = logging.getLogger(__name__)
 
 PLATFORM_ISSUER = "hecate"
+# The asynchronous result inbox delivery option (rest submitter profile).
+RESULT_DELIVERY_REST_INBOX = "rest_inbox"
 UNRECORDED_LIFECYCLE = "unrecorded"
 # Callback declarations may only assert platform-terminal child states; a
 # reconciling child is an unknown result, never a workflow continuation fact.
@@ -227,6 +229,7 @@ class SubmitResult:
     replayed: bool
     result: dict[str, Any] | None = None
     reason: str | None = None
+    result_delivery: str | None = None
 
 
 @dataclass(frozen=True)
@@ -317,6 +320,7 @@ class TaskControlService:
         idempotency_key: str | None = None,
         wait: bool = False,
         stream: bool = False,
+        result_delivery: str | None = None,
         _verified_agent_child: bool = False,
         _verified_workflow_step: bool = False,
         dispatch_lease: Any = None,
@@ -330,6 +334,11 @@ class TaskControlService:
         creation commits only inside the parent's still-valid dispatch lease
         and while the step is open. Idempotent replays of an already-committed
         submission stay available regardless of the fence.
+
+        ``result_delivery: "rest_inbox"`` binds the asynchronous result
+        inbox to THIS submission: the binding below is derived from the
+        calling context and the actual Task/Run association and persists on
+        the durable task row, so a replay reuses the same association.
         """
         if (dispatch_lease is None) != (dispatch_parent_ref is None) or (dispatch_parent_ref is None) != (
             dispatch_step_index is None
@@ -339,6 +348,29 @@ class TaskControlService:
             raise TaskControlValidationError("dispatch fencing is reserved for the host workflow adapter")
         if not goal or not goal.strip():
             raise TaskControlValidationError("goal must be a non-empty string")
+        if result_delivery is not None:
+            if result_delivery != RESULT_DELIVERY_REST_INBOX:
+                raise TaskControlValidationError(f"result_delivery supports only {RESULT_DELIVERY_REST_INBOX!r}")
+            if wait:
+                raise TaskControlValidationError(
+                    "result_delivery rest_inbox applies to asynchronous submissions (wait=false)"
+                )
+            if stream:
+                raise TaskControlValidationError(
+                    "result_delivery rest_inbox applies to non-stream submissions (stream=false)"
+                )
+            if (
+                user_id is None
+                or input.get("controller_loop") is not True
+                or _verified_agent_child
+                or _verified_workflow_step
+                or any(input.get(key) is not None for key in ("workflow", "workflow_parent", "agent_child_parent"))
+                or self._backend != POSTGRES_BACKEND
+                or not hasattr(self._store, "engine")
+            ):
+                raise TaskControlValidationError(
+                    "result inbox requires a user-owned top-level platform Controller task"
+                )
         messages = input.get("messages")
         if not isinstance(messages, list) or not messages:
             raise TaskControlValidationError("input.messages must be a non-empty list")
@@ -484,7 +516,14 @@ class TaskControlService:
                     "authorization intersection is enforced"
                 )
 
-        digest = canonical_request_digest({"goal": goal, "agent_id": str(agent_id), "input": input, "stream": stream})
+        digest_facts: dict[str, Any] = {"goal": goal, "agent_id": str(agent_id), "input": input, "stream": stream}
+        if result_delivery is not None:
+            # Only an explicit binding enters the digest: submissions made
+            # before this option keep their original digest and replay
+            # semantics, while changing the option under one key is a
+            # different request (409).
+            digest_facts["result_delivery"] = result_delivery
+        digest = canonical_request_digest(digest_facts)
         minted_task, minted_run, engine_session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         t_ref = task_ref_of(minted_task)
         run_backend_ref = run_ref(deployment.issuer_domain, str(engine_session))
@@ -550,6 +589,20 @@ class TaskControlService:
                 if input.get("controller_loop") is True
                 else None
             ),
+            # The asynchronous result inbox binding, derived from the calling
+            # context and the actual association at submit time — never from
+            # request data. Rides the durable task row so replays reuse it.
+            **(
+                {
+                    "result_delivery": {
+                        "mode": RESULT_DELIVERY_REST_INBOX,
+                        "workspace_id": str(workspace_id),
+                        "submitted_by": str(user_id) if user_id else None,
+                    }
+                }
+                if result_delivery is not None
+                else {}
+            ),
         }
         key = IdempotencyKey(
             key=idempotency_key or f"auto:{minted_task}",
@@ -586,7 +639,7 @@ class TaskControlService:
                 await ensure_submission_registration(
                     self._db, association.task_ref, saved, sql_store=hasattr(self._store, "engine")
                 )
-            return await self._replay_result(workspace_id, association)
+            return await self._replay_result(workspace_id, association, saved)
         try:
             from hecate.execution.task_registration import ensure_submission_registration
 
@@ -615,6 +668,7 @@ class TaskControlService:
             run_ref=r_ref,
             lifecycle_state=await self._lifecycle_state(t_ref),
             replayed=False,
+            result_delivery=result_delivery,
         )
 
     @staticmethod
@@ -727,7 +781,9 @@ class TaskControlService:
             reason=None if result is not None else "wait view returned before a terminal outcome",
         )
 
-    async def _replay_result(self, workspace_id: uuid.UUID, association: SubmissionAssociation) -> SubmitResult:
+    async def _replay_result(
+        self, workspace_id: uuid.UUID, association: SubmissionAssociation, saved: dict[str, Any] | None = None
+    ) -> SubmitResult:
         """Return the original submission's outcome for a key replay."""
         try:
             original_id = uuid.UUID(association.task_ref.id)
@@ -736,12 +792,14 @@ class TaskControlService:
         task = await self._db.get(TaskModel, original_id)
         if task is None or task.deleted or task.workspace_id != workspace_id:
             raise TaskControlNotFoundError("registered task does not resolve in workspace")
+        binding = saved.get("result_delivery") if isinstance(saved, dict) else None
         return SubmitResult(
             task_ref=association.task_ref,
             run_ref=association.run_ref,
             lifecycle_state=await self._lifecycle_state(association.task_ref),
             replayed=True,
             reason="idempotent replay of the registered submission",
+            result_delivery=binding.get("mode") if isinstance(binding, dict) else None,
         )
 
     # ------------------------------------------------------------------
