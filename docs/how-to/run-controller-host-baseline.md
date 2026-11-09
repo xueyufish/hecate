@@ -113,9 +113,30 @@ python -m tests.scenarios.baseline.run_controller_feedback_baseline            #
 python -m tests.scenarios.baseline.run_controller_feedback_baseline --print-default-definition
 ```
 
+## Trusted-field scenarios: the platform_trusted_field experiment
+
+`tests/scenarios/baseline/run_controller_trusted_field_baseline.py` registers an independent scenario, `platform_trusted_field`, for the host-enforced [field provenance profile](protect-trusted-fields.md). The agent version declares the profile `synthetic-inventory-order-ref-1` for `submit_inventory_update.order_ref`. The synthetic business registry has no provenance logic — every write that reaches it lands — so each block in a record is the production guard's verdict, read back from the durable action ledger as the blocked action's outcome.
+
+Each case pairs one business situation with one pre-registered model script:
+
+- **receipt_sourced** — the read receipt carries the field and the write uses it; delivery is direct.
+- **input_sourced** — the receipt lacks the field and the write omits it; the guard's input request parks the task, a real `provide_input` answers it, and the same Run writes the answered value.
+- **guessed_value** — the write invents a value; it is blocked before the business call and the flow continues as above.
+- **lucky_guess** — the write guesses exactly the value a human later supplies; it is still blocked, because no source existed when the decision was taken.
+- **substituted_value** — the write contradicts the receipt; the guard refuses it and the task fails with `field_provenance_conflict` and zero side effects.
+
+Security verdicts — an unsourced value landed, a missing guard verdict in the ledger, a duplicate write — are recomputed from the registry's landed writes against the sources available before each write. They are recorded as a separate `security` block and never averaged with the quality criteria. The scenario digest pins the profile declaration and its digest, the case scripts and the rubric `controller-host-trusted-field-rubric-1`, so these records never share a comparison group with the clarification baseline, whose files stay unchanged.
+
+Collection is offline only. The definition schema admits only `deterministic_injection`, and the collector refuses a real model. The scripts are harness evidence for the protection, never real-model quality. No record is committed for this family yet, so it is not listed under `recorded_tracks`.
+
+```bash
+python -m tests.scenarios.baseline.run_controller_trusted_field_baseline            # repeated experiment (deterministic)
+python -m tests.scenarios.baseline.run_controller_trusted_field_baseline --print-default-definition
+```
+
 ## Failure diagnostics in trial records
 
-Every platform run (all three scenario families) carries a versioned `diagnostics` block in its trial record, so a model-call failure can be attributed instead of guessed from a terminal state name:
+Every platform run (all scenario families) carries a versioned `diagnostics` block in its trial record, so a model-call failure can be attributed instead of guessed from a terminal state name:
 
 - `version` — the diagnostic format identifier `controller-failure-diagnostics-1`; older trial records may omit the block.
 - `end_reason` — `terminal_state_observed`, `case_deadline_exceeded` or `collection_exception`. A timeout is attributed to the case deadline only when that deadline actually expired.
@@ -137,4 +158,4 @@ Diagnostic reads have their own bounded deadline outside the case execution budg
 
 ## Verification pointers
 
-Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The clarification scenario's invariants (paired identity, park/wake/resume behavior, negative verdicts, deferred real-model boundary) are asserted in `tests/scenarios/test_controller_clarification_report.py` under the `controller_host_clarification` recorded track. The feedback scenario's invariants (three-case identity, correction/no-reorder/unknown-stop behavior, negative verdicts, quality-case-only real entry) are asserted in `tests/scenarios/test_controller_feedback_report.py` under the `controller_host_feedback` recorded track. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).
+Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The clarification scenario's invariants (paired identity, park/wake/resume behavior, negative verdicts, deferred real-model boundary) are asserted in `tests/scenarios/test_controller_clarification_report.py` under the `controller_host_clarification` recorded track. The feedback scenario's invariants (three-case identity, correction/no-reorder/unknown-stop behavior, negative verdicts, quality-case-only real entry) are asserted in `tests/scenarios/test_controller_feedback_report.py` under the `controller_host_feedback` recorded track. The trusted-field scenario's invariants are asserted in `tests/scenarios/test_controller_trusted_field.py`, and the guard's own verdicts, loader and boundary in `tests/test_execution/test_field_provenance.py`. They cover per-case verdicts, the no-profile control, swapped values, cross-scope replay, rebuild and redelivery, unknown outcomes and the offline-only identity. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).

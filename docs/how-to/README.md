@@ -45,6 +45,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 
 - **[Security hardening](security-hardening.md)** — production security checklist: secrets, TLS, SSO, guardrails, DLP, tool permissions, sandbox isolation, audit/SIEM, database encryption, and monitoring.
 - **[Configure tool permissions](configure-tool-permissions.md)** — workspace baselines, per-agent rules, and allow/deny lists for fine-grained tool access control.
+- **[Protect write fields with trusted provenance](protect-trusted-fields.md)** — declare a field provenance profile so a Controller write field only carries values from trusted receipts or authorized answers; read the input-request and refusal verdicts and the support boundary.
 - **[Browser automation](browser-automation.md)** — enable and govern the six `browser_*` tools (6.27): build the sandbox image, configure domain allow-lists, understand risk gating and DLP behavior.
 - **[Sign runner artifacts](sign-runner-artifacts.md)** — sign an execution manifest offline with Ed25519, configure the artifact trust policy, start the standalone runner under strict trusted-publisher admission, and rotate or revoke keys.
 - **[Install, switch and roll back runner releases](install-runner-releases.md)** — install signed artifacts into a release-managed host, select the version the next cold start runs, and roll back under the current trust policy without touching host state.

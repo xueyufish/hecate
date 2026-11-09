@@ -161,6 +161,11 @@ files as `live-input-restart-evidence`; missing evidence fails the upload.
   feedback, never a parkable wait.
 - Results whose outcome is unknown (a write whose effect cannot be
   confirmed) route to reconciliation, never to an input wait.
+- A host-declared [field provenance profile](protect-trusted-fields.md)
+  can raise the same request itself, when a protected write field has no
+  trusted source. Its contract additionally carries a `field_provenance`
+  binding (profile digest, tool, fields, resource). The answer then
+  authorizes only a later write for that same resource.
 - Input revisions are immutable and ordered by causal turn boundary;
   restarts replay them without re-asking accepted decisions or redoing
   confirmed actions. Turn budgets, accumulated budgets and deadlines are

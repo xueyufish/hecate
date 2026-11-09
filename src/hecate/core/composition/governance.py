@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hecate_governance.action import target_resources_for, tool_arguments_digest
 from hecate_governance.claims import (
@@ -43,6 +43,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.execution.governance_revocation import PrincipalLifecycleRevocation
 from hecate.tools.policy.governance_adapter import PipelinePolicyProfile
+
+if TYPE_CHECKING:
+    from hecate.execution.field_provenance import ControllerFieldProvenanceGuard
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +92,7 @@ class PlatformGovernance:
         model_budget: BudgetGate | None = None,
         identity: dict[str, Any] | None = None,
         workspace_id: Any = None,
+        field_guard: ControllerFieldProvenanceGuard | None = None,
     ) -> None:
         self._identity = dict(identity or {})
         self._workspace_id = workspace_id
@@ -104,6 +108,9 @@ class PlatformGovernance:
         self._claims = action_claims
         # step7 4.4: budget gate for metered model calls (call-level ids).
         self._model_budget = model_budget
+        # Trusted field provenance of one protected controller Run; absent
+        # everywhere else, so every other path keeps its exact behavior.
+        self._field_guard = field_guard
 
     def with_identity(self, identity: dict[str, Any], workspace_id: Any = None) -> PlatformGovernance:
         """Bind a verified entry without mutating a facade shared by callers."""
@@ -113,6 +120,14 @@ class PlatformGovernance:
         bound._identity = dict(identity)
         if workspace_id is not None:
             bound._workspace_id = workspace_id
+        return bound
+
+    def with_field_guard(self, guard: ControllerFieldProvenanceGuard) -> PlatformGovernance:
+        """Bind one Run's field provenance guard without mutating a shared facade."""
+        from copy import copy
+
+        bound = copy(self)
+        bound._field_guard = guard
         return bound
 
     async def authorize_tool_call(
@@ -296,6 +311,25 @@ class PlatformGovernance:
                 raise GovernanceDeniedError(claim.detail or "invocation conflict")
             if claim.status is ClaimStatus.DUPLICATE_IN_FLIGHT:
                 raise OutcomeUnknownError(claim.detail or "invocation already claimed")
+        if self._field_guard is not None:
+            # Authorization never vouches for where a protected value came
+            # from: after permission, approval and the claim, an unsourced
+            # value becomes an input request or a typed refusal here — the
+            # action's recorded outcome, before any business effect.
+            blocked = await self._field_guard.check(name, arguments, call_context)
+            if blocked is not None:
+                if owns_claim:
+                    try:
+                        await self.finish_claim(key, succeeded=True, result=blocked)
+                    except Exception as exc:
+                        raise OutcomeUnknownError("receipt write failed after a provenance verdict") from exc
+                self.record_tool_facts(
+                    invocation_id=key,
+                    candidates=[],
+                    actual={"tool_name": name, "arguments_digest": tool_arguments_digest(arguments)},
+                    context=call_context,
+                )
+                return blocked
         # Exceptions after entering the executor do not establish absence of effects.
         try:
             result = await registry.execute(name, arguments, call_context)
@@ -304,6 +338,8 @@ class PlatformGovernance:
         output_schema = metadata.get("returns")
         if output_schema and list(Draft202012Validator(output_schema).iter_errors(result)):
             raise OutcomeUnknownError("tool result violates output schema; reconcile the claimed action")
+        if self._field_guard is not None:
+            result = self._field_guard.prepare_business_result(result)
         if owns_claim:
             try:
                 await self.finish_claim(key, succeeded=True, result=result)

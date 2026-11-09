@@ -138,6 +138,7 @@ class SqlEventLog:
         payload: dict[str, Any],
         correlation_id: str | None = None,
         causation_id: str | None = None,
+        event_id: str | None = None,
     ) -> EventEnvelope:
         """Allocate a sequence and insert the envelope on ``session``.
 
@@ -159,6 +160,7 @@ class SqlEventLog:
             actor_id=self._actor_id,
             correlation_id=correlation_id,
             causation_id=causation_id,
+            event_id=event_id,
         )
         validate_governance_event(envelope)
         session.add(

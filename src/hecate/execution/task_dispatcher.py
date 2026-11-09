@@ -282,6 +282,53 @@ class _ControllerTimerWait:
         return "timer_wait_requested" if self.requested is not None else None
 
 
+class _ControllerFieldProvenanceStop:
+    """Observe the field provenance guard's typed refusals by action identity.
+
+    The refusal is the blocked action's recorded outcome (zero business
+    effect), so a first run and a ledger replay stop identically. Only an
+    envelope bound to the observing action, its tool and the task's pinned
+    profile counts; any other shape stays ordinary tool output.
+    """
+
+    def __init__(self, guard: Any) -> None:
+        self.requested: dict[str, Any] | None = None
+        self._guard = guard
+
+    def observe_result(self, execution_id: str, tool_name: str, result: Any) -> None:
+        if self.requested is not None:
+            return
+        from hecate.execution.field_provenance import field_provenance_refusal
+
+        self.requested = field_provenance_refusal(
+            result, execution_id=execution_id, tool=tool_name, profile=self._guard.profile
+        )
+
+    def stop_reason(self) -> str | None:
+        """Stop remaining actions before they acquire a claim."""
+        return f"field_provenance_{self.requested['reason']}" if self.requested is not None else None
+
+    async def restore_source_result(self, execution_id: str, tool: str, content: Any) -> Any:
+        """Preserve structured source receipts when applying result governance on replay."""
+
+        return await self._guard.restore_source_result(execution_id, tool, content)
+
+    async def observe_read(self, execution_id: str, tool: str, content: Any) -> None:
+        await self._guard.observe_read(execution_id, tool, content)
+
+    def outcome(self) -> dict[str, Any]:
+        """The explicit terminal: unreadable facts need reconciliation."""
+        refusal = dict(self.requested or {})
+        reason = refusal.get("reason", "unavailable")
+        return {
+            "status": "awaiting_reconciliation" if reason == "unavailable" else "failed",
+            "content": "",
+            "error": f"protected field provenance {reason}; the write was not executed",
+            "error_category": f"field_provenance_{reason}",
+            "field_provenance": refusal,
+        }
+
+
 class _InputRequestExecutor(ToolCallExecutor):
     """Observe only confirmed, governed results of fresh and recovered actions."""
 
@@ -291,12 +338,38 @@ class _InputRequestExecutor(ToolCallExecutor):
         watch: _ControllerInputWait,
         timer_watch: _ControllerTimerWait | None = None,
         agent_child_watch: _ControllerAgentChildWatch | None = None,
+        provenance_watch: _ControllerFieldProvenanceStop | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._watch = watch
         self._timer_watch = timer_watch
         self._agent_child_watch = agent_child_watch
+        self._provenance_watch = provenance_watch
+
+    async def _maybe_govern_recovery(
+        self,
+        recovery: dict[str, Any],
+        *,
+        name: str,
+        tc_id: str,
+        execution_id: str,
+        base_context: dict | None,
+    ) -> dict[str, Any]:
+        if self._provenance_watch is not None and recovery.get("_replay_govern"):
+            recovery = {
+                **recovery,
+                "content": await self._provenance_watch.restore_source_result(
+                    execution_id, name, recovery.get("content")
+                ),
+            }
+        return await super()._maybe_govern_recovery(
+            recovery,
+            name=name,
+            tc_id=tc_id,
+            execution_id=execution_id,
+            base_context=base_context,
+        )
 
     async def execute_accepted_call(
         self,
@@ -317,13 +390,16 @@ class _InputRequestExecutor(ToolCallExecutor):
             ownership=ownership,
             node_id=node_id,
         )
-        if outcome.status == "succeeded" and not outcome.result.get("is_error"):
-            content = outcome.result.get("content")
+        succeeded = outcome.status == "succeeded" and not outcome.result.get("is_error")
+        content = outcome.result.get("content") if succeeded else None
+        function = tool_call["function"]
+        if self._provenance_watch is not None:
+            await self._provenance_watch.observe_read(context["invocation_id"], function["name"], content)
+        if succeeded:
             try:
                 result = json.loads(content) if isinstance(content, str) else None
             except ValueError:
                 result = None
-            function = tool_call["function"]
             self._watch.observe_result(context["invocation_id"], function["name"], function["arguments"], result)
             if self._timer_watch is not None:
                 await self._timer_watch.observe_result(
@@ -333,6 +409,8 @@ class _InputRequestExecutor(ToolCallExecutor):
                 self._agent_child_watch.observe_result(
                     context["invocation_id"], function["name"], function["arguments"], result
                 )
+            if self._provenance_watch is not None:
+                self._provenance_watch.observe_result(context["invocation_id"], function["name"], result)
         return outcome
 
 
@@ -1374,6 +1452,16 @@ class PlatformTaskDispatcher:
         if version is None or version.deleted:
             raise ValueError("the frozen agent version no longer resolves")
         config = snapshot.get("config_snapshot") or {}
+        if config.get("field_provenance") is not None:
+            # Only the platform-local Controller dispatch enforces a field
+            # provenance profile; refuse instead of running its protected
+            # writes through a path that would silently skip it.
+            return {
+                "status": "failed",
+                "content": "",
+                "error": "field provenance profiles are enforced only for controller_loop tasks",
+                "error_category": "field_provenance_unsupported",
+            }
         tool_refs = config.get("tools") or []
         event_store = None
         tool_registry = None
@@ -1596,6 +1684,33 @@ class PlatformTaskDispatcher:
             raise ValueError("the frozen agent version no longer resolves")
         config = snapshot.get("config_snapshot") or {}
         tool_refs = config.get("tools") or []
+        field_provenance = None
+        if config.get("field_provenance") is not None:
+            # The host-declared profile is frozen with the version. A broken
+            # declaration or a store without the durable source facts stops
+            # before any model call instead of running protected writes
+            # unguarded.
+            from hecate.execution.field_provenance import FieldProvenanceDeclarationError, FieldProvenanceProfile
+
+            try:
+                field_provenance = FieldProvenanceProfile.from_declaration(config["field_provenance"])
+            except FieldProvenanceDeclarationError as exc:
+                return {
+                    "status": "failed",
+                    "content": "",
+                    "error": f"field provenance profile is invalid: {exc}",
+                    "error_category": "field_provenance_invalid",
+                }
+            if context.platform_run_id is None or not all(
+                hasattr(self._store, name)
+                for name in ("list_accepted_actions", "get_run_action", "list_input_revisions")
+            ):
+                return {
+                    "status": "failed",
+                    "content": "",
+                    "error": "field provenance requires the platform decision, action and input stores",
+                    "error_category": "field_provenance_unsupported",
+                }
         event_store = get_shared_event_store()
         tool_registry = None
         effective_tools: list[dict[str, Any]] = []
@@ -1746,11 +1861,32 @@ class PlatformTaskDispatcher:
                 model_budget=slice_budget,
                 override_model_budget=True,
             )
+        field_guard = None
+        if field_provenance is not None:
+            # The guard is bound to this dispatch's trusted Task and Run
+            # identities and consulted by the governed execution boundary
+            # itself, after permission, approval and the ledger claim.
+            from hecate.core.composition.governance import build_platform_governance
+            from hecate.execution.field_provenance import ControllerFieldProvenanceGuard
+
+            field_guard = ControllerFieldProvenanceGuard(
+                field_provenance,
+                store=self._store,
+                task_ref=task_ref,
+                run_ref=run_ref,
+                controller_run=RunRef(issuer_domain=PLATFORM_ISSUER, run_id=str(context.platform_run_id)),
+            )
+            if governance_for_port is None:
+                governance_for_port = build_platform_governance(
+                    db, agent_id=agent.id, workspace_id=context.workspace_id
+                )
+            governance_for_port = governance_for_port.with_field_guard(field_guard)
         await self._wire_approval_backend(db, context, bundle, resume_interrupted=resume_interrupted)
 
-        # The slice gate rides an explicit governance override ONLY when a
-        # budget slice exists; without one the port is built exactly as
-        # before (composition doubles patch this factory signature).
+        # The slice gate and the field provenance guard ride an explicit
+        # governance override ONLY when declared; without either the port is
+        # built exactly as before (composition doubles patch this factory
+        # signature).
         port_kwargs: dict[str, Any] = {"governance": governance_for_port} if governance_for_port is not None else {}
         port = create_runtime_port(
             db,
@@ -1829,6 +1965,9 @@ class PlatformTaskDispatcher:
                 if skill_catalog_row is not None
                 else {}
             ),
+            # The field provenance profile rides every decision: the guard
+            # admits sources only for decisions taken under this exact pin.
+            **({"field_provenance": field_provenance.pin()} if field_provenance is not None else {}),
         }
         store = SqlAcceptedDecisionStore(self._store)
         # Acknowledgements commit with the wake and its causal revision.
@@ -1865,11 +2004,13 @@ class PlatformTaskDispatcher:
             converted_delegate = format_tools_for_llm([{"name": DELEGATE_AGENT_TOOL_NAME, **delegate_tool.definition}])
             if converted_delegate:
                 tool_definitions[DELEGATE_AGENT_TOOL_NAME] = converted_delegate[0]
+        provenance_watch = _ControllerFieldProvenanceStop(field_guard) if field_guard is not None else None
 
         executor = _InputRequestExecutor(
             watch=input_watch,
             timer_watch=timer_watch,
             agent_child_watch=agent_child_watch,
+            provenance_watch=provenance_watch,
             port=port,
             event_store=event_store,
             access_policy=bundle.access_policy if bundle else None,
@@ -2018,12 +2159,13 @@ class PlatformTaskDispatcher:
             # it.
             stop_check=(
                 input_watch.stop_reason
-                if timer_watch is None and agent_child_watch is None
+                if timer_watch is None and agent_child_watch is None and provenance_watch is None
                 else (
                     lambda: (
                         input_watch.stop_reason()
                         or (timer_watch.stop_reason() if timer_watch is not None else None)
                         or (agent_child_watch.stop_reason() if agent_child_watch is not None else None)
+                        or (provenance_watch.stop_reason() if provenance_watch is not None else None)
                     )
                 )
             ),
@@ -2177,6 +2319,11 @@ class PlatformTaskDispatcher:
                         "engine_session_id": str(engine_session),
                     },
                 )
+            if provenance_watch is not None and provenance_watch.requested is not None:
+                # The blocked action's recorded refusal is the stop fact:
+                # first runs and ledger replays end here identically, with
+                # zero business effect for the refused write.
+                return provenance_watch.outcome()
             if result.state.value == "failed":
                 if result.detail.get("requires_reconciliation"):
                     return {
