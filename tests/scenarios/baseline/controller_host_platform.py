@@ -254,8 +254,20 @@ class PlatformEnvironment:
         )
         self._seeded = False
 
-    async def _seed(self, *, with_approval_rule: bool, persona: str | None = None) -> uuid.UUID:
-        """Seed org/workspace/users/agent plus the optional ASK policy row."""
+    async def _seed(
+        self,
+        *,
+        with_approval_rule: bool,
+        persona: str | None = None,
+        config_extra: dict[str, Any] | None = None,
+        workspace_id: uuid.UUID = WS,
+    ) -> uuid.UUID:
+        """Seed org/workspace/users/agent plus the optional ASK policy row.
+
+        ``config_extra`` adds frozen agent-version configuration (for
+        example a host-declared field provenance profile); ``workspace_id``
+        seeds a further isolated workspace in the same platform database.
+        """
 
         from hecate.models.agent import AgentModel
         from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
@@ -271,11 +283,12 @@ class PlatformEnvironment:
             await conn.run_sync(Base.metadata.create_all)
 
         async with self.session_factory() as db:
-            db.add(OrganizationModel(id=ORG, name="org", slug=f"org-{ORG.hex[:12]}", owner_id=OWNER))
-            db.add(WorkspaceModel(id=WS, org_id=ORG, name="ws", slug=f"ws-{WS.hex}"))
-            db.add(UserModel(id=OWNER, email="owner@example.com", hashed_password=uuid.uuid4().hex))
-            db.add(UserModel(id=APPROVER, email="approver@example.com", hashed_password=uuid.uuid4().hex))
-            agent = AgentModel(workspace_id=WS, name="controller-host-baseline-agent")
+            if not self._seeded:
+                db.add(OrganizationModel(id=ORG, name="org", slug=f"org-{ORG.hex[:12]}", owner_id=OWNER))
+                db.add(UserModel(id=OWNER, email="owner@example.com", hashed_password=uuid.uuid4().hex))
+                db.add(UserModel(id=APPROVER, email="approver@example.com", hashed_password=uuid.uuid4().hex))
+            db.add(WorkspaceModel(id=workspace_id, org_id=ORG, name="ws", slug=f"ws-{workspace_id.hex}"))
+            agent = AgentModel(workspace_id=workspace_id, name="controller-host-baseline-agent")
             db.add(agent)
             await db.flush()
             version = AgentVersionModel(
@@ -286,6 +299,7 @@ class PlatformEnvironment:
                     "persona": persona if persona is not None else spec.SYSTEM_PROMPT,
                     "tools": [spec.READ_TOOL, spec.WRITE_TOOL],
                     "model_config": {"model": "baseline", "temperature": 0},
+                    **(config_extra or {}),
                 },
                 content_hash="b" * 64,
             )
@@ -293,14 +307,14 @@ class PlatformEnvironment:
             await db.flush()
             db.add(
                 AgentPrincipalModel(
-                    id=agent.id, agent_id=agent.id, workspace_id=WS, organization_id=ORG, owner_user_id=OWNER
+                    id=agent.id, agent_id=agent.id, workspace_id=workspace_id, organization_id=ORG, owner_user_id=OWNER
                 )
             )
             db.add(
                 AgentDeploymentModel(
                     agent_id=agent.id,
                     agent_version_id=version.id,
-                    workspace_id=WS,
+                    workspace_id=workspace_id,
                     backend_type=BackendType.BUILTIN,
                     access_mode=AccessMode.IN_PROCESS,
                     issuer_domain="hecate",
@@ -314,7 +328,7 @@ class PlatformEnvironment:
             if with_approval_rule:
                 db.add(
                     ToolPolicyRuleModel(
-                        workspace_id=WS,
+                        workspace_id=workspace_id,
                         agent_id=None,
                         tool_pattern=spec.WRITE_TOOL,
                         action="ask",
@@ -332,8 +346,8 @@ class PlatformEnvironment:
                     name="controller-host-baseline-quota",
                     resource_type="cost",
                     scope="workspace",
-                    scope_id=WS,
-                    workspace_id=WS,
+                    scope_id=workspace_id,
+                    workspace_id=workspace_id,
                     limit_value=1000.0,
                     window_type="monthly",
                 )
@@ -350,11 +364,11 @@ class PlatformEnvironment:
         dispatcher = PlatformTaskDispatcher(self.store, self.session_factory)
         return DurableWorker(self.store, dispatcher, leases=self.store.leases)
 
-    async def run_rows(self, task_id: uuid.UUID) -> list[Any]:
+    async def run_rows(self, task_id: uuid.UUID, workspace_id: uuid.UUID = WS) -> list[Any]:
         from hecate.execution.task_run_registry import TaskRunRegistry
 
         async with self.session_factory() as db:
-            return list(await TaskRunRegistry(db).list_runs_for_task(task_id, WS))
+            return list(await TaskRunRegistry(db).list_runs_for_task(task_id, workspace_id))
 
     async def close(self) -> None:
         await self._engine.dispose()

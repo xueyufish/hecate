@@ -56,6 +56,7 @@ from hecate_durable.contracts.durable import (
     TaskLifecycleState,
     TaskStateRecord,
     ToolSideEffectClass,
+    canonical_request_digest,
     may_auto_replay,
     validate_command_transition,
     validate_task_transition,
@@ -69,6 +70,7 @@ from hecate_durable.storage.models import (
     ActionOutcomeRow,
     Base,
     CommandRow,
+    EventRow,
     SubmissionRow,
     TaskStateRow,
 )
@@ -685,7 +687,28 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 # the durable worker can never miss an accepted input.
                 new_revision_id = self._insert_input_revision(session, task_ref, run_ref, input_revision, recorded)
             if applied_command_id is not None:
-                self._stamp_applied_command(session, task_ref, applied_command_id, recorded, run_ref, new_revision_id)
+                input_request_binding = None
+                if expected_wait_state is TaskLifecycleState.WAITING_INPUT and new_revision_id is not None:
+                    contract = (expected_wait or {}).get("contract_ref")
+                    input_contract = contract.get("contract") if isinstance(contract, dict) else None
+                    if (
+                        isinstance(contract, dict)
+                        and isinstance(input_contract, dict)
+                        and isinstance(input_contract.get("field_provenance"), dict)
+                    ):
+                        input_request_binding = {
+                            "execution_id": contract.get("execution_id"),
+                            "contract_digest": canonical_request_digest(input_contract),
+                        }
+                self._stamp_applied_command(
+                    session,
+                    task_ref,
+                    applied_command_id,
+                    recorded,
+                    run_ref,
+                    new_revision_id,
+                    input_request_binding=input_request_binding,
+                )
             if target in (
                 TaskLifecycleState.SUCCEEDED,
                 TaskLifecycleState.FAILED,
@@ -706,6 +729,8 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         recorded: str,
         run_ref: BackendRef | None,
         input_revision_id: str | None,
+        *,
+        input_request_binding: dict[str, Any] | None = None,
     ) -> None:
         """Flip one command receipt to applied inside the caller's transaction.
 
@@ -742,6 +767,8 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 **(command.extra or {}),
                 "input_revision": input_revision_id,
             }
+        if input_request_binding is not None:
+            command.extra = {**(command.extra or {}), "input_request_binding": input_request_binding}
         if run_ref is not None:
             self.events.emit(
                 session,
@@ -2048,8 +2075,6 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         The transactional event log preserves the original deadline anchor.
         Missing or mismatched evidence is never replaced by the current time.
         """
-        from hecate_durable.storage.models import EventRow
-
         with self._read_session() as session:
             intent = session.get(ActionIntentRow, action_key)
             outcome = session.get(ActionOutcomeRow, action_key)
@@ -2220,6 +2245,50 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
         return self.events.read(run_ref, cursor=cursor, limit=limit)
 
+    def confirm_first_action_projection(
+        self, task_ref: BackendRef, run_ref: BackendRef, action_key: str, result_digest: str | None
+    ) -> bool:
+        """Pin the first governed projection of an accepted action before it returns.
+
+        A null digest records that the original receipt was withheld or changed.
+        Replay can confirm an earlier release but cannot promote a withheld result.
+        """
+        event_id = f"first-projection-{action_key}"
+        with self._session() as session, session.begin():
+            action = session.execute(
+                select(ActionIntentRow.action_key)
+                .where(
+                    ActionIntentRow.action_key == action_key,
+                    ActionIntentRow.task_issuer == task_ref.issuer_domain,
+                    ActionIntentRow.task_id == task_ref.id,
+                    ActionIntentRow.run_issuer == run_ref.issuer_domain,
+                    ActionIntentRow.run_id == run_ref.id,
+                )
+                .with_for_update()
+            ).scalar_one_or_none()
+            if action is None:
+                raise ValueError("projection does not belong to an action of this Task and Run")
+            prior = session.execute(select(EventRow.envelope).where(EventRow.event_id == event_id)).scalar_one_or_none()
+            if prior is not None:
+                if (
+                    prior.get("task_ref") != task_ref.to_dict()
+                    or prior.get("run_ref") != run_ref.to_dict()
+                    or prior["payload"].get("event_type") != "action_result_projection"
+                    or prior["payload"].get("execution_id") != action_key
+                ):
+                    raise ValueError("invalid action projection receipt")
+                return result_digest is not None and prior["payload"].get("result_digest") == result_digest
+            self.events.emit(
+                session,
+                task_ref=task_ref,
+                run_ref=run_ref,
+                event_type="action_result_projection",
+                payload={"execution_id": action_key, "result_digest": result_digest},
+                correlation_id=action_key,
+                event_id=event_id,
+            )
+            return result_digest is not None
+
     def submission_received_at(self, run_ref: BackendRef) -> str | None:
         """Return the original receipt time, independent of later Task updates."""
         with self._read_session() as session:
@@ -2232,8 +2301,6 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def event_runs_for_task(self, task_ref: BackendRef) -> list[BackendRef]:
         """List historical event streams, including attempts no longer current."""
-        from hecate_durable.storage.models import EventRow
-
         with self._read_session() as session:
             rows = session.execute(
                 select(EventRow.run_issuer, EventRow.run_id)
