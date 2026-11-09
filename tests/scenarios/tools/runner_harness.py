@@ -25,6 +25,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -165,8 +166,14 @@ def _write_profile(
         (profile_dir / "secrets/managed-secret").write_bytes(managed_secret)
 
 
-def _start_business_api() -> tuple[ThreadingHTTPServer, list[dict]]:
-    """Stub of the business App's inventory API; owns its own rules."""
+def _start_business_api(
+    commit_write: Callable[[dict, dict], dict] | None = None,
+) -> tuple[ThreadingHTTPServer, list[dict]]:
+    """Stub of the business App's inventory API; owns its own rules.
+
+    ``commit_write`` lets a scenario apply an authorized write and return its
+    committed result before the HTTP response leaves the business thread.
+    """
 
     calls: list[dict] = []
 
@@ -188,7 +195,8 @@ def _start_business_api() -> tuple[ThreadingHTTPServer, list[dict]]:
             length = int(self.headers.get("Content-Length") or 0)
             request = json.loads(self.rfile.read(length) or b"{}")
             calls.append(request)
-            domain = (request.get("arguments") or {}).get("domain")
+            arguments = request.get("arguments") or {}
+            domain = arguments.get("domain")
             if domain not in (request.get("domains") or []):
                 self._send(403, {"detail": "cross-domain read denied by business API"})
                 return
@@ -199,10 +207,16 @@ def _start_business_api() -> tuple[ThreadingHTTPServer, list[dict]]:
                 "domain_a": {"SKU-A1": {"name": "示例商品A1", "quantity": 100}},
                 "domain_b": {"SKU-B1": {"name": "示例商品B1", "quantity": 7}},
             }
-            record = inventory.get(domain, {}).get((request.get("arguments") or {}).get("sku", ""))
+            record = inventory.get(domain, {}).get(arguments.get("sku", ""))
             if record is None:
                 self._send(422, {"detail": "unknown sku"})
                 return
+            if commit_write is not None and self.path == "/inventory/write":
+                quantity = arguments.get("quantity")
+                if type(quantity) is not int or quantity < 1:
+                    self._send(422, {"detail": "invalid write quantity"})
+                    return
+                record = commit_write(arguments, record)
             self._send(200, {"result": record, "outcome": "ok"})
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -336,6 +350,7 @@ def start_runner(
     managed_secret: bytes | None = None,
     durable_database_url: str | None = None,
     dist_dir: Path | None = None,
+    commit_write: Callable[[dict, dict], dict] | None = None,
 ) -> tuple[RunnerInstance, ThreadingHTTPServer, list[dict]]:
     """Build, install, profile, launch.
 
@@ -346,6 +361,8 @@ def start_runner(
     and checkpoints (a file database inside the workdir) and admits
     write/approval tools. ``dist_dir`` reuses previously built wheel
     artifacts (``ensure_wheels``) instead of rebuilding per test.
+    ``commit_write`` opts into a stateful business write after the stub's
+    domain and inventory checks.
     """
 
     if not uv_available():
@@ -386,7 +403,7 @@ def start_runner(
             timeout=300,
         )
 
-    business_server, business_calls = _start_business_api()
+    business_server, business_calls = _start_business_api(commit_write)
     profile_dir = workdir / "profile"
     durable_config = None
     if durable:

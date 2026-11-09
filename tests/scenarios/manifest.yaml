@@ -330,15 +330,30 @@ sc_scenarios:
     tier: 1
     responsible_step: 6/7/10
     blocked_by: standalone-durable-actions
-    implemented_slices: [local_evidence_gate_process]
+    implemented_slices:
+      - local_evidence_gate_process
+      - evidence_unavailable_admission_refusal
+      - post_dispatch_evidence_withholding
+      - idempotent_replay_original_identity
+      - readonly_profile_fail_closed
     assertions: >-
       Local evidence-store failure stops new protected actions; central
       unavailability with valid local retention buffers uploads up to the
       declared limit with an explicit gap report; recovery retransmits
-      evidence only, never business actions. Process-level local half
-      delivered; note: the engine is fail-closed for ALL dispatches while
-      the store is unwritable (readonly continuation is a registered gap);
-      central-upload buffering remains planned (step10).
+      evidence only, never business actions. Verified process slices: the
+      admission gate refuses protected submissions while the store cannot
+      accept writes (explicit unwritable category, queryable gate denial,
+      business write boundary untouched); a business write that committed
+      before result-evidence retention failed converges the run and the
+      action ledger on the provable facts (claimed action without outcome,
+      never presented as success), and replaying the same idempotent
+      request after recovery returns the original execution identity
+      without repeating the business action. In a read-only profile, failure
+      to retain submission evidence returns HTTP 500 and leaves the durably
+      registered task queued. After restoring the original evidence directory,
+      the worker can finish that task under its original identity on restart.
+      Read-only continuation during the outage remains an open policy item.
+      Central-upload buffering and gap reporting remain planned for step10.
   - id: SC07
     title: 制品篡改、不兼容与回滚
     run_mode: standalone
