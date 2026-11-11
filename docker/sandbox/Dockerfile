@@ -35,6 +35,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # `playwright install-deps`, whose Recommends pulls ~280MB of dead weight for
 # a headless-only image: libllvm19+mesa (GL stack, 167MB), CJK/emoji/freefont
 # collections (~85MB), libz3 (27MB). fonts-liberation covers text rendering.
+# libatomic1 is the one library the hand-picked set missed: playwright's
+# bundled node driver needs libatomic.so.1 and fails with exit 127 without it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -42,6 +44,7 @@ RUN apt-get update \
         fontconfig \
         fonts-liberation \
         libasound2 \
+        libatomic1 \
         libatk-bridge2.0-0 \
         libatk1.0-0 \
         libatspi2.0-0 \
