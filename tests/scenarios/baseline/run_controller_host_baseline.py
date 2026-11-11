@@ -37,6 +37,10 @@ REQUEST_BUDGET_ENV = "HECATE_COLLECTOR_REQUEST_BUDGET"
 SAMPLING = dict(spec.SAMPLING)
 
 
+class RequestBudgetExhaustedError(RuntimeError):
+    """The shared pool cannot reserve another provider request."""
+
+
 class RequestBudgetPool:
     """Optional cross-process budget for real provider API calls.
 
@@ -105,7 +109,7 @@ class RequestBudgetPool:
             os.close(descriptor)
             remaining = cls._read_remaining(path)
             if remaining == 0:
-                raise RuntimeError("collector request budget exhausted")
+                raise RequestBudgetExhaustedError("collector request budget exhausted")
             descriptor, filename = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
             temp = Path(filename)
             with os.fdopen(descriptor, "w", encoding="utf-8") as output:

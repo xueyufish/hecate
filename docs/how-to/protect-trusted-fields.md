@@ -135,6 +135,9 @@ with the answered value is then verified against that answer.
   in the `platform_trusted_field` scenario family (see
   [Run the Controller two-host model baseline](run-controller-host-baseline.md)).
   This is not a real-model quality result or a production certification.
+  A separate gated family, `platform_trusted_field_model`, re-runs the two
+  delivery cases with a real model; it records what the model chose apart
+  from what the guard blocked.
 - Values are compared as exact strings at top-level argument and result keys.
   Nested paths, normalization and partial matches are not supported.
 - Approval runs before the provenance check: an approved write without a source

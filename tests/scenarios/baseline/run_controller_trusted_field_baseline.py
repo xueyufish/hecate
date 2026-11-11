@@ -9,12 +9,13 @@ record is the production guard's verdict read back from the durable action
 ledger. Collection is offline and deterministic: one pre-registered script
 per case drives the model seam (compliant, guess, lucky guess,
 substitution) — harness evidence for the protection, never real-model
-quality. Real-model collection for this profile is out of scope until a
-gated provider path is added; the definition schema admits only the
-deterministic source. The module registers the ``platform_trusted_field``
-scenario adapter, so repeated trials reuse the experiment layer's
-aggregation and comparison groups without ever sharing a group with the
-historical clarification baseline.
+quality. Real-model collection runs through the separate gated
+``platform_trusted_field_model`` family
+(``run_controller_trusted_field_model_baseline``); this family's definition
+schema admits only the deterministic source. The module registers the
+``platform_trusted_field`` scenario adapter, so repeated trials reuse the
+experiment layer's aggregation and comparison groups without ever sharing a
+group with the historical clarification baseline.
 """
 
 from __future__ import annotations
@@ -197,7 +198,10 @@ async def collect(
     if not cases or len(set(cases)) != len(cases) or any(case not in tspec.CASES for case in cases):
         raise ValueError("cases must be a nonempty unique subset of the trusted-field cases")
     if model is not None or isinstance(provider, LiteLLMProvider):
-        raise ValueError("real-model collection is out of scope for the trusted-field profile")
+        raise ValueError(
+            "real-model collection is out of scope for the offline trusted-field family; "
+            "use run_controller_trusted_field_model_baseline"
+        )
     provider = provider if provider is not None else tspec.ScriptedTrustedFieldProvider()
     source_identity = collector._source_identity()
     if "collector_files" in source_identity:

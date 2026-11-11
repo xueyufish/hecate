@@ -30,10 +30,19 @@ from tests.scenarios.baseline import controller_host_trusted_field_spec as tspec
 class TrustedFieldRegistry(platform_driver._SyntheticRegistry):
     """Synthetic business boundary without any provenance logic of its own."""
 
-    def __init__(self, case: str, values: dict[str, str] | None = None, *, write_failure: str | None = None) -> None:
+    def __init__(
+        self,
+        case: str,
+        values: dict[str, str] | None = None,
+        *,
+        write_failure: str | None = None,
+        model_rounds: list[dict[str, Any]] | None = None,
+    ) -> None:
         super().__init__(case)
         self.values = {**tspec.DEFAULT_VALUES, **(values or {})}
         self.write_failure = write_failure
+        self.model_rounds = model_rounds
+        self.business_call_rounds: list[int | None] = []
 
     async def describe(self, name: str) -> dict[str, Any]:
         from tests.scenarios.baseline import controller_host_clarification_spec as cspec
@@ -41,6 +50,7 @@ class TrustedFieldRegistry(platform_driver._SyntheticRegistry):
         return {"parameters": cspec.TOOL_SCHEMAS[name]}
 
     async def execute(self, name: str, args: dict, context: dict | None = None) -> Any:
+        self.business_call_rounds.append(len(self.model_rounds) - 1 if self.model_rounds else None)
         self.calls.append({"tool": name, "arguments": dict(args)})
         if name == tspec.READ_TOOL:
             content = tspec.read_content(self.case, self.values)
@@ -128,8 +138,8 @@ async def run_trusted_field_case(
     resolved = {**tspec.DEFAULT_VALUES, **(values or {})}
     environment_label = f"{case}-{uuid.uuid4().hex[:8]}"
     environment = platform_driver.PlatformEnvironment(root, environment_label)
-    registry = TrustedFieldRegistry(case, resolved, write_failure=write_failure)
     gateway = platform_driver._RecordingGateway(provider)
+    registry = TrustedFieldRegistry(case, resolved, write_failure=write_failure, model_rounds=gateway.rounds)
     patch = platform_driver._SeamPatch(
         registry, gateway, InMemoryEventStore(), tool_definitions=tspec.tool_definitions()
     )
@@ -139,6 +149,7 @@ async def run_trusted_field_case(
     previous_tasks = set(_background_tasks)
     states = {"waiting_input", *platform_driver.TERMINAL_STATES}
     parks: list[dict[str, Any]] = []
+    applied_inputs: list[dict[str, str]] = []
     rebuilds = 0
 
     def service(db: Any, worker: Any) -> TaskControlService:
@@ -214,6 +225,7 @@ async def run_trusted_field_case(
                 parks[-1]["wake_state"] = issue.record.state.value
                 if issue.record.state.value != "applied":
                     raise RuntimeError(f"provide_input was not applied: {issue.record.state.value} {issue.detail}")
+                applied_inputs.append({tspec.PROTECTED_FIELD: resolved["provided"]})
                 record = await platform_driver._wait_for_state(environment, task_id, states, worker=worker)
 
             observation.update(
@@ -271,7 +283,7 @@ async def run_trusted_field_case(
                 "clarification": {
                     "parks": parks,
                     "park_count": len(parks),
-                    "input_revisions": [],
+                    "input_revisions": applied_inputs,
                     "responder": "deterministic_injection",
                 },
             }
@@ -279,6 +291,7 @@ async def run_trusted_field_case(
     finally:
         await platform_driver._cancel_case_tasks(previous_tasks)
         platform_driver._refresh_recording(observation, gateway, registry)
+        observation["business_call_rounds"] = registry.business_call_rounds
         patch.unpatch()
         await environment.close()
     return observation
