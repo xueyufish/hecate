@@ -33,6 +33,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 READER_TOKEN = "reader-secret-token"
 ENTRY_NAME = "agents/summary/main.json"
 STARTUP_TIMEOUT_SECONDS = 60.0
+# Time to wait for the FIRST health answer after the port is published.
+# Each poll gives the runner one full timeout window to answer; a loaded
+# machine (Defender scans, background builds) can take minutes for the
+# interpreter to warm up, and an unresponsive-but-alive process retries
+# instead of failing the scenario.
+HEALTH_ANSWER_TIMEOUT_SECONDS = 120.0
 
 
 def uv_available() -> bool:
@@ -462,14 +468,25 @@ def start_runner_from(workdir: Path, profile_dir: Path, python_exe: Path) -> Run
             port = int(contents) if contents.isdigit() else None
             if port is not None:
                 instance = RunnerInstance(workdir, profile_dir, python_exe, process, port)
-                status, body = instance.request("GET", "/healthz", token=None)
-                if status == 200 and body.get("ready"):
-                    log_handle.close()
-                    return instance
+                answer_deadline = time.monotonic() + HEALTH_ANSWER_TIMEOUT_SECONDS
+                while time.monotonic() < answer_deadline and process.poll() is None:
+                    try:
+                        status, body = instance.request("GET", "/healthz", token=None)
+                    except (OSError, ValueError):
+                        status, body = 0, {}
+                    if status == 200 and body.get("ready"):
+                        log_handle.close()
+                        return instance
+                    time.sleep(0.3)
+                if process.poll() is None:
+                    break  # keep the process alive; report the answer timeout below
         time.sleep(0.3)
     log_handle.close()
     process.kill()
-    raise RuntimeError(f"runner did not become healthy in {STARTUP_TIMEOUT_SECONDS}s")
+    raise RuntimeError(
+        f"runner did not become healthy within {STARTUP_TIMEOUT_SECONDS}s startup + "
+        f"{HEALTH_ANSWER_TIMEOUT_SECONDS}s health-answer window (process alive: {process.poll() is None})"
+    )
 
 
 def stop_business_api(server: ThreadingHTTPServer) -> None:

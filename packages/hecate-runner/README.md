@@ -205,6 +205,24 @@ managed closed loop:
   actions and never falls back to local self-authorization; unknown-outcome
   actions reconcile through the action ledger and are never redone after
   re-authorization.
+- Event upload sends at most `upload_batch` envelopes (default 100) per run
+  and cycle. A run's upload position advances only when the platform's
+  answer accounts for every envelope (`projected + skipped_duplicates`
+  equals the batch size); a failed, rejected, empty, incomplete or
+  non-JSON answer resends the same position next cycle, and the
+  all-duplicate answer after a lost response advances it. Positions live in
+  memory, so a restart resends from each run's first event and the platform
+  deduplicates.
+- A missing sequence range in the local event log is never uploaded across:
+  the events before it are sent, the run is held there for reconciliation
+  and other runs keep uploading. The run and missing range are logged once
+  and recorded in the host evidence as kind `managed_upload_gap` (outcome
+  `gap`); the retained events after the gap stay local. `GET /healthz`
+  reports reference-free counters under `managed_upload`: `streams_behind`
+  (uploadable events waiting for platform confirmation) apart from
+  `streams_with_gap` (local gaps), plus confirmed, failed and unconfirmed
+  batch counts. See
+  [`docs/how-to/verify-managed-evidence-upload.md`](../../docs/how-to/verify-managed-evidence-upload.md).
 
 ## Evidence retention
 

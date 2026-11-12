@@ -16,9 +16,13 @@ Responsibilities:
   (issuer/audience/expiry + nonce consumption). A delivery is accepted via
   the durable store's idempotent ``submit_task`` — a redelivered row
   returns the original local task/run references and never re-executes.
-- **Event upload** — push the local durable event log after the upload
-  cursor; the platform deduplicates per event_id, so replays are harmless.
-  Upload happens before new deliveries are requested (projection first).
+- **Event upload** — push the local durable event log after each run's
+  acknowledged position; the platform deduplicates per event_id, so replays
+  are harmless. A position advances only when the platform's counts confirm
+  the whole batch, and a missing local sequence range is never uploaded
+  across: the stream is held at the gap for reconciliation and the range is
+  reported. Upload happens before new deliveries are requested (projection
+  first).
 - **Disconnect semantics** — every channel failure degrades to "keep
   serving locally, retry later". The lease expiring stops NEW protected
   actions (the lease gate); it never switches the host to local
@@ -34,7 +38,8 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Awaitable, Callable
+import threading
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -49,6 +54,7 @@ from hecate_durable.contracts.credentials import (
     solve_challenge as issue_challenge_answer,
 )
 from hecate_durable.contracts.durable import IdempotencyKey, canonical_request_digest
+from hecate_durable.contracts.events import EventEnvelope, EventKind, GapRange
 from hecate_durable.contracts.references import BackendRef, RefKind
 from hecate_durable.storage.lease import LeaseHandle, StaleFenceError
 from hecate_durable.storage.store import SqlDurableStore
@@ -360,6 +366,86 @@ class ManagedStats:
     command_effects_uploaded: int = 0
     command_failures: int = 0
     config_drift_rejections: int = 0
+    # Event-upload batches: confirmed by the platform's counts, failed at
+    # the transport or by rejection, or answered without a complete
+    # confirmation (never advances the run's position).
+    upload_batches_acknowledged: int = 0
+    upload_batches_failed: int = 0
+    upload_batches_unconfirmed: int = 0
+    events_acknowledged_duplicate: int = 0
+    upload_gaps_detected: int = 0
+
+
+UPLOAD_GAP_EVIDENCE_KIND = "managed_upload_gap"
+
+
+@dataclass(frozen=True)
+class UploadStreamStatus:
+    """One run stream's upload position as of the latest upload cycle.
+
+    ``acknowledged_sequence`` is the highest local sequence the platform has
+    explicitly confirmed in this process (a restart re-confirms from the
+    start; the platform deduplicates). ``behind`` means uploadable local
+    events after it still wait for confirmation — the platform is
+    temporarily behind. ``gap`` is a missing local sequence range in the
+    durable log: the stream is held before it for reconciliation and
+    nothing past it is uploaded, so the platform never sees the stream as
+    complete.
+    """
+
+    task_ref: BackendRef
+    run_ref: BackendRef
+    acknowledged_sequence: int
+    behind: bool
+    gap: GapRange | None
+
+    @property
+    def state(self) -> str:
+        if self.gap is not None:
+            return "reconciliation_required"
+        return "behind" if self.behind else "in_sync"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_ref": self.task_ref.to_dict(),
+            "run_ref": self.run_ref.to_dict(),
+            "state": self.state,
+            "acknowledged_sequence": self.acknowledged_sequence,
+            "behind": self.behind,
+            "gap": self.gap.to_dict() if self.gap is not None else None,
+        }
+
+
+def _uploadable_prefix(events: Sequence[EventEnvelope]) -> tuple[list[dict[str, Any]], GapRange | None]:
+    """The contiguous events of a page before its first gap marker, and that gap."""
+
+    batch: list[dict[str, Any]] = []
+    for event in events:
+        if event.kind is EventKind.GAP:
+            return batch, event.gap
+        if event.kind is EventKind.EVENT:
+            batch.append(event.to_dict())
+    return batch, None
+
+
+def _acknowledged_counts(result: dict[str, Any] | None, batch_size: int) -> tuple[int, int] | None:
+    """``(projected, duplicates)`` only when the response confirms every envelope.
+
+    The platform answers one count per envelope, so a confirmation must be
+    two non-negative integers summing to the batch size. A failed call, an
+    empty body, a missing or non-integer count, or a sum that misses part
+    of the batch confirms nothing.
+    """
+
+    if not isinstance(result, dict):
+        return None
+    projected = result.get("projected")
+    duplicates = result.get("skipped_duplicates")
+    if type(projected) is not int or type(duplicates) is not int:
+        return None
+    if projected < 0 or duplicates < 0 or projected + duplicates != batch_size:
+        return None
+    return projected, duplicates
 
 
 class ManagedChannel:
@@ -385,6 +471,7 @@ class ManagedChannel:
         execution_definition: str | None = None,
         command_handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None,
         config_fingerprint: Callable[[], str] | None = None,
+        gap_recorder: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._workspace_id = workspace_id
@@ -424,6 +511,18 @@ class ManagedChannel:
         self._credential: dict[str, Any] | None = None
         self._delivery_cursor: str | None = None
         self._event_cursors: dict[tuple[str, str], int] = {}
+        self._pending_upload_ends: dict[tuple[str, str], int] = {}
+        # Upload diagnostics: written on the channel loop, read by the
+        # health surface from HTTP handler threads.
+        self._stream_status: dict[tuple[str, str], UploadStreamStatus] = {}
+        self._status_lock = threading.Lock()
+        self._streams_behind = 0
+        self._streams_with_gap = 0
+        # A local evidence gap is logged once per process and recorded (through
+        # the host's evidence store) until a write succeeds.
+        self._gap_recorder = gap_recorder
+        self._logged_gaps: set[tuple[str, str, int, int]] = set()
+        self._recorded_gaps: set[tuple[str, str, int, int]] = set()
         self._upload_exhausted = False
         self.stats = ManagedStats()
         # The most recent expected-configuration rejection reason (step7 I-Cb
@@ -642,7 +741,21 @@ class ManagedChannel:
         return "accepted"
 
     async def upload_events(self) -> int:
-        """Push local durable events after the upload cursor (dedup upstream)."""
+        """Push local durable events after each run's acknowledged position.
+
+        One batch of at most ``upload_batch`` envelopes per run stream and
+        cycle; returns the number the platform newly projected. A stream's
+        position advances only when the response's counts confirm every
+        envelope of the batch, so a failed, rejected, empty or incomplete
+        answer leaves it in place and the next cycle resends the same
+        position. After a lost response the resent batch comes back as
+        duplicates (the platform deduplicates per event id); that complete
+        confirmation advances the position too.
+
+        A gap marker in the durable log is never uploaded across: the
+        contiguous events before it are sent, the stream is held there and
+        the missing range is reported, while other runs keep uploading.
+        """
 
         run_rows = await asyncio.to_thread(self._store.list_tasks)
         uploaded = 0
@@ -651,35 +764,145 @@ class ManagedChannel:
                 continue
             runs = await asyncio.to_thread(self._store.event_runs_for_task, record.task_ref)
             for run_ref in runs:
-                association = await self.associate_attempt(record.task_ref, run_ref)
-                if association is None:
-                    continue
                 stream_key = (run_ref.issuer_domain, run_ref.id)
+                cursor = self._event_cursors.get(stream_key, 0)
                 page = await asyncio.to_thread(
                     self._store.read_events,
                     run_ref,
-                    cursor=self._event_cursors.get(stream_key, 0),
+                    cursor=cursor,
                     limit=self._upload_batch,
                 )
-                envelopes = [event.to_dict() for event in page.events if event.kind.value == "event"]
-                if not envelopes:
+                batch, gap = _uploadable_prefix(page.events)
+                pending_end = self._pending_upload_ends.get(stream_key)
+                if pending_end is not None:
+                    # Retrying a short batch must not absorb events appended
+                    # after the unconfirmed request was sent.
+                    batch = [envelope for envelope in batch if envelope["source_sequence"] <= pending_end]
+                # Local facts first: the report shows pending events and local
+                # gaps even while every platform call fails.
+                self._note_stream(record.task_ref, run_ref, cursor, behind=bool(batch), gap=gap)
+                if gap is not None:
+                    await self._report_gap(record.task_ref, run_ref, gap)
+                if not batch:
+                    continue
+                association = await self.associate_attempt(record.task_ref, run_ref)
+                if association is None:
                     continue
                 if self._gate.active is False and not self._credential:
                     return uploaded
+                batch_end = int(batch[-1]["source_sequence"])
+                pending_end = self._pending_upload_ends.setdefault(stream_key, batch_end)
                 result = await self._request(
                     "POST",
                     "/managed/host/events",
-                    payload={"local_task_ref": record.task_ref.to_dict(), "envelopes": envelopes},
+                    payload={"local_task_ref": record.task_ref.to_dict(), "envelopes": batch},
                     auth=True,
                     tolerate=(403, 422),
                 )
-                if result is None:
+                counts = _acknowledged_counts(result, len(batch))
+                if counts is None:
+                    if result is None:
+                        self.stats.upload_batches_failed += 1
+                    else:
+                        self.stats.upload_batches_unconfirmed += 1
+                        logger.warning(
+                            "managed upload for run %s was not confirmed for its %d envelopes; "
+                            "resending from sequence %d",
+                            run_ref.id,
+                            len(batch),
+                            cursor + 1,
+                        )
                     continue
-                count = int(result.get("projected", 0))
-                uploaded += count
-                self._event_cursors[stream_key] = page.next_cursor
-                self.stats.events_uploaded += count
+                projected, duplicates = counts
+                self._event_cursors[stream_key] = batch_end
+                if batch_end == pending_end:
+                    del self._pending_upload_ends[stream_key]
+                self._note_stream(
+                    record.task_ref,
+                    run_ref,
+                    batch_end,
+                    behind=gap is None and (page.has_more or page.next_cursor > batch_end),
+                    gap=gap,
+                )
+                self.stats.upload_batches_acknowledged += 1
+                self.stats.events_uploaded += projected
+                self.stats.events_acknowledged_duplicate += duplicates
+                uploaded += projected
         return uploaded
+
+    def upload_report(self) -> dict[str, Any]:
+        """Per-run upload positions; the platform being behind and a local gap count apart."""
+
+        with self._status_lock:
+            streams = list(self._stream_status.values())
+        return {
+            "streams": [status.to_dict() for status in streams],
+            "streams_behind": sum(1 for status in streams if status.behind),
+            "streams_with_gap": sum(1 for status in streams if status.gap is not None),
+        }
+
+    def upload_summary(self) -> dict[str, int]:
+        """Reference-free upload counters for the public health surface."""
+
+        with self._status_lock:
+            return {
+                "streams": len(self._stream_status),
+                "streams_behind": self._streams_behind,
+                "streams_with_gap": self._streams_with_gap,
+                "batches_acknowledged": self.stats.upload_batches_acknowledged,
+                "batches_failed": self.stats.upload_batches_failed,
+                "batches_unconfirmed": self.stats.upload_batches_unconfirmed,
+                "gaps_detected": self.stats.upload_gaps_detected,
+            }
+
+    def _note_stream(
+        self,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        acknowledged: int,
+        *,
+        behind: bool,
+        gap: GapRange | None,
+    ) -> None:
+        status = UploadStreamStatus(
+            task_ref=task_ref,
+            run_ref=run_ref,
+            acknowledged_sequence=acknowledged,
+            behind=behind,
+            gap=gap,
+        )
+        with self._status_lock:
+            key = (run_ref.issuer_domain, run_ref.id)
+            previous = self._stream_status.get(key)
+            self._streams_behind += int(behind) - int(previous.behind if previous is not None else False)
+            self._streams_with_gap += int(gap is not None) - int(previous is not None and previous.gap is not None)
+            self._stream_status[key] = status
+
+    async def _report_gap(self, task_ref: BackendRef, run_ref: BackendRef, gap: GapRange) -> None:
+        """Log a held stream's missing range once and record it as local evidence."""
+
+        marker = (run_ref.issuer_domain, run_ref.id, gap.from_sequence, gap.to_sequence)
+        if marker not in self._logged_gaps:
+            self._logged_gaps.add(marker)
+            self.stats.upload_gaps_detected += 1
+            logger.warning(
+                "managed upload: run %s is missing local events %d-%d; the stream is held before "
+                "the gap for reconciliation",
+                run_ref.id,
+                gap.from_sequence,
+                gap.to_sequence,
+            )
+        if self._gap_recorder is None or marker in self._recorded_gaps:
+            return
+        detail = {"task_ref": task_ref.to_dict(), "run_ref": run_ref.to_dict(), **gap.to_dict()}
+        try:
+            await asyncio.to_thread(self._gap_recorder, detail)
+        except Exception as exc:  # noqa: BLE001 — retried next cycle; uploads continue
+            logger.warning(
+                "managed upload: recording the evidence gap of run %s failed (%s)", run_ref.id, type(exc).__name__
+            )
+            return
+        self._recorded_gaps.add(marker)
 
     async def associate_attempt(self, task_ref: BackendRef, run_ref: BackendRef) -> dict[str, Any] | None:
         """Register a host-local attempt before execution facts are projected."""
@@ -698,7 +921,7 @@ class ManagedChannel:
 
         return f"n-{secrets_mod.token_hex(16)}"
 
-    def _record_config_drift(self, response: Any) -> str | None:
+    def _record_config_drift(self, error: dict[str, Any]) -> str | None:
         """Surface a config-drift rejection as channel state (not just a log).
 
         Returns the drift reason when the response is the platform's
@@ -706,13 +929,9 @@ class ManagedChannel:
         on the health surface.
         """
 
-        try:
-            detail = response.json().get("detail") or {}
-        except Exception:  # noqa: BLE001 — malformed body is just a rejection
+        if error.get("code") != "config-drift":
             return None
-        if not (isinstance(detail, dict) and detail.get("error", {}).get("code") == "config-drift"):
-            return None
-        reason = str(detail.get("error", {}).get("message") or "configuration fingerprint rejected")
+        reason = str(error.get("message") or "configuration fingerprint rejected")
         self.last_config_drift = reason
         self.stats.config_drift_rejections += 1
         logger.warning("managed channel: expected-configuration gate rejected new work: %s", reason)
@@ -777,31 +996,39 @@ class ManagedChannel:
         except httpx.HTTPError as exc:
             logger.warning("managed channel %s %s failed: %s", method, path, exc)
             return None
-        if response.status_code == 403:
+        if response.is_error:
             try:
-                error = response.json().get("detail", {}).get("error", {})
+                detail = response.json().get("detail")
             except (ValueError, AttributeError):
-                error = {}
-            if error.get("code") == "enrollment-inactive":
-                self.authorization_revoked = True
-        if response.status_code >= 400 and self._record_config_drift(response) is not None:
-            return None
+                detail = None
+            error = detail.get("error") if isinstance(detail, dict) else None
+            if isinstance(error, dict):
+                if response.status_code == 403 and error.get("code") == "enrollment-inactive":
+                    self.authorization_revoked = True
+                if self._record_config_drift(error) is not None:
+                    return None
         if response.status_code == 401 and auth:
             self._credential = None
         if response.status_code in tolerate:
             logger.info("managed channel %s %s tolerated %d", method, path, response.status_code)
             return None
-        if response.status_code >= 400:
+        if not response.is_success:
+            logger.warning("managed channel %s %s returned %d", method, path, response.status_code)
+            return None
+        try:
+            payload = response.json() if response.content else {}
+        except ValueError:
+            payload = None
+        if not isinstance(payload, dict):
+            # A success status with an unreadable body confirms nothing.
             logger.warning(
-                "managed channel %s %s rejected: %d %s", method, path, response.status_code, response.text[:300]
+                "managed channel %s %s answered %d without a JSON object", method, path, response.status_code
             )
             return None
         if path.split("?", 1)[0] in ("/managed/host/pull", "/managed/host/accept"):
             self.last_config_drift = None
             self.authorization_revoked = False
-        if not response.content:
-            return {}
-        return response.json()
+        return payload
 
 
 @dataclass(frozen=True)

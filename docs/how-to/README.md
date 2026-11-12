@@ -35,6 +35,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Run the Controller two-host model baseline](run-controller-host-baseline.md)** — collect the recorded platform-vs-runner Controller baseline (deterministic matrix, gated real collection), read the record, and know what it does not certify.
 - **[Observe parent-child task relationships](observe-parent-child-tasks.md)** — read the recorded delegation facts on both task sides, navigate between parent and child details, and keep callback consumption separate from child success and parent verdicts.
 - **[Read task results through the REST result inbox](rest-result-inbox.md)** — submit a task with `result_delivery: "rest_inbox"`, disconnect, then consume cursor-resumable result/approval/stop notifications as the same JWT submitter from anywhere.
+- **[Verify managed evidence upload recovery](verify-managed-evidence-upload.md)** — what a managed Runner guarantees when the platform cannot take its evidence (confirmed-only upload positions, harmless lost answers, restart backfill, held local gaps), how to read the health counters and gap evidence, and how to run the installed-Runner drill.
 
 ## Versioning and lifecycle
 

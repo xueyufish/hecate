@@ -339,6 +339,11 @@ sc_scenarios:
       - post_dispatch_evidence_withholding
       - idempotent_replay_original_identity
       - readonly_profile_fail_closed
+      - managed_upload_fault_before_commit
+      - managed_upload_lost_confirmation_dedup
+      - managed_upload_restart_backfill
+      - managed_upload_run_isolation
+      - managed_upload_local_gap_report
     assertions: >-
       Local evidence-store failure stops new protected actions; central
       unavailability with valid local retention buffers uploads up to the
@@ -356,7 +361,22 @@ sc_scenarios:
       registered task queued. After restoring the original evidence directory,
       the worker can finish that task under its original identity on restart.
       Read-only continuation during the outage remains an open policy item.
-      Central-upload buffering and gap reporting remain planned for step10.
+      Managed central-upload slices (test_sc06_managed_evidence_upload.py,
+      SQLite and PostgreSQL Runner tiers in step6-pg-process-matrix): while
+      the platform evidence route fails before commit, or commits and then
+      loses or truncates its answer, the installed Runner executes the
+      protected write once, keeps local action results and events readable,
+      advances a run's upload position only on a complete confirmation (an
+      all-duplicate answer after a lost response counts) and resends the
+      identical batch; after a hard restart on the same database the backlog
+      uploads with no loss, no duplicate projection and the original Task/Run
+      association; one run's confirmations never move another run's
+      position. A local event-log gap holds its run before the gap, is
+      recorded in host evidence with the run and missing range and reported
+      apart from a platform that is merely behind, while healthy runs keep
+      uploading. Backlog quotas against the declared limit, evidence
+      retention and eviction, and platform-side visibility of host gaps
+      remain open.
   - id: SC07
     title: 制品篡改、不兼容与回滚
     run_mode: standalone

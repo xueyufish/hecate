@@ -265,11 +265,13 @@ jobs:
           if-no-files-found: warn
 
   # step6f process matrix: the managed host scenarios (SC04 lease renewal,
-  # SC05 wake chain + reconnect) are database-parametrized — with
+  # SC05 wake chain + reconnect, SC06 managed evidence upload) are
+  # database-parametrized — with
   # HECATE_STEP6_POSTGRES_URL set each scenario runs BOTH [sqlite] and
   # [postgres], so the host database, action ledger, commands and waits of
   # the fault matrix (accepted-not-executed, kill/restart, lost receipts,
-  # expired commands, stopped lease delivery, control-plane restart) land
+  # expired commands, stopped lease delivery, control-plane restart,
+  # evidence-route faults and upload backfill) land
   # on real PostgreSQL. Windows hosts cannot certify this locally (the
   # runner subprocess is refused by the Docker port proxy); Linux CI is
   # the authoritative run.
@@ -305,6 +307,19 @@ jobs:
           HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
         run: |
           python scripts/dev.py test tests/scenarios/test_sc04_lease_renewal_policy.py tests/scenarios/test_sc05_managed_wake_chain.py tests/scenarios/test_sc05_managed_reconnect.py -q --timeout=420 -p no:cacheprovider
+      - name: SC06 managed evidence upload faults and backfill
+        env:
+          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+          HECATE_SC06_UPLOAD_EVIDENCE_DIR: ${{ runner.temp }}/sc06-managed-evidence-upload
+        run: |
+          python scripts/dev.py test tests/scenarios/test_sc06_managed_evidence_upload.py -q -rA --timeout=420 -p no:cacheprovider
+      - name: Preserve SC06 managed evidence upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sc06-managed-evidence-upload
+          path: ${{ runner.temp }}/sc06-managed-evidence-upload/*.json
+          if-no-files-found: error
 
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
   # requires Docker-in-Docker and is covered by integration tests locally.
