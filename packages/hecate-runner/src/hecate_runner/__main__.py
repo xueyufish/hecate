@@ -29,6 +29,7 @@ from .durable import DurableRuntime
 from .engine import EvidenceUnavailableError, ExecutionEngine
 from .evidence import EvidenceStore
 from .managed import (
+    UPLOAD_GAP_EVIDENCE_KIND,
     LeaseGate,
     ManagedChannel,
     ManagedExecutionScheduler,
@@ -257,6 +258,12 @@ def _run_profile(profile: Profile, args: argparse.Namespace, *, trust_guard: Any
             nonce_record_path=str(Path(evidence_dir) / "lease-consumed-nonces.jsonl"),
             lease_policy=control_plane.lease_policy,
         )
+
+        def record_upload_gap(detail: dict) -> None:
+            # A missing local event range is audit-relevant: it stays in the
+            # host's own evidence beside the retained events it interrupts.
+            evidence.append(UPLOAD_GAP_EVIDENCE_KIND, "host", detail["run_ref"]["id"], "gap", detail)
+
         channel = ManagedChannel(
             base_url=control_plane.base_url,
             workspace_id=control_plane.workspace_id,
@@ -272,6 +279,7 @@ def _run_profile(profile: Profile, args: argparse.Namespace, *, trust_guard: Any
             lease_gate=lease_gate,
             execution_definition=profile.execution_definition_digest(business_api),
             config_fingerprint=lambda: profile.config_fingerprint(business_api),
+            gap_recorder=record_upload_gap,
         )
 
     from hecate_governance.managed import ManagedRevocationView
@@ -375,7 +383,13 @@ def _run_profile(profile: Profile, args: argparse.Namespace, *, trust_guard: Any
                 associate_attempt=channel.associate_attempt,
             ),
         )
-    server = RunnerServer(profile, engine, evidence, durable=durable)
+    server = RunnerServer(
+        profile,
+        engine,
+        evidence,
+        durable=durable,
+        managed_upload=channel.upload_summary if channel is not None else None,
+    )
 
     if durable is not None:
         _schedule_pending_resumes(durable, engine, server)

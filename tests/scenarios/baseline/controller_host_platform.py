@@ -481,17 +481,26 @@ def _empty_diagnostics(end_reason: str) -> dict[str, Any]:
         "last_error_digest": None,
         "round_error_types": [],
         "diagnostic_error": None,
+        "cleanup_stragglers": 0,
         **{field: None for field in DIAGNOSTIC_FIELDS},
     }
 
 
 async def read_task_diagnostics(
-    environment: Any, task_uuid: uuid.UUID | None, end_reason: str, *, error: BaseException | None = None
+    environment: Any,
+    task_uuid: uuid.UUID | None,
+    end_reason: str,
+    *,
+    error: BaseException | None = None,
+    cleanup_stragglers: int = 0,
 ) -> dict[str, Any]:
     """Read bounded, content-safe durable facts without masking case errors."""
 
     diagnostics = _empty_diagnostics(end_reason)
     diagnostics["collection_error_type"] = exception_type(error) if error is not None else None
+    diagnostics["cleanup_stragglers"] = (
+        cleanup_stragglers if type(cleanup_stragglers) is int and cleanup_stragglers >= 0 else 0
+    )
     if task_uuid is None:
         diagnostics["diagnostic_error"] = "task identity unavailable"
         return diagnostics
@@ -528,13 +537,39 @@ async def read_task_diagnostics(
         return diagnostics
 
 
-async def _cancel_case_tasks(previous_tasks: set[asyncio.Task]) -> None:
+CASE_CLEANUP_JOIN_SECONDS = 5.0
+
+
+async def _cancel_case_tasks(
+    previous_tasks: set[asyncio.Task], *, join_seconds: float = CASE_CLEANUP_JOIN_SECONDS
+) -> int:
+    """Cancel this case's background tasks and join them within a bound.
+
+    A child that ignores cancellation — or is stuck behind a starved
+    default executor under heavy parallel collection — must not hang the
+    driver past its own evidence deadlines: the join is bounded and the
+    number of children still alive at the deadline is returned so callers
+    record it as evidence. Survivors stay registered in
+    ``_background_tasks``, so a later cleanup retries them.
+    """
+
     from hecate.execution.task_control import _background_tasks
 
     pending = tuple(_background_tasks - previous_tasks)
     for task in pending:
         task.cancel()
-    await asyncio.gather(*pending, return_exceptions=True)
+    if not pending:
+        return 0
+    _done, alive = await asyncio.wait(pending, timeout=join_seconds)
+    return len(alive)
+
+
+def _record_cleanup_stragglers(observation: dict[str, Any], stragglers: int) -> None:
+    """Fold a cleanup join's survivor count into the diagnostics block."""
+
+    diagnostics = dict(observation.get("diagnostics") or {})
+    diagnostics["cleanup_stragglers"] = diagnostics.get("cleanup_stragglers", 0) + stragglers
+    observation["diagnostics"] = diagnostics
 
 
 def _refresh_recording(observation: dict[str, Any], gateway: _RecordingGateway, registry: Any) -> None:
@@ -758,9 +793,11 @@ async def run_platform_case(case: str, provider: Any, root: Path) -> dict[str, A
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
         # The known identity survives the failure; the durable-fact read is
         # best-effort and must not mask the original error.
-        await _cancel_case_tasks(previous_tasks)
+        stragglers = await _cancel_case_tasks(previous_tasks)
         end_reason = "case_deadline_exceeded" if deadline.expired() else "collection_exception"
-        diagnostics = await read_task_diagnostics(environment, task_id, end_reason, error=exc)
+        diagnostics = await read_task_diagnostics(
+            environment, task_id, end_reason, error=exc, cleanup_stragglers=stragglers
+        )
         observation = _fallback_observation(
             gateway,
             registry,
@@ -772,8 +809,9 @@ async def run_platform_case(case: str, provider: Any, root: Path) -> dict[str, A
         )
         observation["usage"] = _usage(gateway.rounds)
     finally:
-        await _cancel_case_tasks(previous_tasks)
+        stragglers = await _cancel_case_tasks(previous_tasks)
         _refresh_recording(observation, gateway, registry)
+        _record_cleanup_stragglers(observation, stragglers)
         patch.unpatch()
         await environment.close()
     return observation

@@ -27,6 +27,7 @@ import asyncio
 import json
 import logging
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, unquote
@@ -61,11 +62,14 @@ class RunnerServer:
         engine: ExecutionEngine,
         evidence: EvidenceStore,
         durable: DurableRuntime | None = None,
+        managed_upload: Callable[[], dict[str, int]] | None = None,
     ) -> None:
         self._profile = profile
         self._engine = engine
         self._evidence = evidence
         self._durable = durable
+        # Managed hosts publish reference-free upload counters on health.
+        self._managed_upload = managed_upload
         self._loop = asyncio.new_event_loop()
         engine.attach_loop(self._loop)
         self._loop_thread = threading.Thread(target=self._loop.run_forever, name="runner-asyncio", daemon=True)
@@ -397,14 +401,14 @@ class RunnerServer:
                 try:
                     path = self.path.split("?", 1)[0]
                     if path == "/healthz":
-                        self._send_json(
-                            200,
-                            {
-                                "ready": not server._engine.closing,
-                                **server._profile.capabilities_summary(),
-                                **server._evidence.policy_summary(),
-                            },
-                        )
+                        health = {
+                            "ready": not server._engine.closing,
+                            **server._profile.capabilities_summary(),
+                            **server._evidence.policy_summary(),
+                        }
+                        if server._managed_upload is not None:
+                            health["managed_upload"] = server._managed_upload()
+                        self._send_json(200, health)
                         return
                     if path == "/capabilities":
                         payload = contract.capabilities(
