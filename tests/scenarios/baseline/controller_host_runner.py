@@ -168,7 +168,12 @@ class _EndpointModelServer:
         handlers = tuple(self._handlers)
         for task in handlers:
             task.cancel()
-        await asyncio.gather(*handlers, return_exceptions=True)
+        if handlers:
+            # Bounded like the platform driver's cleanup join: a handler that
+            # ignores cancellation must not hang the whole case teardown.
+            from tests.scenarios.baseline.controller_host_platform import CASE_CLEANUP_JOIN_SECONDS
+
+            await asyncio.wait(handlers, timeout=CASE_CLEANUP_JOIN_SECONDS)
         if server is not None:
             await server.wait_closed()
 

@@ -229,9 +229,11 @@ async def run_clarification_case(case: str, provider: Any, root: Path) -> dict[s
             environment, task_id, "terminal_state_observed"
         )
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
-        await platform_driver._cancel_case_tasks(previous_tasks)
+        stragglers = await platform_driver._cancel_case_tasks(previous_tasks)
         end_reason = "case_deadline_exceeded" if deadline.expired() else "collection_exception"
-        diagnostics = await platform_driver.read_task_diagnostics(environment, task_id, end_reason, error=exc)
+        diagnostics = await platform_driver.read_task_diagnostics(
+            environment, task_id, end_reason, error=exc, cleanup_stragglers=stragglers
+        )
         observation = platform_driver._fallback_observation(
             gateway,
             registry,
@@ -251,8 +253,9 @@ async def run_clarification_case(case: str, provider: Any, root: Path) -> dict[s
             "responder": "deterministic_injection",
         }
     finally:
-        await platform_driver._cancel_case_tasks(previous_tasks)
+        stragglers = await platform_driver._cancel_case_tasks(previous_tasks)
         platform_driver._refresh_recording(observation, gateway, registry)
+        platform_driver._record_cleanup_stragglers(observation, stragglers)
         patch.unpatch()
         await environment.close()
     return observation

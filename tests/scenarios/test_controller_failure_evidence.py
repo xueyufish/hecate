@@ -8,8 +8,11 @@ rounds, receipts and side-effect counters survive provider exceptions
 and case timeouts; durable facts (task state, dispatch attempts,
 last_error) are read best-effort with allow-listed fields and never
 mask the original failure; completed actions do not repeat after a
-failure, calls stay bounded, and cancellation adds no actions. Fully
-offline — the deterministic injected provider stands in for the model.
+failure, calls stay bounded, and cancellation adds no actions. The case
+cleanup join is itself bounded: a background child that ignores
+cancellation is abandoned and counted as evidence instead of hanging the
+driver. Fully offline — the deterministic injected provider stands in
+for the model.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ EXPECTED_DIAGNOSTIC_KEYS = {
     "last_error_digest",
     "round_error_types",
     "diagnostic_error",
+    "cleanup_stragglers",
     *platform_driver.DIAGNOSTIC_FIELDS,
 }
 
@@ -155,6 +159,8 @@ def test_first_call_failure_preserves_identity_and_rounds(first_call_failure) ->
     # The task failed gracefully inside the loop; identity and rounds survive.
     assert run["diagnostics"]["task_state"] in {"failed", "reconciliation_required"}
     assert run["diagnostics"]["end_reason"]
+    # A calm failure joins every background child within the bound.
+    assert run["diagnostics"]["cleanup_stragglers"] == 0
     assert run["model_calls"] == len(run["rounds"]) >= 1
     assert run["rounds"][0]["error_type"] == "ConnectionError"
     assert run["write_attempts"] == 0 and run["side_effect_count"] == 0
@@ -206,6 +212,9 @@ async def test_collection_timeout_preserves_identity_and_rounds(tmp_path, monkey
     assert run["task_id"], "task identity must survive a case timeout"
     diagnostics = run["diagnostics"]
     assert diagnostics["end_reason"] == "case_deadline_exceeded"
+    # Under heavy parallel collection a cancelled dispatch child may still be
+    # dying at the join bound: that is now recorded evidence, never a hang.
+    assert type(diagnostics["cleanup_stragglers"]) is int and diagnostics["cleanup_stragglers"] >= 0
     # The driver caught the converted timeout with awaits available, so the
     # durable facts are readable; they reflect the still-running task.
     assert diagnostics["task_state"] in {"queued", "running", "reconciliation_required"}
@@ -333,19 +342,67 @@ async def test_diagnostic_read_timeout_keeps_partial_facts(tmp_path, monkeypatch
         async def run_rows(self, _task_id):
             await asyncio.Event().wait()
 
-    monkeypatch.setattr(platform_driver, "DIAGNOSTIC_TIMEOUT_SECONDS", 0.02)
+    # The bound only needs to be comfortably above loop scheduling latency
+    # so the instant state read never races it; the run-rows read hangs
+    # forever, so the timeout path itself stays fully exercised.
+    monkeypatch.setattr(platform_driver, "DIAGNOSTIC_TIMEOUT_SECONDS", 0.5)
     diagnostics = await asyncio.wait_for(
         platform_driver.read_task_diagnostics(
             StubEnvironment(), uuid_module.UUID(int=0), "collection_exception", error=ConnectionError("secret body")
         ),
-        timeout=1,
+        timeout=5,
     )
     assert diagnostics["collection_error_type"] == "ConnectionError"
+    assert diagnostics["cleanup_stragglers"] == 0
     assert diagnostics["task_state"] == "running" and diagnostics["dispatch_attempts"] == 1
     assert diagnostics["last_run_id"] is None
     assert diagnostics["diagnostic_error"] == "run rows: TimeoutError"
     assert "secret body" not in json.dumps(diagnostics)
     _assert_allow_list({"diagnostics": diagnostics})
+
+
+async def test_case_cleanup_join_is_bounded_and_reports_survivors() -> None:
+    """A background child that ignores cancellation cannot hang the driver.
+
+    The cleanup join is bounded: a well-behaved child is cancelled and
+    joined, a stubborn child is abandoned at the deadline and its count is
+    returned so the driver records it. The abandoned child stays registered
+    so a later cleanup retries it.
+    """
+
+    from hecate.execution import task_control
+
+    release = asyncio.Event()
+
+    async def wellbehaved() -> None:
+        await asyncio.Event().wait()
+
+    async def stubborn() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    previous = set(task_control._background_tasks)
+    well_task = asyncio.create_task(wellbehaved())
+    stubborn_task = asyncio.create_task(stubborn())
+    task_control._background_tasks.update({well_task, stubborn_task})
+    # Start both children so they are suspended inside their awaits — the
+    # state real dispatch tasks are in when a case's cleanup cancels them.
+    # Cancelling a never-started task completes it without running its body.
+    await asyncio.sleep(0)
+    started = time.monotonic()
+    try:
+        survivors = await platform_driver._cancel_case_tasks(previous, join_seconds=0.2)
+    finally:
+        release.set()
+        for task in (well_task, stubborn_task):
+            task_control._background_tasks.discard(task)
+        await asyncio.gather(well_task, stubborn_task, return_exceptions=True)
+    assert survivors == 1
+    assert well_task.cancelled()
+    assert stubborn_task.done() and not stubborn_task.cancelled()
+    assert time.monotonic() - started < 3.0
 
 
 @pytest.mark.parametrize("family", ["baseline", "clarification", "feedback"])
