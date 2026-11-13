@@ -127,12 +127,49 @@ Each case pairs one business situation with one pre-registered model script:
 
 Security verdicts — an unsourced value landed, a missing guard verdict in the ledger, a duplicate write — are recomputed from the registry's landed writes against the sources available before each write. They are recorded as a separate `security` block and never averaged with the quality criteria. The scenario digest pins the profile declaration and its digest, the case scripts and the rubric `controller-host-trusted-field-rubric-1`, so these records never share a comparison group with the clarification baseline, whose files stay unchanged.
 
-Collection is offline only. The definition schema admits only `deterministic_injection`, and the collector refuses a real model. The scripts are harness evidence for the protection, never real-model quality. No record is committed for this family yet, so it is not listed under `recorded_tracks`.
+Collection is offline only. The definition schema admits only `deterministic_injection`, and the collector refuses a real model; real-model collection runs through the separate family below. The scripts are harness evidence for the protection, never real-model quality. No record is committed for this family yet, so it is not listed under `recorded_tracks`.
 
 ```bash
 python -m tests.scenarios.baseline.run_controller_trusted_field_baseline            # repeated experiment (deterministic)
 python -m tests.scenarios.baseline.run_controller_trusted_field_baseline --print-default-definition
 ```
+
+## Trusted-field real-model pilot: the platform_trusted_field_model experiment
+
+`tests/scenarios/baseline/run_controller_trusted_field_model_baseline.py` registers an independent scenario, `platform_trusted_field_model`, that re-runs the two delivery cases of the trusted-field family — `receipt_sourced` and `input_sourced` — with a real model on the same platform dispatch, synthetic inventory, prompts, tool contract and merged profile. The guessed, lucky and substituted negatives stay deterministic in the offline family, which is unchanged. Its definition has its own digest, so real records never share a comparison group with the offline family or with the historical GLM pilot in [the pilot synthesis](../research/controller-model-pilot.md); that pilot is background only.
+
+Each run reuses the offline driver and rubric — blocks are the production guard's verdicts read from the durable ledger, and security negatives are recomputed from landed writes — and adds a versioned `model_behavior` block that separates what the model chose from what the host did:
+
+- `first_write_source` records an omitted, receipt-sourced, unsourced or unparseable first write before any park. The collector reads the proposed write from the recorded model round and verifies a read source against the governed result for the same resource in that round's model input.
+- `host_interception` and `clarification_origin` — the guard's input request or refusal and the park it raised. The model has no clarification channel here, so a host interception is never counted as a model-initiated clarification.
+- `authorized_input_same_run`, `post_supplement_write` — the authorized answer reached the same Run, and the write after it carried the answered value.
+- `delivery_outcome` records acceptance, format refusal, unverified acceptance, or a stop before delivery.
+
+Security and quality stay separate. An unsourced value landing, a duplicate write or a write landing before the wait is a security failure. When a run stops before the model proposes a write (an outage or an exhausted budget) or loses collection, an absent guard verdict is recorded as unevaluable instead of failed; the offline family keeps its stricter rule. `behavior_summary` and the CLI tally the behavior per case and list runs the guard never intercepted as separate coverage. Rate limits, timeouts, budget exhaustion and missing evidence all stay in the scheduled denominators.
+
+The pre-registered pilot pins the model `zai/glm-4.7-flash`, both cases, the shared sampling (temperature, token ceiling, request timeout, no retries), the per-case request and time caps, and the round request cap `ROUND_REQUEST_CAP`. Print the exact definition before running:
+
+```bash
+python -m tests.scenarios.baseline.run_controller_trusted_field_model_baseline --model zai/glm-4.7-flash --print-default-definition
+```
+
+Real collection is a manual operator step and needs, in addition to the shared gate and a credential matching the model, an armed shared request budget pool:
+
+- `HECATE_COLLECTOR_REQUEST_BUDGET` must point at a pool file holding no more units than the round cap; a missing, overfull or unreadable pool refuses collection before any provider call. Arm one pool for the whole round and keep it for every rerun — its balance only shrinks, so it is the round's hard request cap.
+- Each run records the pool balance before and after the case, and the trial records it at start and end. These balances are the budget-deduction evidence; other consumers of the pool and the final billing stay unverified, and cost stays unknown.
+- An empty pool produces a `RequestBudgetExhaustedError` collection error before or during a case. Mid-case exhaustion preserves the observed rounds, ledger and tool receipts. Both cases stay in the denominators.
+
+```bash
+# operator-confirmed round only: the quota and ZAI_API_KEY are available
+export HECATE_RUN_CONTROLLER_HOST_BASELINE=1
+export ZAI_API_KEY=...
+# Initialize once per approved round. Noclobber protects an existing balance.
+(set -C; printf '{"remaining": 48}' > /path/outside/repo/trusted-field-pilot-pool.json)
+export HECATE_COLLECTOR_REQUEST_BUDGET=/path/outside/repo/trusted-field-pilot-pool.json
+python -m tests.scenarios.baseline.run_controller_trusted_field_model_baseline --model zai/glm-4.7-flash
+```
+
+The default run without `--model` is the deterministic pilot matrix (harness evidence only). After a real collection, commit the pinned definition, the trial records, the aggregate and an evidence index together; the trial and aggregate files are written with exclusive creation and never overwrite earlier records.
 
 ## Failure diagnostics in trial records
 
@@ -159,4 +196,4 @@ Diagnostic reads have their own bounded deadline outside the case execution budg
 
 ## Verification pointers
 
-Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The clarification scenario's invariants (paired identity, park/wake/resume behavior, negative verdicts, deferred real-model boundary) are asserted in `tests/scenarios/test_controller_clarification_report.py` under the `controller_host_clarification` recorded track. The feedback scenario's invariants (three-case identity, correction/no-reorder/unknown-stop behavior, negative verdicts, quality-case-only real entry) are asserted in `tests/scenarios/test_controller_feedback_report.py` under the `controller_host_feedback` recorded track. The trusted-field scenario's invariants are asserted in `tests/scenarios/test_controller_trusted_field.py`, and the guard's own verdicts, loader and boundary in `tests/test_execution/test_field_provenance.py`. They cover per-case verdicts, the no-profile control, swapped values, cross-scope replay, rebuild and redelivery, unknown outcomes and the offline-only identity. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).
+Report invariants (schema, coverage, cost honesty, threshold drift, approval and stop compliance, provider-outage preservation) are asserted in `tests/scenarios/test_controller_host_baseline_report.py`. The experiment layer's invariants (definition pinning, repetition isolation, denominators and failure preservation, source and security grouping, unknown cost/review honesty, comparison-group drift, history compatibility) are asserted in `tests/scenarios/test_controller_host_experiment_report.py`, and the track is registered as `controller_host_experiment` in `tests/scenarios/manifest.yaml`. The clarification scenario's invariants (paired identity, park/wake/resume behavior, negative verdicts, deferred real-model boundary) are asserted in `tests/scenarios/test_controller_clarification_report.py` under the `controller_host_clarification` recorded track. The feedback scenario's invariants (three-case identity, correction/no-reorder/unknown-stop behavior, negative verdicts, quality-case-only real entry) are asserted in `tests/scenarios/test_controller_feedback_report.py` under the `controller_host_feedback` recorded track. The trusted-field scenario's invariants are asserted in `tests/scenarios/test_controller_trusted_field.py`, and the guard's own verdicts, loader and boundary in `tests/test_execution/test_field_provenance.py`. They cover per-case verdicts, the no-profile control, swapped values, cross-scope replay, rebuild and redelivery, unknown outcomes and the offline-only identity. The real-model pilot entry's invariants (pre-registered definition, comparison-group isolation, gate/credential/pool skips, budget evidence and exhaustion accounting, model-versus-host attribution, partial failures in the denominators) are asserted offline with local stubs in `tests/scenarios/test_controller_trusted_field_model.py`. The host assemblies themselves are covered by `tests/test_execution/test_controller_loop_dispatch.py` (platform) and `packages/hecate-runner/tests/test_controller_loop.py` plus `test_controller_continuation.py` (runner).

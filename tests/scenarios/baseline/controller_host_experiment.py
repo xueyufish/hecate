@@ -111,6 +111,9 @@ def resolve_scenario(name: str | None) -> ScenarioAdapter:
     if resolved == "platform_trusted_field" and resolved not in _SCENARIO_ADAPTERS:
         from tests.scenarios.baseline import run_controller_trusted_field_baseline  # noqa: F401
 
+    if resolved == "platform_trusted_field_model" and resolved not in _SCENARIO_ADAPTERS:
+        from tests.scenarios.baseline import run_controller_trusted_field_model_baseline  # noqa: F401
+
     if resolved not in _SCENARIO_ADAPTERS:
         raise ValueError(f"unknown scenario {resolved!r}; registered: {sorted(_SCENARIO_ADAPTERS)}")
     return _SCENARIO_ADAPTERS[resolved]
