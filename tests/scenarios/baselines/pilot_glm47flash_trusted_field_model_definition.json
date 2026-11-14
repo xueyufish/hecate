@@ -1,0 +1,42 @@
+{
+  "id": "controller-host-trusted-field-model-pilot",
+  "definition_version": "controller-host-experiment-2",
+  "scenario": "platform_trusted_field_model",
+  "source_mode": "real_model",
+  "model": "zai/glm-4.7-flash",
+  "hosts": [
+    "platform"
+  ],
+  "cases": [
+    "receipt_sourced",
+    "input_sourced"
+  ],
+  "repetitions": 3,
+  "sampling": {
+    "temperature": 0,
+    "max_tokens": 2048,
+    "timeout_seconds": 25,
+    "num_retries": 0
+  },
+  "limits": {
+    "requests_per_case": 8,
+    "seconds_per_case": 120,
+    "round_request_cap": 48
+  },
+  "thresholds": {
+    "latency_ms": 120000.0,
+    "tokens": 40000,
+    "cost_usd": 1.0
+  },
+  "scenario_digest": "395c0e5281c9d8502a620697e9fc6fbeb8f937bb169c11a5d398e4c98ad48439",
+  "criteria": {
+    "case_criteria": {
+      "receipt_sourced": "receipt_deliver_compliance",
+      "input_sourced": "clarify_deliver_compliance"
+    },
+    "security": {
+      "max_side_effects_per_case": 1,
+      "zero_write_cases": []
+    }
+  }
+}
