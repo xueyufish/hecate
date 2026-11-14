@@ -264,17 +264,9 @@ jobs:
           path: ${{ runner.temp }}/wait-resource-evidence/*.json
           if-no-files-found: warn
 
-  # step6f process matrix: the managed host scenarios (SC04 lease renewal,
-  # SC05 wake chain + reconnect, SC06 managed evidence upload) are
-  # database-parametrized — with
-  # HECATE_STEP6_POSTGRES_URL set each scenario runs BOTH [sqlite] and
-  # [postgres], so the host database, action ledger, commands and waits of
-  # the fault matrix (accepted-not-executed, kill/restart, lost receipts,
-  # expired commands, stopped lease delivery, control-plane restart,
-  # evidence-route faults and upload backfill) land
-  # on real PostgreSQL. Windows hosts cannot certify this locally (the
-  # runner subprocess is refused by the Docker port proxy); Linux CI is
-  # the authoritative run.
+  # step6f process matrix: HECATE_STEP6_POSTGRES_URL runs both [sqlite]
+  # and [postgres] for managed lease, wake, reconnect and evidence-upload
+  # scenarios, plus standalone SC06 local evidence failures.
   step6-pg-process-matrix:
     needs: changes
     if: needs.changes.outputs.code == 'true'
@@ -319,6 +311,19 @@ jobs:
         with:
           name: sc06-managed-evidence-upload
           path: ${{ runner.temp }}/sc06-managed-evidence-upload/*.json
+          if-no-files-found: error
+      - name: SC06 local evidence failure windows on both Runner tiers
+        env:
+          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+          HECATE_SC06_EVIDENCE_FAILURE_DIR: ${{ runner.temp }}/sc06-evidence-failure
+        run: |
+          python scripts/dev.py test tests/scenarios/test_sc06_evidence_failure.py -q -rA --timeout=420 -p no:cacheprovider
+      - name: Preserve SC06 local evidence failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sc06-evidence-failure
+          path: ${{ runner.temp }}/sc06-evidence-failure/*.json
           if-no-files-found: error
 
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
