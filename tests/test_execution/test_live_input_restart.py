@@ -2,7 +2,8 @@
 
 The local tier uses a WAL SQLite file. HECATE_STEP6_POSTGRES_URL selects a
 dedicated PostgreSQL schema. Only model/tool outputs are scripted; HTTP auth,
-commands, worker dispatch, decisions, action receipts and SQL commits are real.
+commands, worker dispatch, decisions, action receipts, result-inbox reads and
+SQL commits are real.
 """
 
 from __future__ import annotations
@@ -24,14 +25,17 @@ import pytest
 from fastapi import FastAPI
 from hecate_durable.storage import SqlDurableStore
 from hecate_durable.storage.models import AcceptedDecisionRow
+from hecate_durable.worker import OutboxRelay
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from hecate.channel.api import tasks as tasks_api
+from hecate.contracts.execution.references import BackendRef, RefKind
 from hecate.core.composition.durable_platform import DurableSuite
 from hecate.core.database import Base
 from hecate.core.deps import get_db
 from hecate.enterprise.auth.token import create_access_token
+from hecate.execution.event_relay import PlatformOutboxProjector
 from hecate.execution.task_control import TaskControlService
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
@@ -44,7 +48,7 @@ from hecate.models.workspace_member import WorkspaceMemberModel, WorkspaceRole
 from tests.scenarios.tools.managed_platform import serve_over_tcp, stop_tcp_server
 from tests.test_execution._agent_child_db import child_environment
 from tests.test_execution.conftest import _harness_schema_name, _pg_url_with_schema
-from tests.test_execution.test_controller_loop_dispatch import ORG, OWNER, WS
+from tests.test_execution.test_controller_loop_dispatch import ORG, OUTPUT_SCHEMA, OWNER, WS
 
 pytestmark = pytest.mark.timeout(180)
 _REPO = Path(__file__).resolve().parents[2]
@@ -167,6 +171,7 @@ async def stack(tmp_path, monkeypatch, request):
     app = FastAPI()
     app.include_router(tasks_api.router, prefix="/api")
     app.include_router(tasks_api.commands_router, prefix="/api")
+    app.include_router(tasks_api.runs_router, prefix="/api")
 
     async def request_db():
         async with sessions() as db:
@@ -257,7 +262,7 @@ async def _event(stack, event, *, pid=None, turn=None):
     return await _poll(stack, probe, f"{event} from {pid}, turn {turn}")
 
 
-async def _spawn_worker(stack, role, *, hold_turns=(), hold_bind=False, mode="reads"):
+async def _spawn_worker(stack, role, *, hold_turns=(), hold_bind=False, hold_projection=False, mode="reads"):
     ready = stack["tmp_path"] / f"ready-{role}"
     env = child_environment(stack)
     env.update(
@@ -268,6 +273,7 @@ async def _spawn_worker(stack, role, *, hold_turns=(), hold_bind=False, mode="re
             "HECATE_LIVE_BARRIERS": str(stack["tmp_path"]),
             "HECATE_LIVE_HOLD_TURNS": json.dumps(hold_turns),
             "HECATE_LIVE_HOLD_BIND": "1" if hold_bind else "0",
+            "HECATE_LIVE_HOLD_PROJECTION": "1" if hold_projection else "0",
             "HECATE_LIVE_MODE": mode,
         }
     )
@@ -632,3 +638,200 @@ async def test_restart_preserves_original_execution_limits(stack, limit):
         assert len(_trace(stack, "business_call")) == 1
     assert len(await _decisions(stack)) == (2 if limit == "turn_cap" else 1)
     stack["observations"].append({"limit": limit, "stop_category": result["error_category"]})
+
+
+async def _advance_projection(stack) -> None:
+    """One production outbox → platform projection pass, driven by the test.
+
+    The child worker pumps visibility between reconcile cycles, but it stays
+    inside a dispatch while a model barrier holds, so the disconnected
+    submitter's initial checkpoint needs one explicit pass of the same
+    production projection the workers use.
+    """
+
+    relay = OutboxRelay(
+        stack["store"].session_factory,
+        PlatformOutboxProjector(stack["store"], stack["sessions"]),
+        relay_key="platform",
+    )
+    await relay.pump_once()
+
+
+async def test_rest_inbox_delivery_survives_worker_restart(stack):
+    """The whole chain on one Task/Run: a JWT user submits asynchronously
+    with ``rest_inbox`` over real TCP, sends live input while the first
+    model call blocks, a worker restart lands between binding and
+    consumption, and the original submitter reads the delivered result
+    from the saved inbox cursor."""
+    headers = {"Authorization": f"Bearer {stack['tokens']['editor']}"}
+    response = await stack["client"].post(
+        "/api/tasks",
+        json={
+            "goal": "rest inbox restart drill",
+            "agent_id": str(stack["agent_id"]),
+            "input": {
+                "messages": [{"role": "user", "content": "check the stock"}],
+                "controller_loop": True,
+                "controller": {"max_turns": 6},
+                "acceptance": {
+                    "version": 1,
+                    "required_checks": [
+                        {"kind": "output_schema", "schema": OUTPUT_SCHEMA},
+                        {"kind": "content_contains", "value": "EU"},
+                    ],
+                },
+            },
+            "idempotency_key": "rest-inbox-restart-1",
+            "result_delivery": "rest_inbox",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    submitted = response.json()
+    assert submitted["result_delivery"] == "rest_inbox" and submitted["replayed"] is False
+    task_id = uuid.UUID(submitted["task_id"])
+    inbox_path = f"/api/tasks/{task_id}/result-inbox"
+    stack["task"] = BackendRef(RefKind.TASK, "hecate", str(task_id))
+    stack["run"] = BackendRef(RefKind.RUN, "hecate", str(submitted["run_id"]))
+    stack["controller"] = {"max_turns": 6}
+    original_run = await asyncio.to_thread(stack["store"].run_for_task, stack["task"])
+    stack["observations"].append({"step": "http-submit", "http_status": response.status_code})
+
+    # The first model ask blocks; the dispatched task is RUNNING, so one
+    # projection pass gives the disconnected submitter an honest checkpoint.
+    worker_a = await _spawn_worker(stack, "inbox-a", hold_turns=[1], hold_bind=True)
+    await _event(stack, "model_ask", pid=worker_a.pid, turn=1)
+    assert _trace(stack, "model_ask", worker_a.pid)[0]["provided"] == []
+    await _advance_projection(stack)
+
+    async with httpx.AsyncClient(base_url=stack["client"].base_url, timeout=10, trust_env=False) as subscriber:
+        checkpoint = await subscriber.get(inbox_path, headers=headers)
+        assert checkpoint.status_code == 200, checkpoint.text
+        saved = checkpoint.json()
+        assert saved["notifications"] == [] and saved["next_cursor"] is not None
+        saved_cursor = saved["next_cursor"]
+
+    # The live input is received in flight; the blocked call keeps the
+    # original input.
+    body = await _body(stack)
+    receipt = await _request(stack, body)
+    assert receipt.status_code == 201, receipt.text
+    received = receipt.json()["delivery"]
+    assert received["status"] == "received", receipt.text
+    assert len(_trace(stack, "model_ask")) == 1
+
+    # The revision binds at the committed decision boundary and the worker
+    # dies before consuming it. The redelivered command replays the recorded
+    # binding; an independent worker recovers the same Task and Run.
+    _release(stack, "model-1")
+    await _event(stack, "binding_committed", pid=worker_a.pid)
+    assert len(_trace(stack, "model_ask")) == len(_trace(stack, "business_call")) == 1
+    (before,) = await _delivery(stack)
+    assert before["revision_id"] == received["revision_id"]
+    assert before["status"] == "bound" and before["effective_turn"] == 2
+    committed = await _decisions(stack)
+    before_state = await _state(stack)
+    await _kill(stack, worker_a)
+    replay = await _request(stack, body)
+    assert replay.status_code == 201 and replay.json()["delivery"] == before
+    worker_b = await _spawn_worker(stack, "inbox-b", hold_projection=True)
+    await _wait_state(stack, "succeeded")
+
+    (after,) = await _delivery(stack)
+    assert after["revision_id"] == before["revision_id"]
+    assert after["status"] == "consumed" and after["effective_turn"] == 2
+    assert after["consumed_by"]["decision_step_id"] == "agent-turn-000002"
+    assert await asyncio.to_thread(stack["store"].run_for_task, stack["task"]) == original_run
+    assert (await _decisions(stack))[: len(committed)] == committed
+    # The confirmed business execution stays unique across the restart:
+    # one read without the input, one with it.
+    assert [row["turn"] for row in _trace(stack, "business_call")] == [1, 2]
+    assert [row["region"] for row in _trace(stack, "business_call")] == [None, "EU"]
+    assert [row["turn"] for row in _trace(stack, "model_ask", worker_b.pid)] == [2, 3]
+    assert (await _state(stack)).revision >= before_state.revision
+    replayed_command = await _request(stack, body)
+    assert replayed_command.status_code == 201 and replayed_command.json()["delivery"] == after
+    result = (await _state(stack)).extra["result"]
+    assert result["acceptance"]["status"] == "passed"
+
+    # The original submitter resumes from the saved cursor on a brand-new
+    # connection: one stable completion, replayable by ID, gone once the
+    # processed cursor is stored.
+    async with httpx.AsyncClient(base_url=stack["client"].base_url, timeout=10, trust_env=False) as subscriber:
+        from_checkpoint = {"cursor": saved_cursor}
+        before_projection = await subscriber.get(inbox_path, headers=headers, params=from_checkpoint)
+        assert before_projection.status_code == 200, before_projection.text
+        assert before_projection.json()["notifications"] == []
+        stack["observations"].append({"step": "before-terminal-projection", "notification_ids": []})
+        _release(stack, "projection")
+
+        async def _completion_page():
+            page = await subscriber.get(inbox_path, headers=headers, params=from_checkpoint)
+            assert page.status_code == 200, page.text
+            page_json = page.json()
+            if any(note["type"] == "result_ready" for note in page_json["notifications"]):
+                return page_json
+            return None
+
+        resumed = await _poll(stack, _completion_page, "the completion notification on the saved cursor")
+        notes = resumed["notifications"]
+        assert [note["type"] for note in notes] == ["result_ready"], notes
+        completion = notes[0]
+        assert completion["notification_id"] == f"completion:{task_id}"
+        assert completion["run_id"] == str(stack["run"].id)
+        assert completion["views"]["run_detail"] == f"/api/runs/{stack['run'].id}"
+        again = await subscriber.get(inbox_path, headers=headers, params=from_checkpoint)
+        assert again.status_code == 200, again.text
+        assert [note["notification_id"] for note in again.json()["notifications"]] == [completion["notification_id"]]
+        settled = await subscriber.get(inbox_path, headers=headers, params={"cursor": resumed["next_cursor"]})
+        assert settled.status_code == 200, settled.text
+        assert settled.json()["notifications"] == [] and settled.json()["has_more"] is False
+
+        # The authorized Run detail behind the view link: the structured
+        # result was built from the supplemented input and passed the
+        # declared output-schema acceptance.
+        detail = await subscriber.get(completion["views"]["run_detail"], headers=headers)
+        assert detail.status_code == 200, detail.text
+        run_body = detail.json()
+        assert run_body["projection"]["state"] == "succeeded"
+        delivered = json.loads(run_body["projection"]["result_preview"])
+        assert delivered == {"answer": "done", "inputs": [body["payload"]["content"]]}, delivered
+        acceptance_view = run_body["delivery_acceptance"]
+        assert acceptance_view["status"] == "passed", acceptance_view
+        assert acceptance_view["checks"] == [
+            {"kind": "output_schema", "status": "passed"},
+            {"kind": "content_contains", "status": "passed"},
+        ]
+
+        # A same-workspace non-submitter has no inbox here; the revoked
+        # original submitter cannot replay the saved cursor either.
+        foreign = await subscriber.get(
+            inbox_path,
+            headers={"Authorization": f"Bearer {stack['tokens']['viewer']}"},
+        )
+        assert foreign.status_code == 404, foreign.text
+        async with stack["sessions"]() as db:
+            member = await db.scalar(
+                select(WorkspaceMemberModel).where(
+                    WorkspaceMemberModel.user_id == OWNER, WorkspaceMemberModel.workspace_id == WS
+                )
+            )
+            assert member is not None
+            member.deleted = True
+            await db.commit()
+        revoked = await subscriber.get(inbox_path, headers=headers, params=from_checkpoint)
+        assert revoked.status_code == 401, revoked.text
+
+    stack["observations"].append(
+        {
+            "step": "rest-inbox-restart-delivery",
+            "command_receipt": received["status"],
+            "binding_before": before["status"],
+            "binding_after": after["status"],
+            "revision_id": after["revision_id"],
+            "effective_turn": after["effective_turn"],
+            "notification_ids": [completion["notification_id"]],
+            "run_state": run_body["projection"]["state"],
+            "acceptance_status": acceptance_view["status"],
+        }
+    )
