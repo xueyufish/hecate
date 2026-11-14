@@ -167,3 +167,41 @@ The tests exercise SQLite projection recovery and a loopback TCP client
 with real JWT checks, deterministic model and tool output, and the
 production Task/Run persistence path. Set `HECATE_INBOX_EVIDENCE_DIR` to
 retain the drill evidence with the checkout SHA and source digests.
+
+## Verify trusted-field delivery
+
+The same test file closes the loop with a host-declared field provenance
+profile on the agent version (the `tests/scenarios/baseline/` inventory
+tools, real dispatch, production runtime port and guard). The drills
+use loopback TCP, SQLite, JWT identities and a deterministic model.
+
+```bash
+python scripts/dev.py test tests/test_api/test_task_result_inbox.py -k trusted -q
+```
+
+Each successful drill writes a separate `trusted-field-inbox-*.json`
+record to `HECATE_INBOX_EVIDENCE_DIR` when configured.
+
+1. The model sources the protected `order_ref` from the same resource's
+   read receipt. The write lands exactly once. The reconnecting submitter
+   reads `result_ready`, follows the run-detail link and sees
+   `delivery_acceptance.status == "passed"`.
+2. A guessed value is intercepted by the real guard (zero business
+   writes) and surfaces as an open `input_required` notification. An EDITOR
+   wakes the same Task/Run with one idempotent `provide_input` command
+   (the same `command_id` replays the settled receipt). After one authorized
+   write, the resumed cursor reads the unique completion. A full re-read
+   drops the old input notification.
+3. A same-workspace non-submitter's inbox read returns `404`. A VIEWER's
+   input command returns `403`. A revoked submitter's saved-cursor read
+   returns `401`. Inbox pages expose only notification metadata and
+   authorized view links.
+
+Run the related regressions with the following command.
+
+```bash
+python scripts/dev.py test tests/test_api/test_task_command_access_boundary.py \
+  tests/test_execution/test_field_provenance.py \
+  tests/test_execution/test_delivery_acceptance_dispatch.py \
+  tests/scenarios/test_controller_trusted_field.py -q
+```
