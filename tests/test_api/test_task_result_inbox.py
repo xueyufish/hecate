@@ -11,6 +11,13 @@ let execution finish, reconnect, resume from the saved cursor and read
 the authorized Run delivery facts. Only the model/tool seams are
 scripted; HTTP, JWT auth, dispatch, commands, ledger receipts and SQL
 commits are real.
+
+Part C closes the same loop with the host-enforced field provenance
+profile active: a trusted read receipt sources the protected write and
+the delivery is accepted; a guessed value is intercepted by the real
+guard with zero business writes and completes only after one idempotent
+REST ``provide_input``; and the inbox's authorization boundaries and
+payload minimization hold end to end.
 """
 
 from __future__ import annotations
@@ -23,6 +30,7 @@ import os
 import subprocess
 import time
 import uuid
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +40,7 @@ from fastapi import FastAPI
 from hecate_durable.storage import SqlDurableStore
 from hecate_durable.storage.models import Base as DurableBase
 from hecate_durable.worker import OutboxRelay
+from hecate_runtime.action_ledger import tool_arguments_digest
 from hecate_runtime.ports import StubRuntimePort
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -49,7 +58,8 @@ from hecate.core.deps_workspace import get_auth_context
 from hecate.enterprise.auth.token import create_access_token
 from hecate.execution.event_relay import PlatformOutboxProjector
 from hecate.execution.governance_events import RUN_TERMINAL, PlatformEventService
-from hecate.execution.task_control import TaskControlService, TaskControlValidationError
+from hecate.execution.task_control import TaskControlService, TaskControlValidationError, _background_tasks
+from hecate.execution.task_input import TASK_USER_INPUT_SCHEMA_REF
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
 from hecate.models.agent_principal import AgentPrincipalModel
@@ -60,6 +70,9 @@ from hecate.models.task import TaskModel
 from hecate.models.user import UserModel
 from hecate.models.workspace import WorkspaceModel
 from hecate.models.workspace_member import WorkspaceMemberModel, WorkspaceRole
+from tests.scenarios.baseline import controller_host_platform as platform_driver
+from tests.scenarios.baseline import controller_host_trusted_field_platform as tdriver
+from tests.scenarios.baseline import controller_host_trusted_field_spec as tspec
 from tests.scenarios.tools.managed_platform import serve_over_tcp, stop_tcp_server
 from tests.test_execution.test_controller_loop_dispatch import ORG, OWNER, WS, _no_guardrails, _ScriptedAssembly
 
@@ -1262,3 +1275,572 @@ async def test_rest_inbox_async_delivery_over_real_tcp(tmp_path, monkeypatch):
         directory = Path(os.environ.get("HECATE_INBOX_EVIDENCE_DIR", str(tmp_path)))
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "task-result-inbox-evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Part C: trusted-field REST-inbox closed loop over real TCP
+# ---------------------------------------------------------------------------
+
+
+class _TrustedFieldDrillProvider(tspec.ScriptedTrustedFieldProvider):
+    """Hold the first model call to verify asynchronous submission."""
+
+    def __init__(self, case: str, *, hold_at_start: bool = False) -> None:
+        super().__init__(tspec.CASE_SCRIPTS[case][1])
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        if not hold_at_start:
+            self.release.set()
+
+    async def complete(self, *, messages, tools):
+        self.started.set()
+        await self.release.wait()
+        return await super().complete(messages=messages, tools=tools)
+
+
+@asynccontextmanager
+async def _trusted_inbox_stack(tmp_path, monkeypatch, case: str, *, hold_at_start: bool = False):
+    """Serve the production Controller and REST routes with synthetic model and tools."""
+    from hecate_runtime.eventstore import InMemoryEventStore
+
+    provider = _TrustedFieldDrillProvider(case, hold_at_start=hold_at_start)
+    gateway = platform_driver._RecordingGateway(provider)
+    registry = tdriver.TrustedFieldRegistry(case, model_rounds=gateway.rounds)
+    patch = platform_driver._SeamPatch(
+        registry, gateway, InMemoryEventStore(), tool_definitions=tspec.tool_definitions()
+    )
+    submitter = platform_driver.OWNER
+    viewer = uuid.uuid4()
+    bystander = uuid.uuid4()
+    workspace = platform_driver.WS
+    previous_tasks = set(_background_tasks)
+    async with AsyncExitStack() as stack:
+        platform = platform_driver.PlatformEnvironment(tmp_path, "trusted-inbox")
+        stack.push_async_callback(platform.close)
+        agent_id = await platform._seed(
+            with_approval_rule=False,
+            persona=tspec.SYSTEM_PROMPT,
+            config_extra={"field_provenance": tspec.PROFILE_DECLARATION},
+        )
+        sessions = platform.session_factory
+        async with sessions() as db:
+            db.add(UserModel(id=viewer, email="trusted-viewer@example.com", hashed_password="unused"))
+            db.add(UserModel(id=bystander, email="trusted-bystander@example.com", hashed_password="unused"))
+            db.add(WorkspaceMemberModel(user_id=submitter, workspace_id=workspace, role=WorkspaceRole.EDITOR))
+            db.add(WorkspaceMemberModel(user_id=viewer, workspace_id=workspace, role=WorkspaceRole.VIEWER))
+            db.add(WorkspaceMemberModel(user_id=bystander, workspace_id=workspace, role=WorkspaceRole.EDITOR))
+            await db.commit()
+
+        patch.patch()
+        stack.callback(patch.unpatch)
+        patches = stack.enter_context(monkeypatch.context())
+        patches.setattr(tasks_api, "get_durable_suite", lambda: platform.suite)
+        relay = OutboxRelay(
+            platform.store.session_factory, PlatformOutboxProjector(platform.store, sessions), relay_key="platform"
+        )
+        app = FastAPI()
+        app.include_router(tasks_api.router, prefix="/api")
+        app.include_router(tasks_api.runs_router, prefix="/api")
+        app.include_router(tasks_api.commands_router, prefix="/api")
+
+        async def request_db():
+            async with sessions() as session:
+                yield session
+
+        app.dependency_overrides[get_db] = request_db
+        state_handle = SimpleNamespace(durable_outbox_relay=relay)
+        tasks_api.bind_worker_state(state_handle)
+        stack.callback(tasks_api.unbind_worker_state, state_handle)
+
+        async def drain_dispatches():
+            stragglers = await platform_driver._cancel_case_tasks(previous_tasks)
+            assert stragglers == 0, f"{stragglers} trusted inbox dispatches survived cleanup"
+
+        stack.push_async_callback(drain_dispatches)
+        server, serving, base_url = await serve_over_tcp(app)
+        stack.push_async_callback(stop_tcp_server, server, serving)
+        yield {
+            "base_url": base_url,
+            "sessions": sessions,
+            "store": platform.store,
+            "agent_id": agent_id,
+            "submitter": submitter,
+            "registry": registry,
+            "provider": provider,
+            "tokens": {
+                "submitter": create_access_token(submitter, platform_driver.ORG, workspace, WorkspaceRole.EDITOR.value),
+                "viewer": create_access_token(viewer, platform_driver.ORG, workspace, WorkspaceRole.VIEWER.value),
+                "bystander": create_access_token(bystander, platform_driver.ORG, workspace, WorkspaceRole.EDITOR.value),
+            },
+        }
+
+
+def _write_trusted_inbox_evidence(tmp_path, scenario: str, **observations) -> None:
+    directory = Path(os.environ.get("HECATE_INBOX_EVIDENCE_DIR", str(tmp_path)))
+    directory.mkdir(parents=True, exist_ok=True)
+    evidence = {
+        "schema_version": 1,
+        "scenario": scenario,
+        "database": "sqlite",
+        "observations": observations,
+        "code_version": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=_REPO, text=True).strip(),
+        "code_dirty": subprocess.call(["git", "diff", "--quiet", "HEAD"], cwd=_REPO) != 0,
+        "source_sha256": {
+            name: hashlib.sha256((_REPO / name).read_bytes()).hexdigest()
+            for name in (
+                "tests/test_api/test_task_result_inbox.py",
+                "src/hecate/execution/task_result_inbox.py",
+                "src/hecate/execution/field_provenance.py",
+                "tests/scenarios/baseline/controller_host_trusted_field_spec.py",
+            )
+        },
+    }
+    output = directory / f"trusted-field-inbox-{scenario}-{uuid.uuid4().hex}.json"
+    with output.open("x", encoding="utf-8") as stream:
+        json.dump(evidence, stream, indent=2)
+
+
+def _trusted_headers(env, actor="submitter"):
+    return {"Authorization": f"Bearer {env['tokens'][actor]}"}
+
+
+async def _poll_until(predicate, label, timeout=90):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = await predicate()
+        if value:
+            return value
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"timed out waiting for {label}")
+
+
+async def _submit_trusted_task(env, key: str) -> dict:
+    """One asynchronous rest_inbox submission over real TCP (JWT submitter)."""
+    async with AsyncClient(base_url=env["base_url"], timeout=15, trust_env=False) as client:
+        response = await client.post(
+            "/api/tasks",
+            json={
+                "goal": f"trusted-field inbox drill {key}",
+                "agent_id": str(env["agent_id"]),
+                "input": {
+                    "messages": [{"role": "user", "content": tspec.USER_PROMPT}],
+                    "controller_loop": True,
+                    "controller": {"max_turns": 8},
+                    "output_schema": tspec.OUTPUT_SCHEMA,
+                },
+                "idempotency_key": key,
+                "result_delivery": "rest_inbox",
+            },
+            headers=_trusted_headers(env),
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+
+async def _trusted_state(env, task_id):
+    record = await asyncio.to_thread(env["store"].get_task_state, BackendRef(RefKind.TASK, "hecate", str(task_id)))
+    return record
+
+
+async def _trusted_terminal(env, task_id):
+    record = await _trusted_state(env, task_id)
+    if record is not None and record.lifecycle_state.value in ("succeeded", "failed", "reconciliation_required"):
+        return record.lifecycle_state.value
+    return None
+
+
+async def _trusted_parked_wait(env, task_id):
+    record = await _trusted_state(env, task_id)
+    wait = (record.extra or {}).get("wait") if record else None
+    if record is not None and record.lifecycle_state.value == "waiting_input" and isinstance(wait, dict):
+        return wait
+    assert record is None or record.lifecycle_state.value != "failed", record.extra
+    return None
+
+
+async def _trusted_run_actions(env, run_id: str) -> list[dict]:
+    """Read the action ledger for the Run returned at submission."""
+    return await asyncio.to_thread(env["store"].list_run_actions, BackendRef(RefKind.RUN, "hecate", run_id))
+
+
+def _trusted_open_input_page(client, env, task_id):
+    async def _page():
+        response = await client.get(f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env))
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if any(n["type"] == "input_required" and n["status"] == "open" for n in body["notifications"]):
+            return body
+        return None
+
+    return _page
+
+
+def _trusted_completion_page(client, env, task_id):
+    async def _page():
+        response = await client.get(f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env))
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if any(n["type"] == "result_ready" for n in body["notifications"]):
+            return body
+        return None
+
+    return _page
+
+
+def _trusted_completion_from_cursor(client, env, task_id, cursor):
+    async def _page():
+        response = await client.get(
+            f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env), params={"cursor": cursor}
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if any(n["type"] == "result_ready" for n in body["notifications"]):
+            return body
+        return None
+
+    return _page
+
+
+def _trusted_wake_body(detail: dict, command_id: str, value: str) -> dict:
+    """The provide_input command body: revision and token are server-owned."""
+    return {
+        "kind": "provide_input",
+        "command_id": command_id,
+        "expected_revision": detail["revision"],
+        "payload": {tspec.PROTECTED_FIELD: value},
+        "payload_schema_ref": TASK_USER_INPUT_SCHEMA_REF,
+        "detail_ns": {"wait_token": detail["wait"]["wait_token"]},
+    }
+
+
+def _assert_trusted_inbox_metadata(*pages: dict, wait_token: str | None = None) -> None:
+    """Check the public inbox envelope and the two notification shapes."""
+    for page in pages:
+        assert set(page) == {"task_id", "result_delivery", "notifications", "next_cursor", "has_more"}
+        for note in page["notifications"]:
+            status_field = "status" if note["type"] == "input_required" else "state"
+            assert set(note) == {
+                "notification_id",
+                "type",
+                "category",
+                "task_id",
+                "run_id",
+                "occurred_at",
+                "views",
+                status_field,
+            }
+    payload = json.dumps(pages)
+    for secret in (*tspec.DEFAULT_VALUES.values(), tspec.RECEIPT_ID, wait_token):
+        if secret is not None:
+            assert secret not in payload
+    assert "wait_token" not in payload and tspec.PROTECTED_FIELD not in payload
+    assert "Reorder submitted" not in payload
+
+
+@pytest.mark.timeout(240)
+async def test_trusted_receipt_delivery_over_real_tcp(tmp_path, monkeypatch):
+    """The model sources ``order_ref`` from the same resource's read receipt;
+    the business write lands exactly once; after a disconnect the reconnecting
+    submitter reads the original Run's ``result_ready`` notification and the
+    delivery-accepted deliverable behind its authorized view link."""
+    async with _trusted_inbox_stack(tmp_path, monkeypatch, "receipt_sourced", hold_at_start=True) as env:
+        refs = await _submit_trusted_task(env, "trusted-receipt-1")
+        assert refs["result_delivery"] == "rest_inbox" and refs["replayed"] is False
+        task_id = uuid.UUID(refs["task_id"])
+        run_id = refs["run_id"]
+        await asyncio.wait_for(env["provider"].started.wait(), timeout=30)
+        env["provider"].release.set()
+        assert await _poll_until(lambda: _trusted_terminal(env, task_id), "task terminal", timeout=120) == "succeeded"
+
+        # Side-effect evidence: the receipt value landed exactly once.
+        writes = [call for call in env["registry"].calls if call["tool"] == tspec.WRITE_TOOL]
+        reads = [call for call in env["registry"].calls if call["tool"] == tspec.READ_TOOL]
+        assert len(writes) == 1 and len(reads) == 1
+        (read_receipt,) = [receipt for receipt in env["registry"].receipts if receipt["tool"] == tspec.READ_TOOL]
+        write_args = writes[0]["arguments"]
+        assert {key: write_args[key] for key in tspec.RESOURCE} == reads[0]["arguments"] == tspec.RESOURCE
+        assert write_args[tspec.PROTECTED_FIELD] == read_receipt["content"][tspec.PROTECTED_FIELD]
+        assert env["registry"].side_effects == 1
+        assert [v["verdict"] for v in tdriver.guard_verdicts(await _trusted_run_actions(env, run_id))] == ["executed"]
+
+        # Reconnect: a brand-new client resumes from the start cursor.
+        async with AsyncClient(base_url=env["base_url"], timeout=15, trust_env=False) as client:
+            page = await _poll_until(
+                _trusted_completion_page(client, env, task_id), "the completion notification projected", timeout=60
+            )
+            (completion,) = page["notifications"]
+            assert completion["notification_id"] == f"completion:{task_id}"
+            assert completion["task_id"] == str(task_id) and completion["run_id"] == run_id
+            assert completion["category"] == "result"
+            assert completion["views"] == {"task": f"/api/tasks/{task_id}", "run_detail": f"/api/runs/{run_id}"}
+
+            # The authorized Run detail behind the view entry carries the
+            # committed delivery facts: bounded preview and the verified
+            # acceptance view.
+            detail = await client.get(completion["views"]["run_detail"], headers=_trusted_headers(env))
+            assert detail.status_code == 200, detail.text
+            run = detail.json()
+            assert run["projection"]["state"] == "succeeded"
+            preview = run["projection"]["result_preview"]
+            answer = json.loads(preview)
+            assert tspec.RECEIPT_ID in answer["answer"]
+            acceptance = run["delivery_acceptance"]
+            assert acceptance["status"] == "passed"
+            assert acceptance["content_sha256"] == hashlib.sha256(preview.encode("utf-8")).hexdigest()
+
+            # The public action-ledger summary records the sourced write.
+            actions = (await client.get(f"/api/runs/{run_id}/actions", headers=_trusted_headers(env))).json()
+            write_rows = [a for a in actions["actions"] if a["tool_name"] == tspec.WRITE_TOOL]
+            assert len(write_rows) == 1 and write_rows[0]["outcome"] == "succeeded"
+
+            # Stable re-delivery by id; resuming cannot emit the completion again.
+            again = (await client.get(f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env))).json()
+            assert [n["notification_id"] for n in again["notifications"]] == [completion["notification_id"]]
+            settled = (
+                await client.get(
+                    f"/api/tasks/{task_id}/result-inbox",
+                    headers=_trusted_headers(env),
+                    params={"cursor": page["next_cursor"]},
+                )
+            ).json()
+            assert settled["notifications"] == [] and settled["has_more"] is False
+
+            _assert_trusted_inbox_metadata(page, again, settled)
+    _write_trusted_inbox_evidence(
+        tmp_path,
+        "receipt-sourced",
+        task_id=str(task_id),
+        run_id=run_id,
+        completion_id=completion["notification_id"],
+        business_writes=len(writes),
+        acceptance=acceptance["status"],
+    )
+
+
+@pytest.mark.timeout(240)
+async def test_trusted_guess_blocked_then_provided_input_completes_over_real_tcp(tmp_path, monkeypatch):
+    """A guessed ``order_ref`` is intercepted with zero business writes; the
+    inbox to-do carries a stable id and authorized links; one idempotent
+    ``provide_input`` command wakes the SAME Task/Run; the resumed cursor
+    reads the unique completion and a full re-read drops the old to-do."""
+    async with _trusted_inbox_stack(tmp_path, monkeypatch, "guessed_value") as env:
+        refs = await _submit_trusted_task(env, "trusted-guess-1")
+        task_id = uuid.UUID(refs["task_id"])
+        t_ref = BackendRef(RefKind.TASK, "hecate", str(task_id))
+        run_id = refs["run_id"]
+        run_ref = BackendRef(RefKind.RUN, "hecate", run_id)
+
+        await _poll_until(lambda: _trusted_parked_wait(env, task_id), "task parked on the human input wait", timeout=90)
+        # The real guard intercepted the guess before the business call: no
+        # registry side effect, and the blocked write's ledger outcome is the
+        # profile's own input request.
+        assert env["registry"].side_effects == 0
+        assert [call["tool"] for call in env["registry"].calls] == [tspec.READ_TOOL]
+        actions = await _trusted_run_actions(env, run_id)
+        assert [v["verdict"] for v in tdriver.guard_verdicts(actions)] == ["input_required"]
+        (blocked,) = [action for action in actions if action["intent"]["action_name"] == tspec.WRITE_TOOL]
+        guessed_args = {
+            **tspec.RESOURCE,
+            "quantity": tspec.read_content("guessed_value")["quantity"],
+            tspec.PROTECTED_FIELD: tspec.DEFAULT_VALUES["guessed"],
+        }
+        assert blocked["intent"]["arguments_digest"] == tool_arguments_digest(guessed_args)
+
+        async with AsyncClient(base_url=env["base_url"], timeout=15, trust_env=False) as client:
+            page = await _poll_until(
+                _trusted_open_input_page(client, env, task_id), "the open input notification projected", timeout=60
+            )
+            (note,) = page["notifications"]
+            assert note["notification_id"].startswith("input:")
+            assert note["category"] == "needs_attention"
+            assert note["task_id"] == str(task_id) and note["run_id"] == run_id
+            assert note["views"] == {"task": f"/api/tasks/{task_id}", "commands": f"/api/tasks/{task_id}/commands"}
+            saved_cursor = page["next_cursor"]
+            assert saved_cursor
+
+            # Stable identity: a re-read repeats the same notice, never a
+            # second to-do.
+            stable = (await client.get(f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env))).json()
+            assert [n["notification_id"] for n in stable["notifications"]] == [note["notification_id"]]
+
+            # The authorized EDITOR wakes over REST with the server-owned
+            # revision and wait token read from the task detail.
+            detail = await client.get(note["views"]["task"], headers=_trusted_headers(env))
+            assert detail.status_code == 200, detail.text
+            body = detail.json()
+            assert type(body["revision"]) is int
+            assert body["wait"]["contract_ref"]["contract"]["fields"] == [tspec.PROTECTED_FIELD]
+            wake_body = _trusted_wake_body(body, "trusted-provide-order-ref", tspec.DEFAULT_VALUES["provided"])
+            first = await client.post(note["views"]["commands"], json=wake_body, headers=_trusted_headers(env))
+            assert first.status_code == 201, first.text
+            assert first.json()["state"] == "applied", first.text
+
+            # The same command_id and identical request replays the settled
+            # receipt: the input is applied exactly once.
+            replay = await client.post(f"/api/tasks/{task_id}/commands", json=wake_body, headers=_trusted_headers(env))
+            assert replay.status_code == 201, replay.text
+            assert replay.json()["command_id"] == "trusted-provide-order-ref"
+            assert replay.json()["state"] == "applied"
+            assert "idempotent replay" in replay.json()["detail"]
+            receipts = (await client.get(f"/api/tasks/{task_id}/commands", headers=_trusted_headers(env))).json()
+            assert receipts["total"] == 1
+            assert receipts["items"][0]["command_id"] == "trusted-provide-order-ref"
+            assert receipts["items"][0]["state"] == "applied"
+
+        # Exactly one input revision carries the authorized value.
+        (revision,) = await asyncio.to_thread(env["store"].list_input_revisions, t_ref, run_ref)
+        assert revision["content"] == wake_body["payload"]
+
+        # The SAME Task/Run continues with the authorized value: exactly one
+        # business write, the guessed value never landed.
+        assert await _poll_until(lambda: _trusted_terminal(env, task_id), "task terminal", timeout=120) == "succeeded"
+        writes = [call for call in env["registry"].calls if call["tool"] == tspec.WRITE_TOOL]
+        assert len(writes) == 1 and writes[0]["arguments"][tspec.PROTECTED_FIELD] == tspec.DEFAULT_VALUES["provided"]
+        assert env["registry"].side_effects == 1
+        assert [v["verdict"] for v in tdriver.guard_verdicts(await _trusted_run_actions(env, run_id))] == [
+            "input_required",
+            "executed",
+        ]
+
+        # Reconnect: resume from the processed cursor — the only new fact is
+        # the completion; the old to-do is gone from a full re-read too.
+        async with AsyncClient(base_url=env["base_url"], timeout=15, trust_env=False) as client:
+            resumed = await _poll_until(
+                _trusted_completion_from_cursor(client, env, task_id, saved_cursor),
+                "the resumed completion projected",
+                timeout=60,
+            )
+            (completion,) = resumed["notifications"]
+            assert completion["type"] == "result_ready"
+            assert completion["notification_id"] == f"completion:{task_id}"
+            assert completion["task_id"] == str(task_id) and completion["run_id"] == run_id
+            assert completion["views"] == {"task": note["views"]["task"], "run_detail": f"/api/runs/{run_id}"}
+            full = (await client.get(f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env))).json()
+            assert full["notifications"] == [completion]
+
+            run_detail = await client.get(completion["views"]["run_detail"], headers=_trusted_headers(env))
+            assert run_detail.status_code == 200, run_detail.text
+            run = run_detail.json()
+            preview = run["projection"]["result_preview"]
+            assert tspec.RECEIPT_ID in json.loads(preview)["answer"]
+            acceptance = run["delivery_acceptance"]
+            assert acceptance["status"] == "passed"
+            assert acceptance["content_sha256"] == hashlib.sha256(preview.encode("utf-8")).hexdigest()
+
+            task_detail = await client.get(note["views"]["task"], headers=_trusted_headers(env))
+            assert task_detail.status_code == 200, task_detail.text
+            assert [row["run_id"] for row in task_detail.json()["runs"]] == [run_id]
+            _assert_trusted_inbox_metadata(page, stable, resumed, full, wait_token=body["wait"]["wait_token"])
+    _write_trusted_inbox_evidence(
+        tmp_path,
+        "guessed-value",
+        task_id=str(task_id),
+        run_id=run_id,
+        input_required_id=note["notification_id"],
+        completion_id=completion["notification_id"],
+        input_revisions=1,
+        business_writes=len(writes),
+        acceptance=acceptance["status"],
+    )
+
+
+@pytest.mark.timeout(240)
+async def test_trusted_inbox_authorization_boundaries_over_real_tcp(tmp_path, monkeypatch):
+    """The inbox stays submitter-scoped: a same-workspace non-submitter is
+    one 404, a VIEWER cannot supply the trusted field, a revoked submitter
+    cannot resume the saved cursor, and the pages expose only notifications
+    and authorized view links."""
+    async with _trusted_inbox_stack(tmp_path, monkeypatch, "guessed_value") as env:
+        refs = await _submit_trusted_task(env, "trusted-boundary-1")
+        task_id = uuid.UUID(refs["task_id"])
+        await _poll_until(lambda: _trusted_parked_wait(env, task_id), "task parked on the human input wait", timeout=90)
+
+        async with AsyncClient(base_url=env["base_url"], timeout=15, trust_env=False) as client:
+            page = await _poll_until(
+                _trusted_open_input_page(client, env, task_id), "the open input notification projected", timeout=60
+            )
+            (note,) = page["notifications"]
+            saved_cursor = page["next_cursor"]
+
+            # Same workspace, different identity: one indistinguishable 404 —
+            # the inbox is submitter-scoped even for a same-workspace EDITOR,
+            # and a viewer who is not the submitter has no inbox either.
+            stranger = await client.get(
+                f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env, "bystander")
+            )
+            assert stranger.status_code == 404, stranger.text
+            assert stranger.json()["detail"]["error"]["code"] == "NOT_FOUND"
+            viewer_page = await client.get(
+                f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env, "viewer")
+            )
+            assert viewer_page.status_code == 404, viewer_page.text
+
+            # A VIEWER cannot supply the trusted field: the write gate runs
+            # before any command storage, and the task state never moves.
+            detail = await client.get(f"/api/tasks/{task_id}", headers=_trusted_headers(env))
+            assert detail.status_code == 200, detail.text
+            body = detail.json()
+            viewer_wake = await client.post(
+                f"/api/tasks/{task_id}/commands",
+                json=_trusted_wake_body(body, "viewer-provide-order-ref", "PO-VIEWER-0001"),
+                headers=_trusted_headers(env, "viewer"),
+            )
+            assert viewer_wake.status_code == 403, viewer_wake.text
+            assert viewer_wake.json()["detail"]["error"]["code"] == "FORBIDDEN"
+            receipts = (await client.get(f"/api/tasks/{task_id}/commands", headers=_trusted_headers(env))).json()
+            assert receipts["total"] == 0
+            still = (await client.get(f"/api/tasks/{task_id}", headers=_trusted_headers(env))).json()
+            assert still["lifecycle_state"] == "waiting_input" and still["revision"] == body["revision"]
+
+            # The authorized EDITOR (here the submitter) wakes the task.
+            wake = await client.post(
+                f"/api/tasks/{task_id}/commands",
+                json=_trusted_wake_body(body, "trusted-boundary-wake", tspec.DEFAULT_VALUES["provided"]),
+                headers=_trusted_headers(env),
+            )
+            assert wake.status_code == 201, wake.text
+            assert wake.json()["state"] == "applied", wake.text
+
+        assert await _poll_until(lambda: _trusted_terminal(env, task_id), "task terminal", timeout=120) == "succeeded"
+
+        async with AsyncClient(base_url=env["base_url"], timeout=15, trust_env=False) as client:
+            resumed = await _poll_until(
+                _trusted_completion_from_cursor(client, env, task_id, saved_cursor),
+                "the resumed completion projected",
+                timeout=60,
+            )
+            assert [n["type"] for n in resumed["notifications"]] == ["result_ready"]
+            full = (await client.get(f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env))).json()
+            assert [n["notification_id"] for n in full["notifications"]] == [f"completion:{task_id}"]
+
+            # The linked control view resolves for its audience.
+            task_view = await client.get(note["views"]["task"], headers=_trusted_headers(env))
+            assert task_view.status_code == 200, task_view.text
+
+            # Revoked submitter: the old cursor cannot continue reading.
+            async with env["sessions"]() as db:
+                member = await db.scalar(
+                    select(WorkspaceMemberModel).where(
+                        WorkspaceMemberModel.user_id == env["submitter"],
+                        WorkspaceMemberModel.workspace_id == platform_driver.WS,
+                    )
+                )
+                assert member is not None
+                member.deleted = True
+                await db.commit()
+            revoked = await client.get(
+                f"/api/tasks/{task_id}/result-inbox", headers=_trusted_headers(env), params={"cursor": saved_cursor}
+            )
+            assert revoked.status_code == 401, revoked.text
+            _assert_trusted_inbox_metadata(page, resumed, full, wait_token=body["wait"]["wait_token"])
+    _write_trusted_inbox_evidence(
+        tmp_path,
+        "authorization",
+        task_id=str(task_id),
+        run_id=refs["run_id"],
+        http_status={
+            "stranger": stranger.status_code,
+            "viewer": viewer_wake.status_code,
+            "revoked": revoked.status_code,
+        },
+    )
