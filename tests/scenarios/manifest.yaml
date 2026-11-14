@@ -361,6 +361,13 @@ sc_scenarios:
       registered task queued. After restoring the original evidence directory,
       the worker can finish that task under its original identity on restart.
       Read-only continuation during the outage remains an open policy item.
+      Local evidence-failure slice (test_sc06_evidence_failure.py, SQLite
+      and PostgreSQL Runner tiers in step6-pg-process-matrix): the
+      admission refusal, the post-dispatch reconciliation with the
+      idempotent replay of the original identity and the read-only
+      conservative behavior hold identically on both Runner task-store
+      tiers, and the scenario ledger queries read the tier the Runner is
+      actually configured with.
       Managed central-upload slices (test_sc06_managed_evidence_upload.py,
       SQLite and PostgreSQL Runner tiers in step6-pg-process-matrix): while
       the platform evidence route fails before commit, or commits and then
