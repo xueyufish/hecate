@@ -21,14 +21,12 @@ def _trace(event: str, **fields) -> None:
         stream.write(json.dumps({"pid": os.getpid(), "event": event, **fields}) + "\n")
 
 
-async def _model_barrier(turn: int) -> None:
-    if turn not in json.loads(os.environ.get("HECATE_LIVE_HOLD_TURNS", "[]")):
-        return
-    path = Path(os.environ["HECATE_LIVE_BARRIERS"]) / f"model-{turn}.release"
+async def _barrier(name: str) -> None:
+    path = Path(os.environ["HECATE_LIVE_BARRIERS"]) / f"{name}.release"
     deadline = time.monotonic() + 180
     while not path.is_file():
         if time.monotonic() >= deadline:
-            raise TimeoutError(f"model barrier {turn} was never released")
+            raise TimeoutError(f"barrier {name} was never released")
         await asyncio.sleep(0.05)
 
 
@@ -45,7 +43,8 @@ class StubLiveInputPort(StubRuntimePort):
             if message.get("role") == "user" and "provided_input" in str(message.get("content"))
         ]
         _trace("model_ask", turn=turn, provided=provided)
-        await _model_barrier(turn)
+        if turn in json.loads(os.environ.get("HECATE_LIVE_HOLD_TURNS", "[]")):
+            await _barrier(f"model-{turn}")
         mode = os.environ.get("HECATE_LIVE_MODE", "reads")
         if mode == "final" or (mode != "endless" and turn > 2):
             yield {"content": json.dumps({"answer": "done", "inputs": provided}), "tool_calls": None}
@@ -117,6 +116,8 @@ async def _serve() -> None:
             """Run production recovery and expose its completed-cycle boundary."""
             nonlocal cycles
             dispatched = await super().reconcile()
+            if dispatched and os.environ.get("HECATE_LIVE_HOLD_PROJECTION") == "1":
+                await _barrier("projection")
             await relay.pump_once()
             cycles += 1
             _trace("cycle", cycle=cycles, inflight=len(self._inflight))

@@ -47,6 +47,34 @@ display, rebuild it from a fresh scan and replace the old snapshot.
 A resolved input wait disappears, while approval history can report
 `resolved`. The linked control views enforce their own action permissions.
 
+## Live input and worker restarts
+
+A running platform-local top-level Controller task can also accept
+in-flight input through `POST /api/tasks/{task_id}/commands` with
+`payload_schema_ref: "urn:hecate:task-live-input/1"` while a model call
+is still executing. The input binds at the next decision that has yet
+to start. If the worker dies after binding and before consumption, a
+replacement worker resumes the same Task and Run at the bound decision.
+The drill verifies that the revision is consumed once and previously
+confirmed tool calls keep their original receipts.
+
+The drill replays the input command across the restart and checks the
+original submitter's saved cursor before and after terminal projection.
+The notice becomes visible after projection. The Run detail includes
+the structured result with the supplemented input and the recorded
+acceptance checks for output shape and content. Inbox reads require
+the original submitter's current workspace access.
+
+```bash
+python scripts/dev.py test tests/test_execution/test_live_input_restart.py \
+  -k rest_inbox_delivery_survives_worker_restart -q
+```
+
+The drill keeps model and tool outputs deterministic and the HTTP, JWT,
+command, dispatch, worker-process, decision and SQL commit paths real.
+It runs on SQLite by default. For the PostgreSQL profile and evidence
+configuration, see [cross-process recovery acceptance](handle-task-input-waits.md#cross-process-recovery-acceptance).
+
 ## Copyable REST client
 
 Set `HECATE_JWT`, `HECATE_AGENT_ID` and `HECATE_REQUEST_KEY`. Use a
