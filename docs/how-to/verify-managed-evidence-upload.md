@@ -147,6 +147,24 @@ Channel-level regressions live in `packages/hecate-runner/tests/test_managed_upl
 After changing shared Runner upload or platform projection code, also rerun the
 SC04 and SC05 managed suites and `tests/test_execution/test_managed_execution_loop.py`.
 
+## Verify local evidence failures
+
+The standalone SC06 drill replaces the Runner's JSONL evidence directory with
+a file to make evidence writes fail. It checks protected admission refusal,
+reconciliation after a committed business write, and recovery of a queued
+read-only submission. Replaying a request after recovery preserves the original
+Task and Run and does not repeat completed business work.
+
+```bash
+export HECATE_SC06_EVIDENCE_FAILURE_DIR=/tmp/sc06-evidence-failure
+python scripts/dev.py test tests/scenarios/test_sc06_evidence_failure.py -q -rA --timeout=420 -p no:cacheprovider
+```
+
+With the PostgreSQL profile and `HECATE_STEP6_POSTGRES_URL` set as above,
+the command runs both task-store tiers. The evidence fault still targets JSONL
+in both tiers. The `step6-pg-process-matrix` job retains the local drill reports
+in the `sc06-evidence-failure` artifact.
+
 ## Not covered yet
 
 - A backlog limit against the declared retention budget, and eviction of old

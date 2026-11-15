@@ -185,5 +185,5 @@ async def run_feedback_case(case: str, provider: Any, root: Path) -> dict[str, A
         platform_driver._refresh_recording(observation, gateway, registry)
         platform_driver._record_cleanup_stragglers(observation, stragglers)
         patch.unpatch()
-        await environment.close()
+        await platform_driver._close_case_environment(environment, observation)
     return observation
