@@ -71,6 +71,7 @@ from hecate_durable.storage.models import (
     Base,
     CommandRow,
     EventRow,
+    RunSequenceRow,
     SubmissionRow,
     TaskStateRow,
 )
@@ -203,6 +204,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         lease_clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._clock = clock or _default_clock
+        self._source = source
         self.engine = self._build_engine(url)
         self._session_factory = sessionmaker(self.engine, expire_on_commit=False, future=True)
         # Read-only lookups run on an autocommit engine WITHOUT the
@@ -2245,6 +2247,11 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
         return self.events.read(run_ref, cursor=cursor, limit=limit)
 
+    def read_committed_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
+        """Read a page that also reports proven tail gaps (see ``read_committed``)."""
+
+        return self.events.read_committed(run_ref, cursor=cursor, limit=limit)
+
     def confirm_first_action_projection(
         self, task_ref: BackendRef, run_ref: BackendRef, action_key: str, result_digest: str | None
     ) -> bool:
@@ -2312,6 +2319,43 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 .order_by(EventRow.run_issuer, EventRow.run_id)
             ).all()
         return [_run_ref(issuer, run_id) for issuer, run_id in rows]
+
+    def bound_event_runs_for_task(self, task_ref: BackendRef) -> list[BackendRef]:
+        """List this source's streams, including bound runs with only a counter."""
+
+        event_streams = select(EventRow.run_issuer, EventRow.run_id).where(
+            EventRow.envelope["task_ref"]["issuer_domain"].as_string() == task_ref.issuer_domain,
+            EventRow.envelope["task_ref"]["id"].as_string() == task_ref.id,
+            EventRow.source == self._source,
+        )
+        submitted_streams = (
+            select(RunSequenceRow.run_issuer, RunSequenceRow.run_id)
+            .join(
+                SubmissionRow,
+                (SubmissionRow.run_issuer == RunSequenceRow.run_issuer)
+                & (SubmissionRow.run_id == RunSequenceRow.run_id),
+            )
+            .where(
+                SubmissionRow.task_issuer == task_ref.issuer_domain,
+                SubmissionRow.task_id == task_ref.id,
+                RunSequenceRow.source == self._source,
+            )
+        )
+        current_stream = (
+            select(RunSequenceRow.run_issuer, RunSequenceRow.run_id)
+            .join(
+                TaskStateRow,
+                (TaskStateRow.run_issuer == RunSequenceRow.run_issuer) & (TaskStateRow.run_id == RunSequenceRow.run_id),
+            )
+            .where(
+                TaskStateRow.task_issuer == task_ref.issuer_domain,
+                TaskStateRow.task_id == task_ref.id,
+                RunSequenceRow.source == self._source,
+            )
+        )
+        streams = event_streams.union(submitted_streams, current_stream).order_by("run_issuer", "run_id")
+        with self._read_session() as session:
+            return [_run_ref(issuer, run_id) for issuer, run_id in session.execute(streams)]
 
     def emit_event(
         self,
