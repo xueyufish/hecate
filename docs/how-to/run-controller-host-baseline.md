@@ -171,6 +171,10 @@ python -m tests.scenarios.baseline.run_controller_trusted_field_model_baseline -
 
 The default run without `--model` is the deterministic pilot matrix (harness evidence only). After a real collection, commit the pinned definition, the trial records, the aggregate and an evidence index together; the trial and aggregate files are written with exclusive creation and never overwrite earlier records.
 
+The [trusted-field pilot evidence index](../research/controller-trusted-field-model-pilot.md)
+links the recorded round and its frozen definition. Verify the committed evidence offline with
+`python scripts/dev.py test tests/scenarios/test_controller_trusted_field_model_evidence.py -q`.
+
 ## Failure diagnostics in trial records
 
 Every platform run (all scenario families) carries a versioned `diagnostics` block in its trial record, so a model-call failure can be attributed instead of guessed from a terminal state name:
