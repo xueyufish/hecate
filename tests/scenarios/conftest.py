@@ -69,7 +69,11 @@ def step6_runner_database_url(request):
         pool.submit(_ddl, f'CREATE SCHEMA "{schema}"').result(timeout=30)
     try:
         separator = "&" if "?" in request.param else "?"
-        yield f"{request.param}{separator}options=-csearch_path%3D{schema}%2Cpublic"
+        # The search path excludes public: pre-existing durable tables there
+        # (another suite sharing the database) would make create_all skip the
+        # tables owned by this isolated schema and every unqualified read or
+        # write would silently fall through to them.
+        yield f"{request.param}{separator}options=-csearch_path%3D{schema}"
     finally:
         with ThreadPoolExecutor(max_workers=1) as pool:
             pool.submit(_ddl, f'DROP SCHEMA IF EXISTS "{schema}" CASCADE').result(timeout=30)

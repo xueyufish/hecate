@@ -104,6 +104,7 @@ SOURCES = (
     "packages/hecate-runner/src/hecate_runner/__main__.py",
     "packages/hecate-runner/src/hecate_runner/server.py",
     "packages/hecate-durable/src/hecate_durable/storage/eventlog.py",
+    "packages/hecate-durable/src/hecate_durable/storage/store.py",
     "src/hecate/execution/managed_channel.py",
     "src/hecate/channel/api/managed.py",
 )
@@ -1071,3 +1072,136 @@ async def test_sc06_local_gap_holds_stream_apart_from_platform_lag(
     finally:
         evidence.write(window, None)
         await stop_tcp_server(server, server_task)
+
+
+@requires_uv
+async def test_sc06_tail_gap_holds_stream_at_platform_prefix(
+    upload_stack, tmp_path, wheel_dist, step6_runner_database_url, request
+) -> None:
+    """Hold a truncated stream across a hard restart while a healthy run uploads."""
+    from hecate_durable.contracts.references import BackendRef
+    from hecate_durable.storage import SqlDurableStore
+    from hecate_durable.storage.models import EventRow
+    from hecate_runner.evidence import EvidenceStore
+    from hecate_runner.managed import UPLOAD_GAP_EVIDENCE_KIND
+    from sqlalchemy import delete
+
+    window = UploadWindow()
+    evidence = _Evidence(request, "tail-gap", step6_runner_database_url, tmp_path)
+    env: SimpleNamespace | None = None
+    try:
+        window.open("all-runs-held", "all managed runs", BEFORE_COMMIT)
+        async with _installed_host(upload_stack, tmp_path, wheel_dist, step6_runner_database_url, window) as env:
+            tail_delivery = await upload_stack["queue_delivery"](_delivery_input(3))
+            healthy_delivery = await upload_stack["queue_delivery"](_delivery_input(7))
+            healthy_task = f"managed-{healthy_delivery}"
+            window.open("healthy-run-refused", healthy_task, BEFORE_COMMIT, key=healthy_task)
+
+            async def finished(delivery: str) -> dict[str, Any] | None:
+                local = await _local(env, delivery)
+                return (
+                    local
+                    if local["state"] == "succeeded" and any(item["type"] == "run_terminal" for item in local["events"])
+                    else None
+                )
+
+            tail = await _until(lambda: finished(tail_delivery), what="tail run terminal evidence committing")
+            healthy = await _until(lambda: finished(healthy_delivery), what="healthy run terminal evidence committing")
+            assert _writes(env.calls, 3) == _writes(env.calls, 7) == 1 and _reads(env.calls) == 2
+            assert (await _center(upload_stack, tail_delivery))["events"] == []
+
+            terminal_index = next(i for i, item in enumerate(tail["events"]) if item["type"] == "run_terminal")
+            # The Task state and Run outcome are committed together, and the
+            # platform can project the terminal state from either event.
+            terminal_state = tail["events"][terminal_index - 1]
+            assert terminal_state["type"] == "task_state"
+            first_missing = terminal_state["sequence"]
+            last_missing = tail["events"][-1]["sequence"]
+            expected_gap = {
+                "task_ref": tail["task_ref"],
+                "run_ref": tail["run_ref"],
+                "from_sequence": first_missing,
+                "to_sequence": last_missing,
+            }
+            tail_run = BackendRef.from_dict(tail["run_ref"])
+
+            def lose_tail() -> None:
+                store = SqlDurableStore(_local_url(env))
+                try:
+                    with store.session_factory() as session, session.begin():
+                        session.execute(
+                            delete(EventRow).where(
+                                EventRow.run_issuer == tail_run.issuer_domain,
+                                EventRow.run_id == tail_run.id,
+                                EventRow.source == "standalone_host",
+                                EventRow.source_sequence >= first_missing,
+                            )
+                        )
+                finally:
+                    store.dispose()
+
+            await asyncio.to_thread(lose_tail)
+            window.mark("committed-tail-lost", **expected_gap)
+            window.close("all-runs-held")
+            prefix = await _local(env, tail_delivery)
+            assert prefix["events"] == tail["events"][: first_missing - 1]
+            assert prefix["actions"] == tail["actions"]
+
+            def gap_records():
+                try:
+                    return EvidenceStore(env.runner.profile_dir / "evidence").query(kind=UPLOAD_GAP_EVIDENCE_KIND)
+                except json.JSONDecodeError:
+                    # The host may be appending the gap record during this read.
+                    return []
+
+            async def gap_observed(*, behind: int, records: int):
+                health = (await _health(env))["managed_upload"]
+                if health["streams_with_gap"] == 1 and health["streams_behind"] == behind:
+                    observed = await asyncio.to_thread(gap_records)
+                    if len(observed) >= records:
+                        assert [record.detail for record in observed] == [expected_gap] * records
+                        assert health["gaps_detected"] == 1
+                        return health
+                return None
+
+            evidence.payload["health_with_backlog"] = await _until(
+                lambda: gap_observed(behind=1, records=1), what="one local gap beside one healthy backlog"
+            )
+            center = await _center(upload_stack, tail_delivery)
+            _assert_mirrored_once(prefix, center)
+            assert center["projection_state"] != "succeeded"
+            assert center["accepted_refs"]["task_ref"] == tail["task_ref"]
+            assert center["accepted_refs"]["run_ref"] == tail["run_ref"]
+
+            window.close("healthy-run-refused", key=healthy_task)
+            evidence.payload["health_after_backfill"] = await _until(
+                lambda: gap_observed(behind=0, records=1), what="healthy backfill without repeating the gap receipt"
+            )
+            healthy_center = await _center(upload_stack, healthy_delivery)
+            _assert_mirrored_once(healthy, healthy_center)
+            assert healthy_center["projection_state"] == "succeeded"
+
+            previous = env.runner
+            await asyncio.to_thread(_stop_for_restart, previous)
+            env.runner = await asyncio.to_thread(previous.restart, kill_previous=True)
+            env.pids.append(await asyncio.to_thread(_runner_pid, env.runner))
+            assert env.pids[0] != env.pids[1]
+            window.mark("runner-restarted", pid=env.pids[-1])
+            restarted = await _until(lambda: gap_observed(behind=0, records=2), what="same gap after process restart")
+            assert restarted["batches_acknowledged"] > 0
+            assert any(
+                (attempt.get("platform_answer") or {}).get("skipped_duplicates", 0) > 0
+                for attempt in window.for_task(tail["task_ref"]["id"])
+            )
+            assert await _center(upload_stack, tail_delivery) == center
+            assert await _local(env, tail_delivery) == prefix
+            assert _writes(env.calls, 3) == _writes(env.calls, 7) == 1 and _reads(env.calls) == 2
+
+            evidence.payload["gap"] = expected_gap
+            evidence.payload["events"] = {"tail": _mirror(prefix, center), "healthy": _mirror(healthy, healthy_center)}
+            evidence.payload["acknowledged_sequence"] = first_missing - 1
+            evidence.payload["tail_projection_state"] = center["projection_state"]
+            evidence.payload["health_after_restart"] = restarted
+            evidence.payload["outcome"] = "passed"
+    finally:
+        evidence.write(window, env)

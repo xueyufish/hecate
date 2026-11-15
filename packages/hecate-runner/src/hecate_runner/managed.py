@@ -762,12 +762,13 @@ class ManagedChannel:
         for record in run_rows:
             if record.task_ref.issuer_domain != MANAGED_ISSUER:
                 continue
-            runs = await asyncio.to_thread(self._store.event_runs_for_task, record.task_ref)
+            # Durable bindings keep streams enumerable after all their events are lost.
+            runs = await asyncio.to_thread(self._store.bound_event_runs_for_task, record.task_ref)
             for run_ref in runs:
                 stream_key = (run_ref.issuer_domain, run_ref.id)
                 cursor = self._event_cursors.get(stream_key, 0)
                 page = await asyncio.to_thread(
-                    self._store.read_events,
+                    self._store.read_committed_events,
                     run_ref,
                     cursor=cursor,
                     limit=self._upload_batch,

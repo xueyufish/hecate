@@ -34,6 +34,14 @@ in batches of at most `control_plane.upload_batch` envelopes per run and cycle.
   uploads the events before the gap, holds that run there for reconciliation and
   keeps uploading other runs. The retained events after the gap stay local, so
   the platform never sees that run as complete.
+- **Committed sequence counters reveal tail gaps.** The Runner reads the
+  counter with the event page. When the counter proves that committed tail
+  rows are missing, the Runner uploads the surviving prefix and reports the
+  missing range. The cursor advances only on platform confirmation. If all
+  events are lost, a surviving current Task/Run link or original submission
+  binding can identify the stream. A rowless historical attempt needs a
+  surviving binding. Streams without a counter keep the existing
+  observed-range behavior.
 
 Accepting work, leases and attempt association use their own routes. A fault on
 the evidence route does not stop new deliveries or protected actions that hold a
@@ -69,6 +77,8 @@ Treat the two signals differently:
   recorded range with the run's local events and the platform projection, then
   decide from the business facts. The Runner does not skip the range, invent
   filler events or delete the retained events after it.
+  If the confirmed prefix includes a terminal Task state, the platform can
+  display that state while the Runner reports a gap in the Run outcome.
 
 ## The installed-Runner drill
 
@@ -101,6 +111,12 @@ each upload attempt. Every delivery runs one protected write
   gap run uploads only its prefix, is reported with its range and recorded once
   per process, and survives a channel restart unchanged. A second run refused by
   the platform shows up as behind until it catches up.
+- **Tail gap.** The installed Runner completes two runs while the platform
+  refuses their uploads. The drill removes the committed terminal tail
+  from one local stream, including both its terminal Task state and Run
+  outcome. That Run uploads its prefix, reports the missing range in host
+  evidence and repeats the report after a hard restart. The other Run
+  backfills in full. Each business call executes once.
 
 Barriers are explicit. Each step waits on an observed fact, such as the local
 terminal state in the Runner database, refused attempts seen at the route, the
@@ -171,7 +187,5 @@ in the `sc06-evidence-failure` artifact.
   local evidence.
 - Platform-side visibility of a host gap. The platform only sees that the run has
   not finished projecting.
-- Gaps at the end of a stream. The durable log only reports missing ranges
-  between recorded events.
 - Read-only continuation while local evidence is unavailable, and the complete
   SC06 scenario, which stays `planned` in `tests/scenarios/manifest.yaml`.

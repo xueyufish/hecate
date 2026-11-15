@@ -381,9 +381,15 @@ sc_scenarios:
       position. A local event-log gap holds its run before the gap, is
       recorded in host evidence with the run and missing range and reported
       apart from a platform that is merely behind, while healthy runs keep
-      uploading. Backlog quotas against the declared limit, evidence
-      retention and eviction, and platform-side visibility of host gaps
-      remain open.
+      uploading. The installed Runner detects missing tail events through
+      the committed sequence counter. It holds at the platform-confirmed
+      prefix and reports the exact range once per process. After a hard
+      restart, the Runner detects the gap again, the platform deduplicates
+      the prefix, and business call counts remain unchanged. A current
+      Task/Run link or original submission binding identifies a stream
+      whose event rows are all lost. Backlog quotas
+      against the declared limit, evidence retention and eviction, and
+      platform-side visibility of host gaps remain open.
   - id: SC07
     title: 制品篡改、不兼容与回滚
     run_mode: standalone

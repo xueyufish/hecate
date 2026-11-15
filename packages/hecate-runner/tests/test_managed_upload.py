@@ -340,6 +340,92 @@ async def test_gap_recording_failure_retries_without_blocking_uploads(host_store
     assert channel.stats.upload_gaps_detected == 1
 
 
+async def test_tail_gap_holds_the_stream_and_records_the_range_once(host_store) -> None:
+    platform = ScriptedPlatform()
+    recorded: list[dict[str, Any]] = []
+    task_ref, run_ref = _managed_stream(host_store, "d1", notes=2)  # five events
+    _drop_events(host_store, run_ref, {4, 5})  # the committed tail is lost
+    channel = _channel(host_store, platform, batch=10, recorder=recorded.append)
+
+    assert await channel.upload_events() == 3  # the surviving prefix uploads
+    for _ in range(2):
+        assert await channel.upload_events() == 0  # the tail gap holds the stream
+
+    assert platform.sequences_for(run_ref.id) == [[1, 2, 3]]
+    status = _stream(channel, run_ref)
+    assert status["state"] == "reconciliation_required"
+    assert status["acknowledged_sequence"] == 3
+    assert status["behind"] is False
+    assert status["gap"] == {"from_sequence": 4, "to_sequence": 5}
+    assert recorded == [
+        {"task_ref": task_ref.to_dict(), "run_ref": run_ref.to_dict(), "from_sequence": 4, "to_sequence": 5}
+    ]
+    assert channel.stats.upload_gaps_detected == 1
+
+
+async def test_tail_gap_when_every_event_row_is_lost(host_store) -> None:
+    platform = ScriptedPlatform()
+    recorded: list[dict[str, Any]] = []
+    task_ref, run_ref = _managed_stream(host_store, "d1", notes=2)
+    _drop_events(host_store, run_ref, {1, 2, 3, 4, 5})
+    channel = _channel(host_store, platform, batch=3, recorder=recorded.append)
+
+    for _ in range(3):
+        assert await channel.upload_events() == 0  # nothing uploadable: the whole stream is the gap
+    assert platform.batches == []
+    status = _stream(channel, run_ref)
+    assert status["state"] == "reconciliation_required"
+    assert status["acknowledged_sequence"] == 0
+    assert status["gap"] == {"from_sequence": 1, "to_sequence": 5}
+    assert recorded == [
+        {"task_ref": task_ref.to_dict(), "run_ref": run_ref.to_dict(), "from_sequence": 1, "to_sequence": 5}
+    ]
+    # The submission binding keeps the row-less stream enumerable.
+    assert host_store.bound_event_runs_for_task(task_ref) == [run_ref]
+    assert host_store.event_runs_for_task(task_ref) == []
+
+
+async def test_full_and_foreign_source_streams_are_never_tail_gapped(host_store) -> None:
+    from hecate_durable.storage.eventlog import SqlEventLog, build_envelope
+
+    platform = ScriptedPlatform()
+    task_ref, run_ref = _managed_stream(host_store, "d1", notes=1)  # four events, complete
+    external = SqlEventLog(
+        host_store.session_factory, source="execution_backend", clock=lambda: "2026-01-01T00:00:00+00:00"
+    )
+    external.append(
+        build_envelope(
+            task_ref=task_ref,
+            run_ref=run_ref,
+            source="execution_backend",
+            source_sequence=9,
+            event_type="external_note",
+            payload={},
+            occurred_at="2026-01-01T00:00:00+00:00",
+        )
+    )
+    channel = _channel(host_store, platform, batch=10)
+
+    assert await channel.upload_events() == 4
+    status = _stream(channel, run_ref)
+    assert status["state"] == "in_sync" and status["gap"] is None
+    assert platform.sequences_for(run_ref.id) == [[1, 2, 3, 4]]
+
+
+async def test_counterless_stream_keeps_plain_read_behavior(host_store) -> None:
+    from hecate_durable.storage.models import RunSequenceRow
+
+    platform = ScriptedPlatform()
+    _, run_ref = _managed_stream(host_store, "d1", notes=1)
+    with host_store.session_factory() as session, session.begin():
+        session.execute(delete(RunSequenceRow).where(RunSequenceRow.run_id == run_ref.id))
+    channel = _channel(host_store, platform, batch=10)
+
+    assert await channel.upload_events() == 4
+    status = _stream(channel, run_ref)
+    assert status["state"] == "in_sync" and status["gap"] is None  # legacy data: no fabricated tail
+
+
 async def test_cli_records_gaps_as_host_evidence_and_publishes_the_summary(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "shutdown")
     monkeypatch.setenv("RUNNER_LEASE_SECRET", "lease-secret")
