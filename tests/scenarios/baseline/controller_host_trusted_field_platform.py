@@ -296,5 +296,5 @@ async def run_trusted_field_case(
         observation["business_call_rounds"] = registry.business_call_rounds
         platform_driver._record_cleanup_stragglers(observation, stragglers)
         patch.unpatch()
-        await environment.close()
+        await platform_driver._close_case_environment(environment, observation)
     return observation

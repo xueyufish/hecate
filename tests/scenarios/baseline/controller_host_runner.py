@@ -31,9 +31,32 @@ PRINCIPAL = "app-reader"
 DOMAINS = ("domain_a",)
 APPROVAL_REF = "approval-controller-host-baseline-1"
 CASE_TIME_BUDGET_SECONDS = 120.0
+CASE_CLOSE_JOIN_SECONDS = 10.0
 
 READ_ENTRY_CONTENT = json.dumps({"kind": "entry", "tools": [spec.READ_TOOL, spec.WRITE_TOOL]}).encode()
 WRITE_TOOL_SCHEMA_BYTES = json.dumps(spec.TOOL_SCHEMAS[spec.WRITE_TOOL]).encode()
+
+
+async def _close_bounded(environment: RunnerEnvironment) -> None:
+    """Join the environment teardown with a timeout.
+
+    The case deadline protects only the case body, so a cancelled dispatch
+    can leave the engine teardown awaiting forever afterwards. The close
+    runs as its own task joined by timeout: one that cannot finish —
+    including a close that swallows cancellation, which ``wait_for``
+    cannot rescue — is cancelled best-effort and abandoned, and the
+    timeout becomes the recorded collection failure instead of a hang.
+    """
+
+    close_task = asyncio.create_task(environment.close())
+    await asyncio.wait({close_task}, timeout=CASE_CLOSE_JOIN_SECONDS)
+    if close_task.done():
+        error = close_task.exception()
+        if error is not None:
+            raise error
+        return
+    close_task.cancel()
+    raise TimeoutError("case environment close did not finish in time")
 
 
 def _write_profile(profile_dir: Path, *, write_permission: str, database_url: str) -> None:
@@ -488,7 +511,7 @@ async def run_runner_case(case: str, provider: Any, root: Path) -> dict[str, Any
                 observation["collection_error"] = None
             finally:
                 if not initial_closed:
-                    await environment.close()
+                    await _close_bounded(environment)
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
         observation = {
             "run_id": None,

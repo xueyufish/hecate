@@ -482,6 +482,7 @@ def _empty_diagnostics(end_reason: str) -> dict[str, Any]:
         "round_error_types": [],
         "diagnostic_error": None,
         "cleanup_stragglers": 0,
+        "close_error": None,
         **{field: None for field in DIAGNOSTIC_FIELDS},
     }
 
@@ -570,6 +571,40 @@ def _record_cleanup_stragglers(observation: dict[str, Any], stragglers: int) -> 
     diagnostics = dict(observation.get("diagnostics") or {})
     diagnostics["cleanup_stragglers"] = diagnostics.get("cleanup_stragglers", 0) + stragglers
     observation["diagnostics"] = diagnostics
+
+
+CASE_CLOSE_JOIN_SECONDS = 10.0
+
+
+def _record_close_error(observation: dict[str, Any], error_type: str) -> None:
+    """Fold a bounded-close outcome into the diagnostics block."""
+
+    diagnostics = dict(observation.get("diagnostics") or {})
+    diagnostics["close_error"] = error_type
+    observation["diagnostics"] = diagnostics
+
+
+async def _close_case_environment(environment: Any, observation: dict[str, Any]) -> None:
+    """Bound the finally-path teardown of a finished case environment.
+
+    The case deadline protects only the ``async with`` body, so a
+    cancelled dispatch can leave the environment's engine teardown
+    awaiting forever afterwards. Like the bounded cleanup join, the close
+    runs as its own task joined by timeout: one that cannot finish —
+    including a close that swallows cancellation, which ``wait_for``
+    cannot rescue — is cancelled best-effort and recorded as evidence
+    instead of hanging the driver past every evidence deadline.
+    """
+
+    close_task = asyncio.create_task(environment.close())
+    await asyncio.wait({close_task}, timeout=CASE_CLOSE_JOIN_SECONDS)
+    if close_task.done():
+        error = close_task.exception()
+        if error is not None:
+            _record_close_error(observation, exception_type(error))
+        return
+    close_task.cancel()
+    _record_close_error(observation, "TimeoutError")
 
 
 def _refresh_recording(observation: dict[str, Any], gateway: _RecordingGateway, registry: Any) -> None:
@@ -813,7 +848,7 @@ async def run_platform_case(case: str, provider: Any, root: Path) -> dict[str, A
         _refresh_recording(observation, gateway, registry)
         _record_cleanup_stragglers(observation, stragglers)
         patch.unpatch()
-        await environment.close()
+        await _close_case_environment(environment, observation)
     return observation
 
 

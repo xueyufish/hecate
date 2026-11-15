@@ -42,6 +42,7 @@ EXPECTED_DIAGNOSTIC_KEYS = {
     "round_error_types",
     "diagnostic_error",
     "cleanup_stragglers",
+    "close_error",
     *platform_driver.DIAGNOSTIC_FIELDS,
 }
 
@@ -225,6 +226,25 @@ async def test_collection_timeout_preserves_identity_and_rounds(tmp_path, monkey
     assert diagnostics["round_error_types"] == ["CancelledError"]
     assert run["tool_receipts"], "the completed read receipt survives the timeout"
     assert run["write_attempts"] == 0 and run["side_effect_count"] == 0
+    _assert_allow_list(run)
+
+
+async def test_stalled_case_close_becomes_evidence_never_a_hang(tmp_path, monkeypatch) -> None:
+    """A case environment whose close never finishes must not hang the
+    driver: like the bounded cleanup join, the teardown runs under a
+    join timeout, is cancelled best-effort and recorded as evidence."""
+
+    async def stalled_close(self) -> None:
+        await asyncio.sleep(999)
+
+    monkeypatch.setattr(platform_driver.PlatformEnvironment, "close", stalled_close)
+    report = await asyncio.wait_for(
+        collector.collect(provider=spec.DeterministicProvider(), root=tmp_path, hosts=("platform",), cases=("normal",)),
+        timeout=120,
+    )
+    run = next(run for run in report["runs"] if run["case"] == "normal")
+    assert run["collection_error"] is None, run
+    assert run["diagnostics"]["close_error"] == "TimeoutError"
     _assert_allow_list(run)
 
 
