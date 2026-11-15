@@ -123,6 +123,18 @@ older installed release offline. Rollback re-selects an artifact only —
 tasks, action receipts, approval consumption, budgets, evidence and known
 revocations are never rewound, and no database downgrade runs.
 
+The offline lifecycle drill (`tests/scenarios/test_runner_offline_lifecycle.py`)
+exercises both fault windows end to end: activating a tampered installed
+release refuses and leaves the pointer bytes and generation untouched,
+and a switch process interrupted before the pointer commit preserves the
+previous selection with the host lock immediately re-acquirable, after
+which the previous release cold starts and the retried switch commits.
+The verified boundary is process interruption at the activation seams —
+the atomic pointer swap and the OS lock are what make that window safe.
+Host-wide power loss, damaged disks and a corrupted host directory are
+outside this verification; they belong to backup and restore, not to
+activation.
+
 ## Start the runner from the selection
 
 ```bash

@@ -129,8 +129,9 @@ class _DeploymentStack:
             self._release_cli("install", "--host", str(self.host), "--bundle", str(bundle))
         self._generation = 0
 
-    def _release_cli(self, *args: str) -> None:
-        result = subprocess.run(
+    def run_release_cli(self, *args: str) -> subprocess.CompletedProcess:
+        """One real release-CLI invocation whose outcome the caller asserts."""
+        return subprocess.run(
             [
                 str(self.offline_python),
                 "-I",
@@ -146,7 +147,14 @@ class _DeploymentStack:
             timeout=120,
             check=False,
         )
+
+    def _release_cli(self, *args: str) -> None:
+        result = self.run_release_cli(*args)
         assert result.returncode == 0, result.stderr[-2000:]
+
+    def installed_release_dir(self, sha: str) -> Path:
+        """The digest-addressed installed release directory on disk."""
+        return self.host / "releases" / sha
 
     def _write_policy(self, *, revoked: bool = False) -> Path:  # noqa: S107 - test fixture token
         self.policy_path.write_text(
