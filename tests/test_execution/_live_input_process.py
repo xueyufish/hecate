@@ -42,7 +42,7 @@ class StubLiveInputPort(StubRuntimePort):
             for message in messages
             if message.get("role") == "user" and "provided_input" in str(message.get("content"))
         ]
-        _trace("model_ask", turn=turn, provided=provided)
+        _trace("model_ask", turn=turn, marker=config.get("marker"), provided=provided)
         if turn in json.loads(os.environ.get("HECATE_LIVE_HOLD_TURNS", "[]")):
             await _barrier(f"model-{turn}")
         mode = os.environ.get("HECATE_LIVE_MODE", "reads")
@@ -52,6 +52,11 @@ class StubLiveInputPort(StubRuntimePort):
         arguments = {"sku": "S-9", "turn": turn}
         if provided:
             arguments["region"] = provided[-1]["region"]
+        if config.get("marker"):
+            # The frozen version's model_config rides the real port config:
+            # the doubles observe which agent version actually drives each
+            # ask, and every tool call carries that marker in its arguments.
+            arguments["marker"] = config["marker"]
         yield {
             "content": None,
             "tool_calls": [
@@ -65,7 +70,7 @@ class StubLiveInputPort(StubRuntimePort):
 
     async def tool_execute(self, name: str, args: dict, context=None):
         """Record one actual synthetic execution, distinct from its ledger receipt."""
-        _trace("business_call", turn=args["turn"], region=args.get("region"))
+        _trace("business_call", turn=args["turn"], region=args.get("region"), marker=args.get("marker"))
         return {"quantity": 3, "region": args.get("region")}
 
 
@@ -127,7 +132,7 @@ async def _serve() -> None:
         store,
         PlatformTaskDispatcher(store, sessions),
         leases=store.leases,
-        lease_ttl=15,
+        lease_ttl=float(os.environ.get("HECATE_LIVE_LEASE_TTL", "15")),
         poll_interval=0.1,
         max_attempts=3,
     )
