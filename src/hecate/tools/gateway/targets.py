@@ -15,7 +15,7 @@ from ipaddress import ip_address
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
@@ -148,19 +148,42 @@ class GatewayTargetService:
             raise TargetNotFoundError(f"Gateway target {target_id} not found")
         return target
 
-    async def list_targets(self, workspace_id: object | None = None) -> list[GatewayTargetModel]:
+    async def get_target_scoped(
+        self, target_id: uuid.UUID, workspace_id: uuid.UUID | None, *, include_global: bool = False
+    ) -> GatewayTargetModel:
+        """Fetch an active target in the permitted workspace or global scope."""
+        query = self._active_targets().where(
+            GatewayTargetModel.id == target_id, self._scope_filter(workspace_id, include_global)
+        )
+        target = (await self._db.execute(query)).scalar_one_or_none()
+        if target is None:
+            raise TargetNotFoundError(f"Gateway target {target_id} not found")
+        return target
+
+    @staticmethod
+    def _active_targets():
+        return select(GatewayTargetModel).where(~GatewayTargetModel.deleted, GatewayTargetModel.is_active.is_(True))
+
+    @staticmethod
+    def _scope_filter(workspace_id: uuid.UUID | None, include_global: bool):
+        scope = GatewayTargetModel.workspace_id == workspace_id
+        return or_(scope, GatewayTargetModel.workspace_id.is_(None)) if include_global else scope
+
+    async def list_targets(
+        self, workspace_id: uuid.UUID | None = None, *, include_global: bool = False
+    ) -> list[GatewayTargetModel]:
         """List active targets, optionally scoped to one workspace.
 
         Args:
             workspace_id: When set, only targets owned by that workspace
-                are returned; when ``None``, all active targets.
+                are returned by default.
+            include_global: Include global targets alongside the workspace,
+                or list only global targets when no workspace was selected.
+                With both arguments omitted, list all active targets.
         """
-        query = select(GatewayTargetModel).where(
-            ~GatewayTargetModel.deleted,
-            GatewayTargetModel.is_active.is_(True),
-        )
-        if workspace_id is not None:
-            query = query.where(GatewayTargetModel.workspace_id == workspace_id)
+        query = self._active_targets()
+        if workspace_id is not None or include_global:
+            query = query.where(self._scope_filter(workspace_id, include_global))
         result = await self._db.execute(query.order_by(GatewayTargetModel.name))
         return list(result.scalars().all())
 

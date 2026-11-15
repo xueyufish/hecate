@@ -137,12 +137,13 @@ class TestGatewayAPI:
         response = await client.get("/api/gateway/targets")
         assert response.status_code == 404
 
-    async def test_create_and_list_target_redacted(self, client, monkeypatch) -> None:
+    async def test_create_and_list_target_redacted(self, client, monkeypatch, default_workspace) -> None:
         monkeypatch.setattr(settings, "GATEWAY_ENABLED", True)
         payload = {
             "name": "crm",
             "kind": "rest",
             "base_url": "https://api.example.com",
+            "workspace_id": str(default_workspace.id),
             "spec": {
                 "openapi": "3.0.0",
                 "paths": {
@@ -165,6 +166,7 @@ class TestGatewayAPI:
         assert sorted(body["import"]["imported"]) == ["crm__getContact", "crm__ping"]
         assert body["import"]["warnings"] == []
         assert body["target"]["credentials"] == {"headers": {"Authorization": "***"}}
+        assert body["target"]["workspace_id"] == str(default_workspace.id)
         assert "top-secret" not in created.text
 
         listing = await client.get("/api/gateway/targets")
@@ -172,23 +174,62 @@ class TestGatewayAPI:
         assert "top-secret" not in listing.text
         assert listing.json()[0]["name"] == "crm"
 
-    async def test_insecure_target_rejected_via_api(self, client, monkeypatch) -> None:
+    async def test_insecure_target_rejected_via_api(self, client, monkeypatch, default_workspace) -> None:
         monkeypatch.setattr(settings, "GATEWAY_ENABLED", True)
         response = await client.post(
             "/api/gateway/targets",
-            json={"name": "bad", "kind": "rest", "base_url": "http://api.example.com"},
+            json={
+                "name": "bad",
+                "kind": "rest",
+                "base_url": "http://api.example.com",
+                "workspace_id": str(default_workspace.id),
+            },
         )
         assert response.status_code == 422
         assert "HTTPS" in response.json()["detail"]
 
-    async def test_deactivate_target(self, client, monkeypatch) -> None:
+    async def test_deactivate_rest_target(self, client, monkeypatch, default_workspace) -> None:
         monkeypatch.setattr(settings, "GATEWAY_ENABLED", True)
         created = await client.post(
             "/api/gateway/targets",
-            json={"name": "tmp", "kind": "mcp", "base_url": "https://mcp.example.com"},
+            json={
+                "name": "tmp",
+                "kind": "rest",
+                "base_url": "https://api.example.com",
+                "workspace_id": str(default_workspace.id),
+            },
         )
+        assert created.status_code == 201, created.text
         target_id = created.json()["target"]["id"]
         deleted = await client.delete(f"/api/gateway/targets/{target_id}")
         assert deleted.status_code == 200
         gone = await client.get(f"/api/gateway/targets/{target_id}")
         assert gone.status_code == 404
+
+    async def test_deactivate_mcp_target_requires_platform_admin(
+        self, client, monkeypatch, platform_admin_token
+    ) -> None:
+        """``mcp`` targets mutate the shared name-indexed registry: workspace
+        admins cannot register them (platform-admin gate), and the admin's
+        global mcp target stays invisible to them (one 404)."""
+        monkeypatch.setattr(settings, "GATEWAY_ENABLED", True)
+        headers = {"Authorization": f"Bearer {platform_admin_token}"}
+        foreign = await client.post(
+            "/api/gateway/targets",
+            json={"name": "fed", "kind": "mcp", "base_url": "https://mcp.example.com", "workspace_id": None},
+            headers=headers,
+        )
+        assert foreign.status_code == 201, foreign.text
+        target_id = foreign.json()["target"]["id"]
+
+        denied = await client.post(
+            "/api/gateway/targets",
+            json={"name": "other", "kind": "mcp", "base_url": "https://mcp.example.com"},
+        )
+        assert denied.status_code == 403
+        # The global target stays invisible to the workspace caller.
+        denied_delete = await client.delete(f"/api/gateway/targets/{target_id}")
+        assert denied_delete.status_code == 404
+
+        deleted = await client.delete(f"/api/gateway/targets/{target_id}", headers=headers)
+        assert deleted.status_code == 200

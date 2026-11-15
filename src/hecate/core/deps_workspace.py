@@ -170,12 +170,10 @@ def _is_platform_admin_token(raw_key: str) -> bool:
     )
 
 
-async def ensure_platform_admin(
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
-    """Raise 403 unless the request carries a platform admin identity.
+async def is_platform_admin(
+    credentials: HTTPAuthorizationCredentials | None, ctx: AuthContext, db: AsyncSession
+) -> bool:
+    """Check the deploy-time bearer and JWT email allowlists.
 
     Platform admin resolution is deploy-time bootstrap only (see the
     ``platform-admin`` spec): a bearer token in ``PLATFORM_ADMIN_API_KEYS``
@@ -184,11 +182,24 @@ async def ensure_platform_admin(
     qualify — their issuance history predates this gate.
     """
     if credentials is not None and _is_platform_admin_token(credentials.credentials):
-        return
+        return True
 
-    result = await db.execute(select(UserModel).where(UserModel.id == ctx.user_id))
+    if ctx.auth_method != "jwt" or not settings.platform_admin_emails_list:
+        return False
+    result = await db.execute(
+        select(UserModel).where(UserModel.id == ctx.user_id, UserModel.active.is_(True), UserModel.deleted.is_(False))
+    )
     user = result.scalar_one_or_none()
-    if user is not None and user.email.lower() in settings.platform_admin_emails_list:
+    return user is not None and user.email.lower() in settings.platform_admin_emails_list
+
+
+async def ensure_platform_admin(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Raise 403 unless the request carries a platform admin identity."""
+    if await is_platform_admin(credentials, ctx, db):
         return
 
     raise HTTPException(
