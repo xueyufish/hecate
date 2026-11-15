@@ -60,18 +60,29 @@ _VIEW_FIELDS = {
 
 
 async def _task_detail(harness, record) -> dict:  # noqa: F811
-    async with harness["session_factory"]() as db:
-        service = TaskControlService(
-            db,
-            store=harness["suite"].store,
-            recorder=harness["suite"].recorder,
-            backend="postgres",
-            ledger_source="core",
-            session_factory=harness["session_factory"],
-            dispatcher=None,
-            worker=None,
-        )
-        return await service.get_task_detail(WS, uuid.UUID(record.task_ref.id))
+    # The dispatcher commits the durable terminal state before the run
+    # projection lands (the outbox relay recovers the gap), so a read that
+    # follows a terminal-state poll waits out that commit window instead of
+    # asserting on a pre-projection snapshot.
+    deadline = asyncio.get_running_loop().time() + 10.0
+    while True:
+        async with harness["session_factory"]() as db:
+            service = TaskControlService(
+                db,
+                store=harness["suite"].store,
+                recorder=harness["suite"].recorder,
+                backend="postgres",
+                ledger_source="core",
+                session_factory=harness["session_factory"],
+                dispatcher=None,
+                worker=None,
+            )
+            detail = await service.get_task_detail(WS, uuid.UUID(record.task_ref.id))
+        if all(run["projection"].get("state") for run in detail["runs"]):
+            return detail
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError(f"run projections never landed: {detail['runs']}")
+        await asyncio.sleep(0.05)
 
 
 async def _sole_run_id(harness) -> uuid.UUID:  # noqa: F811
@@ -81,10 +92,24 @@ async def _sole_run_id(harness) -> uuid.UUID:  # noqa: F811
     return run.id
 
 
-async def _projection_of(harness, run_id: uuid.UUID) -> dict:  # noqa: F811
-    async with harness["session_factory"]() as db:
-        run = await db.get(RunModel, run_id)
-    return dict(run.projection or {})
+async def _projection_of(harness, run_id: uuid.UUID, *, state: str | None = None) -> dict:  # noqa: F811
+    """Read the run projection, optionally waiting for it to reach ``state``.
+
+    Same commit-window rule as ``_task_detail``: the durable terminal state
+    commits first and the run projection follows, so a read that follows a
+    terminal-state poll passes the state it waits for. Reads that follow a
+    synchronous in-test projection or a relay pump stay single-shot.
+    """
+    deadline = asyncio.get_running_loop().time() + 10.0
+    while True:
+        async with harness["session_factory"]() as db:
+            run = await db.get(RunModel, run_id)
+        projection = dict(run.projection or {})
+        if state is None or projection.get("state") == state:
+            return projection
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError(f"run projection never reached {state!r}: {projection}")
+        await asyncio.sleep(0.05)
 
 
 async def test_run_query_returns_whitelisted_view_of_recorded_verdict(harness) -> None:  # noqa: F811
@@ -247,7 +272,7 @@ async def test_relay_lands_the_same_run_facts_as_the_direct_projection(harness) 
     assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
 
     run_id = await _sole_run_id(harness)
-    before = await _projection_of(harness, run_id)
+    before = await _projection_of(harness, run_id, state="succeeded")
     assert before["delivery_acceptance"]["status"] == "passed"
 
     projector = PlatformOutboxProjector(harness["store"], harness["session_factory"])
@@ -310,7 +335,7 @@ async def test_relay_preserves_the_recorded_view_when_payload_lacks_one(harness)
     record, t_ref, _port = await _dispatch_to_completion(harness, port=port, acceptance=_DECLARED)
     assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
     run_id = await _sole_run_id(harness)
-    before = await _projection_of(harness, run_id)
+    before = await _projection_of(harness, run_id, state="succeeded")
     assert before["delivery_acceptance"]["status"] == "passed"
 
     # A synthetic late run_terminal whose payload carries no acceptance key
@@ -344,7 +369,7 @@ async def test_backfill_finish_preserves_the_recorded_view(harness, monkeypatch)
     record, t_ref, _port = await _dispatch_to_completion(harness, port=port, acceptance=_DECLARED)
     assert record.lifecycle_state is TaskLifecycleState.SUCCEEDED
     run_id = await _sole_run_id(harness)
-    before = await _projection_of(harness, run_id)
+    before = await _projection_of(harness, run_id, state="succeeded")
     assert before["delivery_acceptance"]["status"] == "passed"
 
     dispatcher = PlatformTaskDispatcher(harness["store"], harness["session_factory"])
@@ -418,7 +443,7 @@ async def test_query_refuses_a_valid_digest_for_another_execution(harness, field
     port = ScriptedLoopPort(final_text=json.dumps({"answer": "three items in stock"}))
     record, _, _ = await _dispatch_to_completion(harness, port=port, acceptance=_DECLARED)
     run_id = await _sole_run_id(harness)
-    projection = await _projection_of(harness, run_id)
+    projection = await _projection_of(harness, run_id, state="succeeded")
     acceptance = projection["delivery_acceptance"]
     if field == "workspace":
         acceptance["evaluated_by"]["workspace_id"] = str(uuid.uuid4())

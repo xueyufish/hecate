@@ -129,6 +129,21 @@ cumulative turn limit and absolute deadline. This top-level profile has no
 declared monetary slice in the drill; model fees remain unknown. It does
 not certify real-model quality, managed Runner input, or child-budget billing.
 
+The same harness also accepts the platform's default-deployment cutover for
+`builtin/in_process` deployments: two deployments of one agent carry distinct
+frozen agent versions, and `DeploymentRegistry.set_default` re-routes only new
+submissions. A task submitted under the previous default is recovered by an
+independent worker on its original Run with its frozen deployment and agent
+version — the deterministic doubles observe the version marker of the
+deployment that actually executes — while the same idempotency key replays
+the original Task/Run instead of re-routing, a new key binds to the new
+default and really executes under its marker, and switching the default back
+returns new submissions to the previous deployment. Registration and every
+default change are recorded as audit rows, and the evidence JSON carries the
+deployment/version IDs, worker PIDs, per-marker call counts and the audit
+records. Release manifests, the release management API and other hosts are
+out of this scope.
+
 Run the local SQLite WAL tier with the worktree's development environment:
 
 ```bash

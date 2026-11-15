@@ -3,7 +3,10 @@
 The local tier uses a WAL SQLite file. HECATE_STEP6_POSTGRES_URL selects a
 dedicated PostgreSQL schema. Only model/tool outputs are scripted; HTTP auth,
 commands, worker dispatch, decisions, action receipts, result-inbox reads and
-SQL commits are real.
+SQL commits are real. The default-deployment cutover drill extends the same
+harness to two builtin deployments: switching the default re-routes only new
+submissions, while submitted tasks recover on their frozen deployment and
+version across independent worker processes.
 """
 
 from __future__ import annotations
@@ -30,18 +33,27 @@ from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from hecate.channel.api import tasks as tasks_api
+from hecate.contracts.execution.capabilities import (
+    EnvironmentOwner,
+    HarnessOwner,
+    OwnershipAxes,
+    ToolExecutionPoint,
+)
 from hecate.contracts.execution.references import BackendRef, RefKind
 from hecate.core.composition.durable_platform import DurableSuite
 from hecate.core.database import Base
 from hecate.core.deps import get_db
 from hecate.enterprise.auth.token import create_access_token
+from hecate.execution.deployment_registry import DeploymentRegistry
 from hecate.execution.event_relay import PlatformOutboxProjector
 from hecate.execution.task_control import TaskControlService
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
 from hecate.models.agent_principal import AgentPrincipalModel
 from hecate.models.agent_version import AgentVersionModel
+from hecate.models.audit import AuditLogModel
 from hecate.models.organization import OrganizationModel
+from hecate.models.run import RunModel
 from hecate.models.user import UserModel
 from hecate.models.workspace import WorkspaceModel
 from hecate.models.workspace_member import WorkspaceMemberModel, WorkspaceRole
@@ -262,7 +274,9 @@ async def _event(stack, event, *, pid=None, turn=None):
     return await _poll(stack, probe, f"{event} from {pid}, turn {turn}")
 
 
-async def _spawn_worker(stack, role, *, hold_turns=(), hold_bind=False, hold_projection=False, mode="reads"):
+async def _spawn_worker(
+    stack, role, *, hold_turns=(), hold_bind=False, hold_projection=False, mode="reads", lease_ttl=15
+):
     ready = stack["tmp_path"] / f"ready-{role}"
     env = child_environment(stack)
     env.update(
@@ -275,6 +289,7 @@ async def _spawn_worker(stack, role, *, hold_turns=(), hold_bind=False, hold_pro
             "HECATE_LIVE_HOLD_BIND": "1" if hold_bind else "0",
             "HECATE_LIVE_HOLD_PROJECTION": "1" if hold_projection else "0",
             "HECATE_LIVE_MODE": mode,
+            "HECATE_LIVE_LEASE_TTL": str(lease_ttl),
         }
     )
     log = open(stack["tmp_path"] / f"worker-{role}.log", "w", encoding="utf-8")  # noqa: SIM115
@@ -373,9 +388,11 @@ async def _delivery(stack):
     return await asyncio.to_thread(stack["store"].list_input_revisions_with_delivery, stack["task"])
 
 
-def _decision_rows(stack):
+def _decision_rows(stack, run_ref: BackendRef | None = None):
+    if run_ref is None:
+        run_ref = stack["run"]
     with stack["store"].session_factory() as db:
-        rows = db.scalars(select(AcceptedDecisionRow).where(AcceptedDecisionRow.run_id == stack["run"].id)).all()
+        rows = db.scalars(select(AcceptedDecisionRow).where(AcceptedDecisionRow.run_id == run_ref.id)).all()
         return [
             {
                 "step": row.decision_step_id,
@@ -387,8 +404,8 @@ def _decision_rows(stack):
         ]
 
 
-async def _decisions(stack):
-    return await asyncio.to_thread(_decision_rows, stack)
+async def _decisions(stack, run_ref: BackendRef | None = None):
+    return await asyncio.to_thread(_decision_rows, stack, run_ref)
 
 
 async def _write_evidence(stack):
@@ -833,5 +850,356 @@ async def test_rest_inbox_delivery_survives_worker_restart(stack):
             "notification_ids": [completion["notification_id"]],
             "run_state": run_body["projection"]["state"],
             "acceptance_status": acceptance_view["status"],
+        }
+    )
+
+
+async def _state_of(stack, task_ref):
+    return await asyncio.to_thread(stack["store"].get_task_state, task_ref)
+
+
+async def _wait_task_state(stack, task_ref, expected):
+    async def probe():
+        record = await _state_of(stack, task_ref)
+        if record.lifecycle_state.value == expected:
+            return record
+        assert record.lifecycle_state.value not in _TERMINAL, record.extra
+        return None
+
+    return await _poll(stack, probe, f"task {task_ref.id} {expected}", timeout=120)
+
+
+async def _runs(stack, task_id):
+    """Every attempt run of one task with its frozen deployment binding."""
+    async with stack["sessions"]() as db:
+        rows = (await db.execute(select(RunModel).where(RunModel.task_id == uuid.UUID(str(task_id))))).scalars().all()
+        return [
+            {
+                "run_id": str(row.id),
+                "attempt": row.attempt_no,
+                "deployment_id": str(row.deployment_id),
+                "agent_version_id": (row.execution_snapshot or {}).get("agent_version_id"),
+            }
+            for row in sorted(rows, key=lambda row: row.attempt_no)
+        ]
+
+
+async def _post_task(stack, *, key, goal):
+    """One real authenticated task submission carrying an idempotency key."""
+    response = await stack["client"].post(
+        "/api/tasks",
+        json={
+            "goal": goal,
+            "agent_id": str(stack["agent_id"]),
+            "input": {
+                "messages": [{"role": "user", "content": "check the stock"}],
+                "controller_loop": True,
+                "controller": {"max_turns": 6},
+            },
+            "idempotency_key": key,
+        },
+        headers={"Authorization": f"Bearer {stack['tokens']['editor']}"},
+    )
+    stack["observations"].append({"step": "http-submit", "key": key, "http_status": response.status_code})
+    return response
+
+
+def _marker_trace(stack, event, marker):
+    return [(row["pid"], row["turn"]) for row in _trace(stack, event) if row.get("marker") == marker]
+
+
+async def test_default_deployment_cutover_routes_new_tasks_and_preserves_submitted_ones(stack):
+    """A→B→A default cutover with cross-process recovery over real TCP.
+
+    Two ``builtin/in_process`` deployments of one agent carry distinct
+    frozen agent versions whose model config carries a marker the scripted
+    doubles actually observe. Switching the default re-routes only NEW
+    submissions: a task submitted under the previous default is recovered
+    by an independent worker on its original Run with its frozen deployment
+    and version, the same idempotency key replays the original Task/Run
+    instead of re-routing, a new key binds to the new default and really
+    executes under its marker, and every default change lands in the audit
+    log.
+    """
+    # -- Two deployments, one agent, distinct frozen versions. -------------
+    async with stack["sessions"]() as db:
+        deployment_a = (
+            await db.execute(select(AgentDeploymentModel).where(AgentDeploymentModel.is_default.is_(True)))
+        ).scalar_one()
+        version_a = await db.get(AgentVersionModel, deployment_a.agent_version_id)
+        # The marker rides each version's frozen model_config: the real port
+        # config hands it to the stub, so the doubles observe which agent
+        # version actually drives every ask and tool call. Frozen before any
+        # run exists — later edits would fail the run revalidation gate.
+        version_a.config_snapshot = {
+            "tools": ["query_inventory"],
+            "model_config": {"model": "stub-model", "marker": "deploy-a"},
+        }
+        version_b = AgentVersionModel(
+            agent_id=deployment_a.agent_id,
+            version=2,
+            config_snapshot={
+                "tools": ["query_inventory"],
+                "model_config": {"model": "stub-model", "marker": "deploy-b"},
+            },
+            content_hash="b" * 64,
+        )
+        db.add(version_b)
+        await db.flush()
+        deployment_b = await DeploymentRegistry(db).register(
+            deployment_a.agent_id,
+            BackendType.BUILTIN,
+            AccessMode.IN_PROCESS,
+            OwnershipAxes(
+                harness=HarnessOwner.HECATE,
+                environment=EnvironmentOwner.NONE,
+                tool_execution=ToolExecutionPoint.HECATE_GATEWAY,
+            ),
+            workspace_id=WS,
+            agent_version_id=version_b.id,
+            registered_by=OWNER,
+        )
+        agent_id = deployment_a.agent_id
+        await db.commit()
+    deployment_a_id, deployment_b_id = deployment_a.id, deployment_b.id
+    version_a_id, version_b_id = version_a.id, version_b.id
+    stack["observations"].append(
+        {
+            "step": "cutover-setup",
+            "deployment_a": str(deployment_a_id),
+            "deployment_b": str(deployment_b_id),
+            "version_a": str(version_a_id),
+            "version_b": str(version_b_id),
+        }
+    )
+
+    # -- A is the default: submit, first receipt persists, kill at the -----
+    # -- next decision boundary. ------------------------------------------
+    # Give the worker time to reach the injected boundary even under runner
+    # contention. Recovery still waits for the killed worker's real lease.
+    lease_ttl = 45
+    worker_a = await _spawn_worker(stack, "cut-a", hold_turns=[2], lease_ttl=lease_ttl)
+    submit_a = await _post_task(stack, key="cutover-a-1", goal="cutover drill on A")
+    assert submit_a.status_code == 201, submit_a.text
+    submitted_a = submit_a.json()
+    assert submitted_a["replayed"] is False, submit_a.text
+    task_a = BackendRef(RefKind.TASK, "hecate", str(submitted_a["task_id"]))
+    run_a = BackendRef(RefKind.RUN, "hecate", str(submitted_a["run_id"]))
+    stack["task"], stack["run"], stack["controller"] = task_a, run_a, {"max_turns": 6}
+    original_rows = await _runs(stack, task_a.id)
+    assert original_rows == [
+        {
+            "run_id": run_a.id,
+            "attempt": 1,
+            "deployment_id": str(deployment_a_id),
+            "agent_version_id": str(version_a_id),
+        }
+    ]
+    original_record = await asyncio.to_thread(stack["store"].run_for_task, task_a)
+
+    await _event(stack, "model_ask", pid=worker_a.pid, turn=1)
+    assert _trace(stack, "model_ask", worker_a.pid)[0]["marker"] == "deploy-a"
+    # Turn two's ask only happens after turn one's decision and its tool
+    # receipt are committed — the worker is killed exactly at that boundary.
+    await _event(stack, "model_ask", pid=worker_a.pid, turn=2)
+    committed = await _decisions(stack)
+    assert len(committed) == 1 and len(committed[0]["action_keys"]) == 1, committed
+    list_run_actions = stack["store"].list_run_actions
+    (first_receipt,) = await asyncio.to_thread(list_run_actions, run_a)
+    assert first_receipt["intent"]["action_name"] == "query_inventory", first_receipt
+    assert first_receipt["last_outcome"]["outcome"] == "succeeded", first_receipt
+    assert first_receipt["last_outcome"]["result_digest"], first_receipt
+    assert len(_trace(stack, "business_call", worker_a.pid)) == 1
+    before_state = await _state(stack)
+    await _kill(stack, worker_a)
+
+    # -- Default switches to B: the same key replays the original, ---------
+    # -- a new key binds to B. ---------------------------------------------
+    async with stack["sessions"]() as db:
+        await DeploymentRegistry(db).set_default(agent_id, deployment_b_id, workspace_id=WS, actor_id=OWNER)
+        await db.commit()
+    replay_a = await _post_task(stack, key="cutover-a-1", goal="cutover drill on A")
+    # A replay is not a new resource: the API returns the original
+    # association with 200 instead of the fresh-submission 201.
+    assert replay_a.status_code == 200, replay_a.text
+    replayed_a = replay_a.json()
+    assert replayed_a["replayed"] is True, replay_a.text
+    assert replayed_a["task_id"] == submitted_a["task_id"], replay_a.text
+    assert replayed_a["run_id"] == submitted_a["run_id"], replay_a.text
+    assert await _runs(stack, task_a.id) == original_rows
+
+    submit_b = await _post_task(stack, key="cutover-b-1", goal="cutover drill on B")
+    assert submit_b.status_code == 201, submit_b.text
+    submitted_b = submit_b.json()
+    assert submitted_b["replayed"] is False and submitted_b["task_id"] != submitted_a["task_id"]
+    task_b = BackendRef(RefKind.TASK, "hecate", str(submitted_b["task_id"]))
+    run_b = BackendRef(RefKind.RUN, "hecate", str(submitted_b["run_id"]))
+    original_b_rows = await _runs(stack, task_b.id)
+    assert original_b_rows == [
+        {
+            "run_id": run_b.id,
+            "attempt": 1,
+            "deployment_id": str(deployment_b_id),
+            "agent_version_id": str(version_b_id),
+        }
+    ]
+
+    # -- One independent worker recovers A's task and executes B's task. ---
+    worker_b = await _spawn_worker(stack, "cut-b", lease_ttl=lease_ttl)
+    await _wait_task_state(stack, task_a, "succeeded")
+    await _wait_task_state(stack, task_b, "succeeded")
+
+    # A's task recovered on the SAME run under its frozen deployment and
+    # version; the committed decision prefix is unchanged and no confirmed
+    # tool call repeats (turn one ran on the killed worker, turn two on the
+    # recovery worker — both observed under A's marker).
+    assert await asyncio.to_thread(stack["store"].run_for_task, task_a) == original_record
+    recovered = await _decisions(stack, run_a)
+    assert len(recovered) == 3, recovered
+    assert recovered[: len(committed)] == committed
+    actions_a = {action["action_key"]: action for action in await asyncio.to_thread(list_run_actions, run_a)}
+    assert len(actions_a) == 2
+    assert actions_a[first_receipt["action_key"]] == first_receipt
+    assert all(row["input_refs"]["agent_version"] == str(version_a_id) for row in recovered)
+    assert all(row["input_refs"]["agent_version_no"] == 1 for row in recovered)
+    assert len({key for row in recovered for key in row["action_keys"]}) == 2
+    assert (await _state(stack)).revision >= before_state.revision
+
+    # B's task really executed under B's frozen version.
+    executed_b = await _decisions(stack, run_b)
+    assert len(executed_b) == 3, executed_b
+    assert all(row["input_refs"]["agent_version"] == str(version_b_id) for row in executed_b)
+    assert all(row["input_refs"]["agent_version_no"] == 2 for row in executed_b)
+    assert len({key for row in executed_b for key in row["action_keys"]}) == 2
+
+    assert _marker_trace(stack, "business_call", "deploy-a") == [
+        (worker_a.pid, 1),
+        (worker_b.pid, 2),
+    ]
+    assert _marker_trace(stack, "business_call", "deploy-b") == [
+        (worker_b.pid, 1),
+        (worker_b.pid, 2),
+    ]
+    assert _marker_trace(stack, "model_ask", "deploy-a") == [
+        (worker_a.pid, 1),
+        (worker_a.pid, 2),
+        (worker_b.pid, 2),
+        (worker_b.pid, 3),
+    ]
+    assert _marker_trace(stack, "model_ask", "deploy-b") == [
+        (worker_b.pid, 1),
+        (worker_b.pid, 2),
+        (worker_b.pid, 3),
+    ]
+
+    # -- Default switches back to A: new submissions follow it again, ------
+    # -- while A's and B's earlier bindings stay queryable. ----------------
+    await _kill(stack, worker_b)
+    async with stack["sessions"]() as db:
+        await DeploymentRegistry(db).set_default(agent_id, deployment_a_id, workspace_id=WS, actor_id=OWNER)
+        await db.commit()
+    submit_c = await _post_task(stack, key="cutover-a-2", goal="cutover drill back on A")
+    assert submit_c.status_code == 201, submit_c.text
+    submitted_c = submit_c.json()
+    assert submitted_c["replayed"] is False
+    task_c = BackendRef(RefKind.TASK, "hecate", str(submitted_c["task_id"]))
+    run_c = BackendRef(RefKind.RUN, "hecate", str(submitted_c["run_id"]))
+    assert await _runs(stack, task_c.id) == [
+        {
+            "run_id": run_c.id,
+            "attempt": 1,
+            "deployment_id": str(deployment_a_id),
+            "agent_version_id": str(version_a_id),
+        }
+    ]
+    worker_c = await _spawn_worker(stack, "cut-c", lease_ttl=lease_ttl)
+    await _wait_task_state(stack, task_c, "succeeded")
+    assert _marker_trace(stack, "business_call", "deploy-a") == [
+        (worker_a.pid, 1),
+        (worker_b.pid, 2),
+        (worker_c.pid, 1),
+        (worker_c.pid, 2),
+    ]
+    assert _marker_trace(stack, "model_ask", "deploy-a") == [
+        (worker_a.pid, 1),
+        (worker_a.pid, 2),
+        (worker_b.pid, 2),
+        (worker_b.pid, 3),
+        (worker_c.pid, 1),
+        (worker_c.pid, 2),
+        (worker_c.pid, 3),
+    ]
+    executed_c = await _decisions(stack, run_c)
+    assert len(executed_c) == 3
+    assert all(row["input_refs"]["agent_version"] == str(version_a_id) for row in executed_c)
+
+    # History stays queryable: A's original run, B's task and the audit
+    # trail of both default changes.
+    assert await _runs(stack, task_a.id) == original_rows
+    assert await _runs(stack, task_b.id) == original_b_rows
+    await _advance_projection(stack)
+    headers = {"Authorization": f"Bearer {stack['tokens']['editor']}"}
+    for run_ref, deployment_id in ((run_a, deployment_a_id), (run_b, deployment_b_id)):
+        response = await stack["client"].get(f"/api/runs/{run_ref.id}", headers=headers)
+        assert response.status_code == 200, response.text
+        history = response.json()
+        assert history["run_id"] == run_ref.id
+        assert history["deployment_id"] == str(deployment_id)
+        assert history["projection"]["state"] == "succeeded"
+    assert len(_trace(stack, "business_call")) == 6
+    assert len(_trace(stack, "model_ask")) == 10
+
+    async with stack["sessions"]() as db:
+        audits = (
+            (
+                await db.execute(
+                    select(AuditLogModel)
+                    .where(
+                        AuditLogModel.action.in_(("AGENT_DEPLOYMENT_REGISTERED", "AGENT_DEPLOYMENT_DEFAULT_SET")),
+                        AuditLogModel.workspace_id == WS,
+                        AuditLogModel.resource_type == "agent_deployment",
+                    )
+                    .order_by(AuditLogModel.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [(row.action, row.resource_id, row.user_id, row.success) for row in audits] == [
+        ("AGENT_DEPLOYMENT_REGISTERED", deployment_b_id, OWNER, True),
+        ("AGENT_DEPLOYMENT_DEFAULT_SET", deployment_b_id, OWNER, True),
+        ("AGENT_DEPLOYMENT_DEFAULT_SET", deployment_a_id, OWNER, True),
+    ]
+    assert all(row.metadata_["agent_id"] == str(agent_id) for row in audits)
+    assert audits[0].metadata_["agent_version_id"] == str(version_b_id)
+
+    stack["observations"].append(
+        {
+            "step": "cutover-complete",
+            "worker_pids": [worker_a.pid, worker_b.pid, worker_c.pid],
+            "deployments": {"a": str(deployment_a_id), "b": str(deployment_b_id)},
+            "versions": {"a": str(version_a_id), "b": str(version_b_id)},
+            "tasks": {
+                "a_original": {"task": str(task_a.id), "run": str(run_a.id)},
+                "b_new": {"task": str(task_b.id), "run": str(run_b.id)},
+                "a_after_rollback": {"task": str(task_c.id), "run": str(run_c.id)},
+            },
+            "business_calls": {
+                "deploy-a": len(_marker_trace(stack, "business_call", "deploy-a")),
+                "deploy-b": len(_marker_trace(stack, "business_call", "deploy-b")),
+            },
+            "audits": [
+                {
+                    "id": str(row.id),
+                    "action": row.action,
+                    "deployment_id": str(row.resource_id),
+                    "actor_id": str(row.user_id),
+                    "success": row.success,
+                }
+                for row in audits
+            ],
+            "recovered_decision_digest": committed[0]["digest"],
+            "first_action_result_digest": first_receipt["last_outcome"]["result_digest"],
+            "replayed_same_task_run": True,
         }
     )
