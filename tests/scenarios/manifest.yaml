@@ -512,3 +512,26 @@ recorded_tracks:
       to this frozen configuration, the synthetic samples and the
       platform-local Controller dispatch.
     ci_gate: false
+  - id: controller_host_trusted_field_model_clarify
+    tier: 2
+    runner: tests/scenarios/baseline/run_controller_trusted_field_model_baseline.py
+    record: tests/scenarios/baselines/controller_host_experiment_controller-host-trusted-field-model-clarify-20261114T152924167119Z-dd9109.json
+    status: recorded
+    reason: >-
+      committed record is the operator-collected single-variable
+      clarification-prompt round of the same family (definition digest
+      e9a177f697bc3e4147f1771ba9b2514e27754835a161354a8e5073538244e968;
+      only the system prompt changed against the recorded pilot, pinned as
+      the definition's persona field). The candidate prompt drove the full
+      host supplement loop in every input_sourced run: the write omitted
+      order_ref, the guard intercepted with input_required, the authorized
+      answer entered the same Run, exactly one authorized write landed and
+      the delivery passed (3/3). receipt_sourced passed 2/3. One run
+      proposed no write and its final answer failed the output schema.
+      All 18 security checks passed. The request pool balance fell from
+      30 to 8 (22 units, 22 recorded rounds).
+      Evidence audited offline by
+      test_controller_trusted_field_model_evidence.py; results apply only
+      to this frozen configuration, the synthetic samples and the
+      platform-local Controller dispatch.
+    ci_gate: false

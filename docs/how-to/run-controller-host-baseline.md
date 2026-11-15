@@ -153,6 +153,17 @@ The pre-registered pilot pins the model `zai/glm-4.7-flash`, both cases, the sha
 python -m tests.scenarios.baseline.run_controller_trusted_field_model_baseline --model zai/glm-4.7-flash --print-default-definition
 ```
 
+Single-variable rounds pin a candidate system prompt as the definition's
+`persona` field (the definition digest re-keys the comparison group while
+the family identity stays untouched; the text never carries test answers).
+`--clarify-prompt` builds the recorded clarification-prompt candidate —
+combine it with `--model` for real collection and `--print-default-definition`
+to freeze it:
+
+```bash
+python -m tests.scenarios.baseline.run_controller_trusted_field_model_baseline --clarify-prompt --model zai/glm-4.7-flash --print-default-definition
+```
+
 Real collection is a manual operator step and needs, in addition to the shared gate and a credential matching the model, an armed shared request budget pool:
 
 - `HECATE_COLLECTOR_REQUEST_BUDGET` must point at a pool file holding no more units than the round cap; a missing, overfull or unreadable pool refuses collection before any provider call. Arm one pool for the whole round and keep it for every rerun — its balance only shrinks, so it is the round's hard request cap.

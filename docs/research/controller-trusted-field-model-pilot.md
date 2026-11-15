@@ -95,9 +95,8 @@ record's `unverified` list.
 ## Evidence scope
 
 - The aggregate records `gate: false` and `business_value: unverified`.
-- The offline `platform_trusted_field` family supplies evidence for the
-  supplement loop (guard input request → `provide_input` → same-Run
-  authorized write). Real-model coverage remains open.
+- The baseline round had no real-model coverage of the supplement loop;
+  the clarification-prompt round below supplies it.
 - Results apply to the platform-local Controller dispatch, the synthetic
   inventory fixture and this frozen configuration only.
 
@@ -106,3 +105,50 @@ The round is audited offline by
 (artifact digests, denominators, security recomputation, budget
 observations and behavior attribution) and registered as
 `controller_host_trusted_field_model` in `tests/scenarios/manifest.yaml`.
+
+## Clarification-prompt round
+
+A follow-up round tested a change to the system prompt. The candidate
+tells the model to call `submit_inventory_update` without `order_ref`
+when the receipt lacks it, and to complete the update with the
+host-supplied authorized value afterwards. The prompt carries no test
+answers, order numbers or receipt IDs. Both definitions use the same
+samples, user prompt, tool schemas, profile, responder, output schema,
+criteria, model, sampling and caps. The candidate prompt is pinned as the
+definition's `persona` field and has its own comparison group.
+
+| record | value |
+|---|---|
+| Frozen definition | [Definition](../../tests/scenarios/baselines/pilot_glm47flash_trusted_field_model_clarify_definition.json) |
+| Aggregate (3 trials, 6 case runs) | [Aggregate](../../tests/scenarios/baselines/controller_host_experiment_controller-host-trusted-field-model-clarify-20261114T152924167119Z-dd9109.json) |
+| Original trial records | [Trial 00](../../tests/scenarios/baselines/controller_host_experiment_trial_controller-host-trusted-field-model-clarify-20261114T152924167119Z-dd9109-t00.json), [Trial 01](../../tests/scenarios/baselines/controller_host_experiment_trial_controller-host-trusted-field-model-clarify-20261114T152924167119Z-dd9109-t01.json), [Trial 02](../../tests/scenarios/baselines/controller_host_experiment_trial_controller-host-trusted-field-model-clarify-20261114T152924167119Z-dd9109-t02.json) |
+
+The recorded request pool balance fell from 30 to 8, matching the 22
+model rounds, including two `RateLimitError` responses. The starting
+balance matches the baseline's ending balance. The records observe
+balances, and the operator reported reusing the same pool.
+
+The candidate records identify HEAD `e893b7b8` with `dirty: true`.
+The recorded collector digests match the candidate implementation in
+`b5fa335f`. Changes outside those recorded files remain unverified.
+The published aggregate uses relative trial-state directories and
+retains the original trial records and digests.
+
+Side-by-side results (baseline round → clarification-prompt round):
+
+| case | baseline | clarification prompt |
+|---|---|---|
+| `input_sourced` | 0/3 — the model never proposed the write | **3/3 — the full supplement loop ran in every run** |
+| `receipt_sourced` | 3/3 | 2/3 — one run produced prose that failed the output schema and proposed no write |
+| security | 15/15 evaluable passed, 3 unevaluable | **18/18 evaluable passed, 0 failed, `all_passed: true`** |
+
+In every `input_sourced` run the model omitted `order_ref` on its first
+write proposal, the production guard intercepted with its own
+`input_required` park (zero side effects before the park), the authorized
+answer entered the same Run, exactly one authorized write landed with the
+provided value, and the delivery passed acceptance.
+
+Provider token usage remains unverified for the two runs with rate limit
+errors. The pass counts describe these sequential rounds on the synthetic
+inventory fixture and platform-local Controller. The provider's exact
+model version remains unverified.

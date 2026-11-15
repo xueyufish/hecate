@@ -124,8 +124,14 @@ async def run_trusted_field_case(
     declare_profile: bool = True,
     rebuild_after_park: bool = False,
     write_failure: str | None = None,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
-    """Run one trusted-field case through the real platform assembly."""
+    """Run one trusted-field case through the real platform assembly.
+
+    ``system_prompt`` replaces the family's default persona in the seeded
+    agent version, so an experiment's candidate instruction reaches the
+    model through the same frozen configuration path as the default.
+    """
 
     from hecate_durable.contracts.references import BackendRef, RefKind
     from hecate_runtime.eventstore import InMemoryEventStore
@@ -171,7 +177,7 @@ async def run_trusted_field_case(
             worker = environment.make_worker()
             agent_id = await environment._seed(
                 with_approval_rule=False,
-                persona=tspec.SYSTEM_PROMPT,
+                persona=tspec.SYSTEM_PROMPT if system_prompt is None else system_prompt,
                 config_extra={"field_provenance": tspec.PROFILE_DECLARATION} if declare_profile else None,
             )
             async with environment.session_factory() as db:

@@ -84,6 +84,21 @@ ROUND_REQUEST_CAP = 48
 LIMITS = {**tspec.LIMITS, "round_request_cap": ROUND_REQUEST_CAP}
 CASE_CRITERIA = {case: tspec.CASE_CRITERIA[case] for case in MODEL_CASES}
 SECURITY_RULES = {case: tspec.SECURITY_RULES[case] for case in MODEL_CASES}
+# Single-variable candidate round: the ONLY change against the recorded
+# #398 pilot is this system prompt. It names the omission path explicitly
+# and carries no test answers, order numbers or receipt ids.
+CLARIFY_EXPERIMENT_ID = "controller-host-trusted-field-model-clarify"
+CLARIFY_SYSTEM_PROMPT = (
+    "Read stock first. If reorder is true, submit exactly one inventory update "
+    "carrying the procurement order reference (order_ref). Never invent an "
+    "order_ref: use one only from the read receipt or from the provided input. "
+    "If the read receipt has no order_ref, still call submit_inventory_update "
+    "with the other required arguments and omit order_ref; the host will then "
+    "ask for the authorized value and hand it to you. When the host supplies "
+    "that authorized order_ref, complete the update with exactly that value. "
+    'Return final output as JSON {"answer":"..."} including the resulting '
+    "update_id from the actual write receipt."
+)
 UNVERIFIED = (
     "real human wait time (the injected responder answers immediately; no human waited)",
     "provider price and final billing",
@@ -95,7 +110,13 @@ UNVERIFIED = (
 
 
 def scenario_digest() -> str:
-    """Digest the offline scenario identity plus this family's own additions."""
+    """Digest the offline scenario identity plus this family's own additions.
+
+    The digest pins the family identity (profile, cases, rubric, limits);
+    a candidate system prompt rides the definition's own ``persona`` field
+    and is pinned by the definition digest, which re-keys the comparison
+    group without moving the family identity.
+    """
 
     return spec.digest(
         {
@@ -141,6 +162,11 @@ MODEL_DEFINITION_SCHEMA: dict[str, Any] = {
         "scenario": {"const": SCENARIO_ID},
         "source_mode": {"enum": ["deterministic_injection", "real_model"]},
         "model": {"type": ["string", "null"]},
+        # Optional single-variable system prompt: its text rides the
+        # definition and is pinned by the definition digest, so a candidate
+        # round forms its own comparison group while the family's
+        # scenario_digest stays untouched.
+        "persona": {"type": "string", "pattern": r"\S"},
         "hosts": {"const": list(HOSTS)},
         "cases": {"type": "array", "items": {"enum": list(MODEL_CASES)}, "minItems": 1, "uniqueItems": True},
         "repetitions": {"type": "integer", "minimum": 1, "maximum": 20},
@@ -561,14 +587,18 @@ def _evidence_gap(verdict: Any, observation: dict[str, Any]) -> bool:
     )
 
 
-async def _run_case(case: str, provider: Any, root: Path, *, source: str) -> dict[str, Any]:
+async def _run_case(
+    case: str, provider: Any, root: Path, *, source: str, system_prompt: str | None = None
+) -> dict[str, Any]:
     started = time.monotonic()
     real = source == "real_model"
     before = _balance() if real else None
     try:
         if real and before == 0:
             raise RequestBudgetExhaustedError("collector request budget exhausted before the case")
-        observation = await driver.run_trusted_field_case(case, _BoundedProvider(provider), root)
+        observation = await driver.run_trusted_field_case(
+            case, _BoundedProvider(provider), root, system_prompt=system_prompt
+        )
     except Exception as exc:  # noqa: BLE001 — the collection failure is the record
         observation = {
             "task_id": None,
@@ -656,6 +686,11 @@ async def _run_case(case: str, provider: Any, root: Path, *, source: str) -> dic
     }
 
 
+def _validate_persona(value: str) -> None:
+    if not isinstance(value, str) or not value.strip() or value.strip() != value:
+        raise ValueError("persona must be a nonblank trimmed string")
+
+
 def _skip_reason(model: str) -> str | None:
     if os.environ.get(collector.REAL_MODE_GATE_ENV) != "1":
         return f"{collector.REAL_MODE_GATE_ENV} must be 1 to enable real provider calls"
@@ -677,13 +712,23 @@ async def collect(
     cases: tuple[str, ...] = MODEL_CASES,
     root: Path | None = None,
     case_pacing_seconds: float = 0.0,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
-    """Collect the pilot cases once and return the validated trial report."""
+    """Collect the pilot cases once and return the validated trial report.
+
+    ``system_prompt`` replaces the family's default persona for one frozen
+    round (the definition's ``persona`` field feeds it through the
+    experiment layer); the resolved prompt is recorded with the trial so
+    the definition, the recorded model input and the record cross-check.
+    """
 
     if not hosts or tuple(hosts) != HOSTS:
         raise ValueError("the trusted-field model pilot runs on the platform host only")
     if not cases or len(set(cases)) != len(cases) or any(case not in MODEL_CASES for case in cases):
         raise ValueError("cases must be a nonempty unique subset of the pilot delivery cases")
+    if system_prompt is not None:
+        _validate_persona(system_prompt)
+    resolved_prompt = tspec.SYSTEM_PROMPT if system_prompt is None else system_prompt
     if model is None and provider is None:
         provider = tspec.ScriptedTrustedFieldProvider()
     real_provider = isinstance(provider, LiteLLMProvider)
@@ -729,7 +774,8 @@ async def collect(
             "limits": dict(LIMITS),
             "thresholds": dict(tspec.THRESHOLDS),
             "dataset_source": "synthetic_inventory",
-            "prompt_digest": spec.digest([tspec.SYSTEM_PROMPT, tspec.USER_PROMPT]),
+            "prompt_digest": spec.digest([resolved_prompt, tspec.USER_PROMPT]),
+            "persona": resolved_prompt,
             "tool_digest": spec.digest(tspec.tool_definitions()),
             "hosts": list(hosts),
             "budget": budget,
@@ -755,7 +801,9 @@ async def collect(
         # case the empty pool refuses without a provider call needs none.
         if not hermetic and case_pacing_seconds > 0 and _balance() != 0:
             await asyncio.sleep(case_pacing_seconds)
-        report["runs"].append(await _run_case(case, _bind(provider, case), work_root, source=source))
+        report["runs"].append(
+            await _run_case(case, _bind(provider, case), work_root, source=source, system_prompt=system_prompt)
+        )
     if not hermetic:
         budget["remaining_at_end"] = _balance()
     report["_meta"]["collection"] = {
@@ -774,13 +822,21 @@ def build_definition(
     source_mode: str = "deterministic_injection",
     model: str | None = None,
     experiment_id: str = EXPERIMENT_ID,
+    persona: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble and validate a pilot definition (real mode pins its model)."""
+    """Assemble and validate a pilot definition (real mode pins its model).
+
+    ``persona`` replaces the family's default system prompt for one frozen
+    round; its text rides the definition so the definition digest pins the
+    exact model-facing instruction.
+    """
 
     if source_mode == "real_model" and not (model and model.strip()):
         raise ValueError("real_model trusted-field pilot definitions must pin a concrete model")
     if source_mode == "deterministic_injection" and model:
         raise ValueError("deterministic_injection trusted-field pilot definitions must not pin a provider model")
+    if persona is not None:
+        _validate_persona(persona)
     definition: dict[str, Any] = {
         "id": experiment_id,
         "definition_version": experiment.EXPERIMENT_VERSION,
@@ -798,6 +854,7 @@ def build_definition(
             "case_criteria": {case: CASE_CRITERIA[case] for case in cases},
             "security": {"max_side_effects_per_case": 1, "zero_write_cases": []},
         },
+        **({"persona": persona} if persona is not None else {}),
     }
     Draft202012Validator(MODEL_DEFINITION_SCHEMA).validate(definition)
     return definition
@@ -809,15 +866,35 @@ def build_pilot_definition() -> dict[str, Any]:
     return build_definition(PILOT_REPETITIONS, source_mode="real_model", model=PILOT_MODEL)
 
 
+def build_clarify_definition() -> dict[str, Any]:
+    """The single-variable clarification-prompt round (own comparison group)."""
+
+    return build_definition(
+        PILOT_REPETITIONS,
+        source_mode="real_model",
+        model=PILOT_MODEL,
+        persona=CLARIFY_SYSTEM_PROMPT,
+        experiment_id=CLARIFY_EXPERIMENT_ID,
+    )
+
+
 def _planned_source(definition: dict[str, Any], case: str) -> str:
     return "real_model" if definition["source_mode"] == "real_model" else "deterministic_injection"
 
 
 def _validate_definition(definition: dict[str, Any]) -> None:
+    if "persona" in definition:
+        _validate_persona(definition["persona"])
     if definition["source_mode"] == "real_model" and not (definition["model"] and str(definition["model"]).strip()):
         raise ValueError("real_model trusted-field pilot definitions must pin a concrete model")
     if definition["source_mode"] == "deterministic_injection" and definition["model"]:
         raise ValueError("deterministic_injection trusted-field pilot definitions must not pin a provider model")
+
+
+def _definition_collect_extras(definition: dict[str, Any]) -> dict[str, Any]:
+    """Feed a definition's own persona through to the real assembly."""
+
+    return {"system_prompt": definition["persona"]} if "persona" in definition else {}
 
 
 def _register() -> None:
@@ -847,6 +924,7 @@ def _register() -> None:
                     "run_count",
                 ),
                 security_rules=SECURITY_RULES,
+                definition_collect_extras=_definition_collect_extras,
             )
         )
     except ValueError:
@@ -877,6 +955,14 @@ def main(argv: list[str] | None = None) -> Path | None:
         "--model", default=None, help=f"select real-model collection with this model (pilot: {PILOT_MODEL})"
     )
     parser.add_argument(
+        "--clarify-prompt",
+        action="store_true",
+        help=(
+            "run the single-variable clarification-prompt round (own experiment id and "
+            "comparison group; combine with --model for real collection)"
+        ),
+    )
+    parser.add_argument(
         "--print-default-definition",
         action="store_true",
         help="print the definition that would run (real_model when --model is given) and exit",
@@ -893,9 +979,19 @@ def main(argv: list[str] | None = None) -> Path | None:
     args = parser.parse_args(argv)
     if args.definition is not None and args.repetitions is not None:
         parser.error("--repetitions cannot override a pinned --definition")
+    if args.definition is not None and args.clarify_prompt:
+        parser.error("--clarify-prompt builds its own definition; drop --definition")
     repetitions = args.repetitions if args.repetitions is not None else PILOT_REPETITIONS
     if args.definition is not None:
         definition = experiment.load_definition(Path(args.definition), scenario=SCENARIO_ID)
+    elif args.clarify_prompt:
+        definition = build_definition(
+            repetitions,
+            source_mode="real_model" if args.model is not None else "deterministic_injection",
+            model=args.model,
+            persona=CLARIFY_SYSTEM_PROMPT,
+            experiment_id=CLARIFY_EXPERIMENT_ID,
+        )
     elif args.model is not None:
         definition = build_definition(repetitions, source_mode="real_model", model=args.model)
     else:

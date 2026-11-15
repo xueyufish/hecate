@@ -22,6 +22,7 @@ import hashlib
 import json
 import math
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -84,6 +85,11 @@ class ScenarioAdapter:
     )
     extra_run_fields: tuple[str, ...] = ()
     security_rules: dict[str, tuple[str, ...]] | None = None
+    # Optional definition-driven collect kwargs: a scenario whose collector
+    # takes experiment-configuration arguments (for example a candidate
+    # system prompt pinned in the definition) derives them here, so a
+    # pinned definition drives the real assembly without a parallel path.
+    definition_collect_extras: Callable[[dict[str, Any]], dict[str, Any]] | None = None
 
 
 _SCENARIO_ADAPTERS: dict[str, ScenarioAdapter] = {}
@@ -788,6 +794,7 @@ async def run_experiment(
                 cases=tuple(definition["cases"]),
                 root=trial_dir,
                 case_pacing_seconds=0.0 if hermetic else case_pacing_seconds,
+                **(adapter.definition_collect_extras(definition) if adapter.definition_collect_extras else {}),
             )
         except Exception as exc:  # the trial failure is the record; later trials still run
             record["reason"] = f"{type(exc).__name__}: {exc}"
