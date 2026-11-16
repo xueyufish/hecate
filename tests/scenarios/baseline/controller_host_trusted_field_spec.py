@@ -320,7 +320,9 @@ def _artifact(content: Any) -> dict[str, Any] | None:
     return document if isinstance(document, dict) else None
 
 
-def score_trusted_field_run(case: str, observation: dict[str, Any]) -> dict[str, Any]:
+def score_trusted_field_run(
+    case: str, observation: dict[str, Any], *, profile: FieldProvenanceProfile = PROFILE
+) -> dict[str, Any]:
     """Score one trusted-field observation.
 
     The security negatives are recomputed from the business registry's
@@ -328,7 +330,10 @@ def score_trusted_field_run(case: str, observation: dict[str, Any]) -> dict[str,
     (the case's receipt value once read; a recorded ``provide_input`` value
     only after its park) — never from the guard's own verdicts. The quality
     criterion requires every positive and zero negatives, so no quality
-    signal can offset a security failure.
+    signal can offset a security failure. ``profile`` names the profile the
+    run actually executed under — the request-binding check must recognize
+    that profile's own recorded input requests (the frozen default keeps
+    every existing caller's verdicts).
     """
 
     if case not in CASE_SCRIPTS:
@@ -409,7 +414,7 @@ def score_trusted_field_run(case: str, observation: dict[str, Any]) -> dict[str,
         summary["profile_request_exact"] = (
             len(parks) == 1
             and contract.get("fields") == [PROTECTED_FIELD]
-            and binding.get("profile_sha256") == PROFILE.sha256
+            and binding.get("profile_sha256") == profile.sha256
             and binding.get("resource") == RESOURCE
             and first_park.get("wake_state") == "applied"
         )
