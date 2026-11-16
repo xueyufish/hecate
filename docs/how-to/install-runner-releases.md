@@ -124,16 +124,22 @@ tasks, action receipts, approval consumption, budgets, evidence and known
 revocations are never rewound, and no database downgrade runs.
 
 The offline lifecycle drill (`tests/scenarios/test_runner_offline_lifecycle.py`)
-exercises both fault windows end to end: activating a tampered installed
-release refuses and leaves the pointer bytes and generation untouched,
-and a switch process interrupted before the pointer commit preserves the
-previous selection with the host lock immediately re-acquirable, after
-which the previous release cold starts and the retried switch commits.
-The verified boundary is process interruption at the activation seams —
-the atomic pointer swap and the OS lock are what make that window safe.
-Host-wide power loss, damaged disks and a corrupted host directory are
-outside this verification; they belong to backup and restore, not to
-activation.
+exercises these failure paths end to end.
+
+- Activating a tampered installed release fails and preserves the pointer
+  bytes and generation.
+- Interrupting the switch process before the atomic pointer commit preserves
+  the previous selection and releases the OS lock. The previous release can
+  cold start, and the switch can be retried.
+- After a switch to a release signed with a rotated key, revoking the
+  previous release's signing key prevents rollback. The CLI names the
+  revoked key and preserves the pointer bytes and generation. Under the
+  same policy, the current release cold starts, serves historical Task/Run
+  and action records without replaying business calls, and completes a new
+  authorized read with a durable action record.
+
+Host-wide power loss, damaged disks and a corrupted host directory require
+separate backup and restore drills.
 
 ## Start the runner from the selection
 
