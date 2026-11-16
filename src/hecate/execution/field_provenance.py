@@ -20,7 +20,19 @@ Legal sources are read exclusively from durable host facts:
 
 Model text, provenance claims inside arguments, undeclared tools, results
 of the same decision, other Tasks and Runs, live supplements and revisions
-the current decision does not pin never supply a value. The guard runs at
+the current decision does not pin never supply a value. A rule may also
+declare ``write_once``: an explicit, per-tool opt-in under which one Run
+may write one resource through that tool at most once. The second write
+attempt of the same workspace, Task, Run, tool and resource — even with a
+sourced value and even with different non-protected arguments — is
+refused as ``duplicate`` before the business call; the first receipt
+stays. An earlier write whose outcome is not established (claimed, lost
+or failed with a pending reconciliation) stops the resource for
+reconciliation instead. An input request and a provenance refusal never
+consume the write: the authorization supplement can still complete the
+Run's first write.
+
+The guard runs at
 the governed execution boundary — after authorization, approval and the
 action-ledger claim, before the business call — so its verdict is the
 action's recorded outcome:
@@ -30,8 +42,9 @@ action's recorded outcome:
   absent, guessed, or an exact guess without a source;
 - refusal (explicit stop, zero business effect): sources disagree or
   contradict the argument (``conflict``), the decision, resource or profile
-  binding is not established (``unbound``), or the durable facts cannot be
-  read or verified (``unavailable``).
+  binding is not established (``unbound``), the durable facts cannot be
+  read or verified (``unavailable``), or the Run already wrote this
+  resource through a write-once tool (``duplicate``).
 """
 
 from __future__ import annotations
@@ -48,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 FIELD_PROVENANCE_VERSION = 1
 FIELD_PROVENANCE_REFUSED = "field_provenance_refused"
-REFUSAL_REASONS = ("conflict", "unbound", "unavailable")
+REFUSAL_REASONS = ("conflict", "unbound", "unavailable", "duplicate")
 PROVIDE_INPUT_SOURCE = "provide_input"
 # Wait-control keys are never business data a supplement could carry.
 _RESERVED_FIELDS = frozenset({"approval_ref", "wait_token", "agent_child_result"})
@@ -104,7 +117,11 @@ class ReadReceiptSource:
 
 @dataclass(frozen=True)
 class FieldProvenanceRule:
-    """One protected field of one write tool and its legal sources."""
+    """One protected field of one write tool and its legal sources.
+
+    ``write_once`` is the explicit per-tool duplicate-write opt-in: rules of
+    one tool must declare it identically, like their ``resource_keys``.
+    """
 
     tool: str
     field: str
@@ -112,9 +129,14 @@ class FieldProvenanceRule:
     read_receipts: tuple[ReadReceiptSource, ...] = ()
     provided_input: bool = False
     prompt: str | None = None
+    write_once: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """The normalized declaration of this rule."""
+        """The normalized declaration of this rule.
+
+        The write-once key appears only when enabled, so declarations
+        committed before the opt-in keep their frozen digest byte-for-byte.
+        """
         return {
             "tool": self.tool,
             "field": self.field,
@@ -124,6 +146,7 @@ class FieldProvenanceRule:
                 "provided_input": self.provided_input,
             },
             **({"prompt": self.prompt} if self.prompt is not None else {}),
+            **({"write_once": True} if self.write_once else {}),
         }
 
 
@@ -173,12 +196,13 @@ class FieldProvenanceProfile:
         rules: list[FieldProvenanceRule] = []
         seen: set[tuple[str, str]] = set()
         resource_by_tool: dict[str, tuple[str, ...]] = {}
+        write_once_by_tool: dict[str, bool] = {}
         for index, raw in enumerate(raw_rules):
             label = f"field_provenance.rules[{index}]"
             entry = _object(
                 raw,
                 label,
-                allowed={"tool", "field", "resource_keys", "sources", "prompt"},
+                allowed={"tool", "field", "resource_keys", "sources", "prompt", "write_once"},
                 required={"tool", "field", "resource_keys", "sources"},
             )
             tool = _name(entry["tool"], f"{label}.tool")
@@ -199,6 +223,13 @@ class FieldProvenanceProfile:
             # One resource identity per tool: an input request binds exactly one resource.
             if resource_by_tool.setdefault(tool, resource_keys) != resource_keys:
                 raise FieldProvenanceDeclarationError(f"{label}: rules of one tool must declare the same resource_keys")
+            write_once = entry.get("write_once", False)
+            if not isinstance(write_once, bool):
+                raise FieldProvenanceDeclarationError(f"{label}.write_once must be a boolean")
+            # Duplicate admission is a property of the write action, not of
+            # one field: rules of one tool must opt in together.
+            if write_once_by_tool.setdefault(tool, write_once) != write_once:
+                raise FieldProvenanceDeclarationError(f"{label}: rules of one tool must declare the same write_once")
             sources = _object(
                 entry["sources"], f"{label}.sources", allowed={"read_receipts", "provided_input"}, required=set()
             )
@@ -227,7 +258,8 @@ class FieldProvenanceProfile:
                 raise FieldProvenanceDeclarationError(
                     f"{label}.prompt must be a nonblank string of at most 500 characters"
                 )
-            rules.append(FieldProvenanceRule(tool, field_name, resource_keys, tuple(reads), provided, prompt))
+            rule = FieldProvenanceRule(tool, field_name, resource_keys, tuple(reads), provided, prompt, write_once)
+            rules.append(rule)
         return cls(profile=profile, rules=tuple(rules))
 
 
@@ -258,6 +290,25 @@ class SupplementFact:
 
 
 @dataclass(frozen=True)
+class WriteFact:
+    """A dispatched write attempt of this Run's ledger for one resource.
+
+    ``consumed`` marks an attempt that reached the business boundary (its
+    receipt is a real result). ``result_known=False`` marks one whose
+    outcome is not established — claimed, lost or failed with a pending
+    reconciliation — which stops the resource for reconciliation. An input
+    request and a provenance refusal never become facts: they consume no
+    write.
+    """
+
+    execution_id: str
+    tool: str
+    resource: dict[str, str]
+    consumed: bool
+    result_known: bool
+
+
+@dataclass(frozen=True)
 class ProvenanceFacts:
     """Durable facts in scope for one protected action of decision ``turn``."""
 
@@ -265,6 +316,7 @@ class ProvenanceFacts:
     reads: tuple[ReadFact, ...] = ()
     supplements: tuple[SupplementFact, ...] = ()
     execution_id: str = ""
+    writes: tuple[WriteFact, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -295,6 +347,10 @@ def evaluate_field_provenance(
         if not _is_value(value):
             return FieldVerdict("refuse", fields, "unbound")
         resource[key] = value
+    if any(rule.write_once for rule in rules):
+        duplicate = _duplicate_write(rules[0].tool, resource, facts)
+        if duplicate is not None:
+            return FieldVerdict("refuse", fields, duplicate, resource)
     missing: list[str] = []
     for rule in rules:
         outcome = _evaluate_rule(rule, arguments, resource, facts)
@@ -305,6 +361,29 @@ def evaluate_field_provenance(
     if missing:
         return FieldVerdict("input_required", tuple(missing), None, resource)
     return FieldVerdict("allow", fields, None, resource)
+
+
+def _duplicate_write(tool: str, resource: dict[str, str], facts: ProvenanceFacts) -> str | None:
+    """The refusal reason for a repeat write of one resource, or ``None``.
+
+    The current action never blocks itself; every other committed write of
+    the same tool and resource does. An unresolved outcome wins over a
+    completed one: the resource must be reconciled before anything else
+    may be claimed for it.
+    """
+
+    duplicate = False
+    unresolved = False
+    for fact in facts.writes:
+        if fact.tool != tool or fact.resource != resource or fact.execution_id == facts.execution_id:
+            continue
+        if not fact.result_known:
+            unresolved = True
+        elif fact.consumed:
+            duplicate = True
+    if unresolved:
+        return "unavailable"
+    return "duplicate" if duplicate else None
 
 
 def _evaluate_rule(
@@ -462,6 +541,9 @@ def _load(
         raise _UnboundError("the accepted decision was not taken under this profile")
     turn = turns[record.decision_step_id]
     by_turn = {turns[item.decision_step_id]: item for item in records}
+    # Distinct name: the reads loop below reuses a local ``execution_id``
+    # for each receipt, and the current action's identity must survive it.
+    current_execution_id = execution_id_for_action(controller_run, record.decision_step_id, action.action_key)
 
     read_tools = {source.tool for rule in rules for source in rule.read_receipts}
     reads: list[ReadFact] = []
@@ -505,11 +587,44 @@ def _load(
             binding = _applied_input_request(store, task_ref, run_ref, row)
             request = _answered_request(store, task_ref, run_ref, controller_run, profile, asking, binding)
             supplements.append(SupplementFact(revision_id, dict(row["content"]), row["effective_turn"], request))
+
+    # Write-once admission facts: every DISPATCHED earlier action of a
+    # write-once tool in this Run, same Task and Run identities, classified
+    # from its committed ledger receipt. Never dispatched consumes nothing;
+    # an input request and a provenance refusal consume nothing; a real
+    # result blocks a repeat; an unresolved outcome stops the resource.
+    writes: list[WriteFact] = []
+    write_tools = {rule.tool for rule in rules if rule.write_once}
+    if write_tools:
+        resource_keys = rules[0].resource_keys
+        for earlier in records:
+            for item in earlier.actions:
+                if item.tool not in write_tools:
+                    continue
+                earlier_execution_id = execution_id_for_action(
+                    controller_run, earlier.decision_step_id, item.action_key
+                )
+                if earlier_execution_id == current_execution_id:
+                    continue  # the current action never blocks itself
+                row = _ledger_row(store, task_ref, run_ref, controller_run, earlier.decision_step_id, item)
+                if row is None:
+                    continue  # never dispatched
+                if earlier.input_refs.get("field_provenance") != profile.pin():
+                    raise _UnavailableError("a write attempt belongs to a different profile")
+                resource = {key: item.arguments.get(key) for key in resource_keys}
+                consumed = _write_consumed(row, earlier_execution_id, item.tool, resource, profile)
+                if consumed is True:
+                    writes.append(WriteFact(earlier_execution_id, item.tool, resource, True, True))
+                elif consumed is None:
+                    writes.append(WriteFact(earlier_execution_id, item.tool, resource, False, False))
+                # Settled without business effect (input request, refusal):
+                # consumes nothing, records no fact.
     return ProvenanceFacts(
         turn=turn,
         reads=tuple(reads),
         supplements=tuple(supplements),
-        execution_id=execution_id_for_action(controller_run, record.decision_step_id, action.action_key),
+        execution_id=current_execution_id,
+        writes=tuple(writes),
     )
 
 
@@ -540,6 +655,33 @@ def _succeeded(row: dict[str, Any]) -> bool:
     if outcome.get("result_digest") != (tool_arguments_digest(payload) if payload is not None else None):
         raise _UnavailableError("the source receipt does not match its result digest")
     return True
+
+
+def _write_consumed(
+    row: dict[str, Any], execution_id: str, tool: str, resource: dict[str, str], profile: FieldProvenanceProfile
+) -> bool | None:
+    """Whether one committed write receipt consumed the resource's write.
+
+    ``True`` — a real business result: the write happened. ``False`` — a
+    settled outcome with no business effect (this profile's input request
+    or refusal). ``None`` — the outcome is not established: claimed, lost,
+    or failed with a pending reconciliation; the resource stops for
+    reconciliation instead of admitting another write.
+    """
+
+    if not _succeeded(row):
+        return None
+    payload = row.get("result_payload")
+    request = profile_request(payload, profile)
+    if (
+        request is not None
+        and request["tool"] == tool
+        and request["resource"] == resource
+        and set(request["fields"]) <= {rule.field for rule in profile.rules_for(tool) if rule.provided_input}
+    ):
+        return False
+    refusal = field_provenance_refusal(_result_object(payload), execution_id=execution_id, tool=tool, profile=profile)
+    return refusal is None
 
 
 def _result_object(result: Any) -> dict[str, Any] | None:
@@ -775,7 +917,17 @@ class ControllerFieldProvenanceGuard:
                 if (observed := self._observed_reads.get(read.execution_id)) is not None
                 and (observed == str(read.result) or _result_object(observed) == read.result)
             )
-            verdict = evaluate_field_provenance(rules, arguments, ProvenanceFacts(facts.turn, reads, facts.supplements))
+            verdict = evaluate_field_provenance(
+                rules,
+                arguments,
+                ProvenanceFacts(
+                    turn=facts.turn,
+                    reads=reads,
+                    supplements=facts.supplements,
+                    execution_id=facts.execution_id,
+                    writes=facts.writes,
+                ),
+            )
         except _UnboundError as exc:
             logger.warning("field provenance binding not established for %s: %s", name, exc)
             verdict = FieldVerdict("refuse", fields, "unbound")
