@@ -1,8 +1,7 @@
 """Network egress policy for DockerEnvironment.
 
-Controls outbound network access from agent containers. When mode is
-``deny_all``, only whitelisted domains are reachable through an egress
-proxy; all other traffic is blocked.
+Defines domain matching and optional firewall rules. DockerEnvironment's
+empty-allow-list profile uses Docker's none network.
 """
 
 from __future__ import annotations
@@ -108,9 +107,13 @@ class NetworkEgressPolicy:
             for ip in sorted(ips):
                 rules.extend(_iptables_allow_rule(ip))
 
-        cmd = ["docker", "exec", container_id, "sh", "-c", " && ".join(rules)] if rules else None
-        if not cmd:
-            return True
+        # Default deny closes everything the allow rules did not open —
+        # also the only rule when the allow-list is empty. Both families
+        # are installed so an IPv6 route cannot bypass the IPv4 deny.
+        rules.append("iptables -A OUTPUT -j REJECT --reject-with icmp-net-unreachable")
+        rules.append("ip6tables -A OUTPUT -j REJECT")
+
+        cmd = ["docker", "exec", container_id, "sh", "-c", " && ".join(rules)]
 
         try:
             proc = await asyncio.create_subprocess_exec(

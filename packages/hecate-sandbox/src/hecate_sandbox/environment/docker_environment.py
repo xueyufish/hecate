@@ -72,19 +72,22 @@ class DockerEnvironment(AgentEnvironment):
         self._image = image or settings.DOCKER_AGENT_IMAGE
         self._runtime = runtime or settings.DOCKER_RUNTIME
         self._network_mode = network_mode or settings.DOCKER_NETWORK_MODE
+        if self._network_mode == "default":
+            self._network_mode = "bridge"
         self._docker_url = docker_url
         self._container_name = f"hecate-agent-{agent_id}"
         self._volume_name = f"agent-{agent_id}"
         self._client: aiodocker.Docker | None = None
         self._container: Any = None
         self._started = False
+        self._retired = False
+        self._lifecycle_lock = asyncio.Lock()
         self._network_policy = network_policy or NetworkEgressPolicy(
             mode=NetworkPolicyMode(settings.AGENT_ENV_NETWORK_POLICY),
         )
         self._credential_scope = credential_scope or CredentialScope(
             enabled=settings.AGENT_ENV_CREDENTIAL_SCOPING,
         )
-        self._internal_network_name: str | None = None
 
     @property
     def environment_id(self) -> str:
@@ -95,49 +98,124 @@ class DockerEnvironment(AgentEnvironment):
         return Path(_CONTAINER_WORKDIR)
 
     async def _ensure_started(self) -> None:
-        """Ensure the Docker client is connected and container is running."""
-        if self._started:
-            return
-        if self._client is None:
-            import aiodocker
+        """Connect and start a container verified against the configured policy."""
+        async with self._lifecycle_lock:
+            if self._retired:
+                raise RuntimeError("Docker environment was retired after a security policy change")
+            if self._started:
+                return
+            if self._network_policy.mode == NetworkPolicyMode.DENY_ALL and self._network_policy.allowed_domains:
+                raise RuntimeError("Docker deny_all requires an empty egress allow-list")
+            if self._client is None:
+                import aiodocker
 
-            self._client = aiodocker.Docker(url=self._docker_url)
-
-        await self._ensure_container()
-        self._started = True
+                self._client = aiodocker.Docker(url=self._docker_url)
+            try:
+                await self._ensure_container()
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await self._client.close()
+                self._client = None
+                self._container = None
+                raise
+            self._started = True
 
     async def _ensure_container(self) -> None:
-        """Find an existing container by name or create a new one."""
+        """Reuse a verified container or replace a known stale agent container."""
+        from aiodocker.exceptions import DockerError
+
         if self._client is None:
             raise RuntimeError("Docker client not initialized")
-
         try:
-            self._container = await self._client.containers.get(self._container_name)
-            state = self._container._container.get("State", {})
-            if state.get("Status") != "running":
-                await self._container.start()
-            logger.debug("Reusing container %s for agent %s", self._container_name, self._agent_id)
+            container = await self._client.containers.get(self._container_name)
+        except DockerError as exc:
+            if exc.status != 404:
+                raise
+            await self._create_container()
             return
-        except Exception as exc:
-            logger.debug("Container %s not found, creating: %s", self._container_name, exc)
 
-        await self._create_container()
+        info = await container.show()
+        mismatch = await self._container_mismatch(info)
+        if mismatch is not None:
+            logger.warning("Replacing container %s: %s", self._container_name, mismatch)
+            try:
+                await container.delete(force=True)
+            except DockerError as exc:
+                if exc.status != 404:
+                    raise
+            await self._create_container()
+            return
+
+        if info["State"]["Status"] != "running":
+            await container.start()
+        self._container = container
+
+    async def _container_mismatch(self, info: Any) -> str | None:
+        """Refuse incomplete records and identify a verified agent container's policy mismatch."""
+        label = self._container_name
+        if not isinstance(info, dict):
+            raise RuntimeError(f"cannot verify container {label}: invalid inspect record")
+        config = info.get("Config")
+        state = info.get("State")
+        mounts = info.get("Mounts")
+        if (
+            not isinstance(config, dict)
+            or not isinstance(config.get("Image"), str)
+            or not isinstance(state, dict)
+            or not isinstance(state.get("Status"), str)
+            or not isinstance(mounts, list)
+            or any(not isinstance(mount, dict) for mount in mounts)
+        ):
+            raise RuntimeError(f"cannot verify container {label}: incomplete inspect record")
+        env_mounts = [mount for mount in mounts if mount.get("Destination") == _CONTAINER_WORKDIR]
+        if len(env_mounts) != 1 or (
+            env_mounts[0].get("Type") != "volume"
+            or env_mounts[0].get("Name") != self._volume_name
+            or env_mounts[0].get("RW") is not True
+        ):
+            raise RuntimeError(f"cannot verify container {label}: expected writable agent volume at /env")
+
+        host = info.get("HostConfig")
+        if not isinstance(host, dict) or not isinstance(host.get("NetworkMode"), str):
+            raise RuntimeError(f"cannot verify container {label}: missing host network configuration")
+        deny_all = self._network_policy.mode == NetworkPolicyMode.DENY_ALL
+        if (deny_all or self._credential_scope.enabled) and (
+            len(mounts) != 1
+            or any(host.get(key) for key in ("Privileged", "PidMode", "Devices", "CapAdd"))
+            or host.get("IpcMode") == "host"
+        ):
+            return "container has extra mounts, privileges or shared host namespaces"
+        if deny_all:
+            network_settings = info.get("NetworkSettings")
+            networks = network_settings.get("Networks") if isinstance(network_settings, dict) else None
+            if not isinstance(networks, dict) or not networks:
+                raise RuntimeError(f"cannot verify container {label}: missing network attachments")
+            if host["NetworkMode"] != "none" or set(networks) != {"none"}:
+                return "deny_all requires Docker's none network"
+        elif host["NetworkMode"] != self._network_mode:
+            return "container network mode differs from the configured mode"
+        if config["Image"] != self._image:
+            return "container image differs from the configured image"
+        if self._runtime and host.get("Runtime") != self._runtime:
+            return "container runtime differs from the configured runtime"
+        if self._credential_scope.enabled:
+            if self._client is None or not isinstance(info.get("Image"), str):
+                raise RuntimeError(f"cannot verify container {label}: missing image identity")
+            image = await self._client.images.inspect(info["Image"])
+            image_config = image.get("Config")
+            if not isinstance(image_config, dict) or "Env" not in config or "Env" not in image_config:
+                raise RuntimeError(f"cannot verify container {label}: missing environment configuration")
+            if (config["Env"] or []) != (image_config["Env"] or []):
+                return "container environment differs from the image defaults"
+        return None
 
     async def _create_container(self) -> None:
-        """Create and start a new container with named volume."""
+        """Create a verified container with the agent's persistent volume."""
         if self._client is None:
             raise RuntimeError("Docker client not initialized")
 
-        try:
-            await self._client.volumes.create({"Name": self._volume_name})
-        except Exception as exc:
-            logger.debug("Volume %s may already exist: %s", self._volume_name, exc)
-
-        effective_network = self._network_mode
-        if self._network_policy.mode == NetworkPolicyMode.DENY_ALL:
-            await self._ensure_internal_network()
-            effective_network = self._internal_network_name or self._network_mode
-
+        await self._client.volumes.create({"Name": self._volume_name})
+        network = "none" if self._network_policy.mode == NetworkPolicyMode.DENY_ALL else self._network_mode
         create_config: dict[str, Any] = {
             "Image": self._image,
             "Cmd": ["sleep", "infinity"],
@@ -150,47 +228,23 @@ class DockerEnvironment(AgentEnvironment):
                         "Target": _CONTAINER_WORKDIR,
                     },
                 ],
-                "NetworkMode": effective_network,
+                "NetworkMode": network,
             },
         }
-
-        if self._runtime and self._runtime != "runc":
+        if self._runtime:
             create_config["HostConfig"]["Runtime"] = self._runtime
 
-        self._container = await self._client.containers.create_or_replace(
-            name=self._container_name,
-            config=create_config,
-        )
-        await self._container.start()
-        logger.info(
-            "Created container %s for agent %s (network=%s, policy=%s)",
-            self._container_name,
-            self._agent_id,
-            effective_network,
-            self._network_policy.mode.value,
-        )
-
-    async def _ensure_internal_network(self) -> None:
-        """Create an internal Docker network with no internet gateway."""
-        if self._client is None:
-            raise RuntimeError("Docker client not initialized")
-        if self._internal_network_name:
-            return
-
-        net_name = f"hecate-internal-{self._agent_id[:12]}"
+        container = await self._client.containers.create(create_config, name=self._container_name)
         try:
-            await self._client.networks.create(
-                {
-                    "Name": net_name,
-                    "Internal": True,
-                    "Driver": "bridge",
-                },
-            )
-            self._internal_network_name = net_name
-            logger.info("Created internal network %s for deny_all policy", net_name)
-        except Exception as exc:
-            logger.debug("Network %s may already exist: %s", net_name, exc)
-            self._internal_network_name = net_name
+            mismatch = await self._container_mismatch(await container.show())
+            if mismatch is not None:
+                raise RuntimeError(f"new container {self._container_name} failed policy verification: {mismatch}")
+            await container.start()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await container.delete(force=True)
+            raise
+        self._container = container
 
     async def read_file(self, path: str) -> bytes:
         await self._ensure_started()
@@ -305,7 +359,9 @@ class DockerEnvironment(AgentEnvironment):
     async def ensure_dirs(self) -> None:
         await self._ensure_started()
         dirs = [posixpath.join(_CONTAINER_WORKDIR, s) for s in self.SUBDIRS]
-        await self.exec_shell(["mkdir", "-p", *dirs])
+        result = await self.exec_shell(["mkdir", "-p", *dirs])
+        if result.exit_code != 0:
+            raise RuntimeError(f"could not initialize agent environment directories (exit {result.exit_code})")
 
     async def exec_shell(
         self,
@@ -327,14 +383,8 @@ class DockerEnvironment(AgentEnvironment):
             "stderr": True,
         }
 
-        if self._credential_scope.enabled:
-            import os
-
-            sanitized_env = self._credential_scope.sanitize_environment(
-                dict(os.environ),
-            )
-            exec_kwargs["env"] = sanitized_env
-
+        # Host environment variables can carry secrets under arbitrary
+        # names. Docker exec uses the verified container environment.
         try:
             exec_obj = await self._container.exec(**exec_kwargs)
         except Exception as exc:
@@ -382,13 +432,14 @@ class DockerEnvironment(AgentEnvironment):
         self._started = False
 
     async def start(self) -> None:
-        """Restart a stopped container (for warm pool reuse)."""
-        if self._container is not None:
-            try:
-                await self._container.start()
-                self._started = True
-            except Exception as exc:
-                logger.warning("Failed to start container %s: %s", self._container_name, exc)
+        """Verify and start the container, including when reused from the warm pool."""
+        await self._ensure_started()
+
+    async def retire(self) -> None:
+        """Prevent a superseded environment handle from starting another container."""
+        async with self._lifecycle_lock:
+            self._retired = True
+            await self.remove()
 
     async def remove(self) -> None:
         """Destroy the container (volume persists for future reuse)."""

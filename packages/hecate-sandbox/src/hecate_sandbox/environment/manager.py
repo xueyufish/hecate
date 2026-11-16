@@ -95,6 +95,9 @@ class EnvironmentManager:
         """
         parts = [
             settings.AGENT_ENV_NETWORK_POLICY,
+            settings.DOCKER_NETWORK_MODE,
+            settings.DOCKER_AGENT_IMAGE,
+            settings.DOCKER_RUNTIME,
             str(settings.AGENT_ENV_CREDENTIAL_SCOPING),
             str(settings.AGENT_ENV_SANDBOX_ENFORCEMENT),
         ]
@@ -114,6 +117,12 @@ class EnvironmentManager:
     async def get_or_create(self, agent_id: str) -> AgentEnvironment:
         """Get an existing environment or create a new one (lazy creation).
 
+        A cached or warm-pooled environment is only reused when the
+        effective security configuration still matches the one it was
+        created under; after a policy change the old container is
+        destroyed (the volume persists) and the next call creates a
+        fresh environment under the new policy.
+
         Args:
             agent_id: The agent identifier.
 
@@ -122,32 +131,34 @@ class EnvironmentManager:
         """
         async with self._lock:
             await self._sweep_warm_pool()
+            current_hash = self._compute_security_config_hash()
 
             entry = self._cache.get(agent_id)
             if entry is not None:
-                if not entry.is_expired(self._ttl):
+                if self._backend == "docker" and entry.security_config_hash != current_hash:
+                    logger.info(
+                        "Security config changed for agent '%s', replacing cached environment",
+                        agent_id,
+                    )
+                    self._cache.pop(agent_id, None)
+                    await self._retire_entry(entry)
+                elif not entry.is_expired(self._ttl):
                     entry.touch()
                     return entry.environment
-                logger.info("Environment for agent '%s' expired, recreating", agent_id)
-                await entry.environment.ensure_dirs()
-                entry.touch()
-                return entry.environment
+                else:
+                    logger.info("Environment for agent '%s' expired, recreating", agent_id)
+                    await entry.environment.ensure_dirs()
+                    entry.touch()
+                    return entry.environment
 
             warm_entry = self._warm_pool.pop(agent_id, None)
             if warm_entry is not None:
-                current_hash = self._compute_security_config_hash()
                 if warm_entry.security_config_hash != current_hash:
                     logger.info(
                         "Security config changed for agent '%s', destroying stale warm container",
                         agent_id,
                     )
-                    if self._backend == "docker":
-                        from hecate_sandbox.environment.docker_environment import (
-                            DockerEnvironment,
-                        )
-
-                        if isinstance(warm_entry.environment, DockerEnvironment):
-                            await warm_entry.environment.remove()
+                    await self._retire_entry(warm_entry)
                 else:
                     logger.info("Reusing warm container for agent '%s'", agent_id)
                     env = warm_entry.environment
@@ -167,10 +178,17 @@ class EnvironmentManager:
             env = self._create_environment(agent_id)
             await env.ensure_dirs()
             entry = _CacheEntry(environment=env)
-            entry.security_config_hash = self._compute_security_config_hash()
+            entry.security_config_hash = current_hash
             self._cache[agent_id] = entry
             logger.info("Created %s environment for agent '%s'", self._backend, agent_id)
             return env
+
+    async def _retire_entry(self, entry: _CacheEntry) -> None:
+        """Retire a superseded Docker environment while keeping its volume."""
+        from hecate_sandbox.environment.docker_environment import DockerEnvironment
+
+        if isinstance(entry.environment, DockerEnvironment):
+            await entry.environment.retire()
 
     async def close(self, agent_id: str) -> None:
         """Close an environment and move it to the warm pool (Docker) or evict (local).

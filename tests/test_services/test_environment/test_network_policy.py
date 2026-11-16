@@ -147,6 +147,34 @@ async def test_apply_to_container_emits_iptables_rules(monkeypatch):
     assert "iptables" in cmd_str
     assert "93.184.216.34" in cmd_str
     assert "ACCEPT" in cmd_str
+    # The default deny closes everything the allow rules did not open.
+    assert "iptables -A OUTPUT -j REJECT" in cmd_str
+    assert "ip6tables -A OUTPUT -j REJECT" in cmd_str
+
+
+@pytest.mark.asyncio
+async def test_apply_to_container_empty_allowlist_still_installs_default_deny(monkeypatch):
+    """An empty allow-list under deny_all installs the default deny only."""
+    policy = NetworkEgressPolicy(mode=NetworkPolicyMode.DENY_ALL, allowed_domains=[])
+
+    fake_proc = MagicMock()
+    fake_proc.communicate = AsyncMock(return_value=(b"", b""))
+    fake_proc.returncode = 0
+
+    captured: dict[str, list[str]] = {}
+
+    async def _fake_exec(*cmd, **_kwargs):
+        captured["cmd"] = [str(c) for c in cmd]
+        return fake_proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", _fake_exec)
+
+    ok = await policy.apply_to_container("cid-abc")
+    assert ok is True
+    cmd_str = " ".join(captured["cmd"])
+    assert "iptables -A OUTPUT -j REJECT" in cmd_str
+    assert "ip6tables -A OUTPUT -j REJECT" in cmd_str
+    assert "ACCEPT" not in cmd_str
 
 
 @pytest.mark.asyncio

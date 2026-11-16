@@ -604,18 +604,22 @@ ToolPolicyPipeline (5 layers)
 
 DockerEnvironment
   ├─ NetworkEgressPolicy: allow_all / deny_all
-  │     └─ deny_all → internal Docker network (no internet gateway)
-  └─ CredentialScope: strip secrets, inject per-tool credentials
-        └─ exec_shell() → sanitized environment passed to container
+  │     └─ empty allow-list under deny_all → Docker none network
+  └─ CredentialScope: verify the container's environment against the image
 ```
 
 ### 9.12 Network Egress Control
 
-`NetworkEgressPolicy` controls outbound network from DockerEnvironment containers:
-- `allow_all` (default): unrestricted network — backward compatible
-- `deny_all`: only whitelisted domains reachable; container attached to internal Docker network
+`AGENT_ENV_NETWORK_POLICY=allow_all` uses the configured Docker network
+mode. With an empty allow-list, `deny_all` requires Docker's `none`
+network mode and checks the container has only that attachment. A nonempty
+allow-list requires a separate egress implementation.
 
-Configuration: `AGENT_ENV_NETWORK_POLICY=allow_all|deny_all`
+Container inspection verifies the configured image and the agent's
+writable named volume at `/env`. The manager retires cached Docker
+environments after security configuration changes. A known stale
+container can be replaced while retaining its named volume.
+Incomplete inspection or a foreign volume fails acquisition.
 
 ### 9.13 Sandbox Enforcement Integration
 
@@ -640,19 +644,18 @@ Configuration: `AGENT_ENV_AUDIT_ENABLED=true` (default on — observation only)
 
 ### 9.15 Per-Execution Credential Scoping
 
-`CredentialScope` strips secret environment variables before tool execution:
-- Pattern detection: `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_API_KEY`, `*_PWD`
-- Prefix marking: `HECATE_SECRET_*` always stripped
-- System whitelist: `PATH`, `HOME`, `LANG`, `LC_*`, `TMPDIR`, `USER`, `SHELL`, `HOSTNAME`, `TERM`, `PWD` always preserved
-- Per-tool credential injection via `tool_credentials` mapping
-
-Configuration: `AGENT_ENV_CREDENTIAL_SCOPING=false` (default off)
+Docker exec uses the container's process environment. The host's
+process variables are kept out of exec. With
+`AGENT_ENV_CREDENTIAL_SCOPING=true`, acquisition also verifies that the
+container's configured environment matches its image defaults. Use a
+trusted image and keep credentials out of both the image and the agent
+volume.
 
 ### LocalEnvironment Limitations
 
 | Feature | DockerEnvironment | LocalEnvironment |
 |---------|-------------------|------------------|
-| 9.12 Network Egress | ✅ Internal Docker network | ⚠️ WARNING logged |
+| 9.12 Network Egress | ✅ Docker none network under deny_all | ⚠️ WARNING logged |
 | 9.13 Sandbox Enforcement | ✅ exec_shell routing | ⚠️ WARNING logged |
 | 9.14 Audit Pipeline | ✅ Full support | ✅ Full support |
 | 9.15 Credential Scoping | ✅ env sanitization | ⚠️ WARNING logged |
