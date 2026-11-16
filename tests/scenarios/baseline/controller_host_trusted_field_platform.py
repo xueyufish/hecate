@@ -29,7 +29,7 @@ from unittest.mock import patch as patch_attribute
 
 from httpx import AsyncClient
 
-from hecate.execution.field_provenance import FIELD_PROVENANCE_REFUSED
+from hecate.execution.field_provenance import FIELD_PROVENANCE_REFUSED, FieldProvenanceProfile
 from tests.scenarios.baseline import controller_host_platform as platform_driver
 from tests.scenarios.baseline import controller_host_trusted_field_spec as tspec
 
@@ -200,6 +200,7 @@ async def run_trusted_field_case(
     *,
     values: dict[str, str] | None = None,
     declare_profile: bool = True,
+    declaration: dict[str, Any] | None = None,
     rebuild_after_park: bool = False,
     write_failure: str | None = None,
     system_prompt: str | None = None,
@@ -214,6 +215,8 @@ async def run_trusted_field_case(
     model through the same frozen configuration path as the default.
     ``user_prompt`` and ``read_content_fn`` likewise ride in with defaults
     that keep the offline family's fixed prompt and read content.
+    ``declaration`` seeds a different host profile (e.g. a write-once
+    variant); the default stays this family's frozen declaration.
     The REST transport serves the production routes on loopback TCP; the
     service transport also supports the host-rebuild fault injection.
     """
@@ -229,6 +232,8 @@ async def run_trusted_field_case(
     if transport == "rest_tcp" and rebuild_after_park:
         raise ValueError("the REST transport does not support rebuilding the host while parked")
     resolved = {**tspec.DEFAULT_VALUES, **(values or {})}
+    seeded_declaration = declaration or tspec.PROFILE_DECLARATION
+    seeded_profile = FieldProvenanceProfile.from_declaration(seeded_declaration) if declare_profile else None
     environment_label = f"{case}-{uuid.uuid4().hex[:8]}"
     environment = platform_driver.PlatformEnvironment(root, environment_label)
     gateway = platform_driver._RecordingGateway(provider)
@@ -271,7 +276,7 @@ async def run_trusted_field_case(
             agent_id = await environment._seed(
                 with_approval_rule=False,
                 persona=tspec.SYSTEM_PROMPT if system_prompt is None else system_prompt,
-                config_extra={"field_provenance": tspec.PROFILE_DECLARATION} if declare_profile else None,
+                config_extra={"field_provenance": seeded_declaration} if declare_profile else None,
             )
             goal = "controller trusted-field baseline case"
             payload = _submit_payload(user_prompt)
@@ -389,6 +394,16 @@ async def run_trusted_field_case(
                         and acceptance.get("content_sha256") == hashlib.sha256(content.encode()).hexdigest()
                     ):
                         observation["rest_delivery"] = "accepted"
+                elif record.lifecycle_state.value in ("failed", "cancelled"):
+                    # A stopped terminal delivers its own stop notice; the
+                    # task view must name the same terminal state. Recorded
+                    # separately from ``rest_delivery``: the frozen sample
+                    # records pin that key's historical success-only shape.
+                    notice, _ = await _inbox_notice(client, relay, task_id, rest_run_id, "task_stopped", inbox_cursor)
+                    detail = await client.get(notice["views"]["task"])
+                    detail.raise_for_status()
+                    if detail.json().get("lifecycle_state") == record.lifecycle_state.value:
+                        observation["rest_stop_delivery"] = "stopped_notice"
             observation.update(
                 {
                     "task_status": record.lifecycle_state.value,
@@ -399,7 +414,7 @@ async def run_trusted_field_case(
                     "reconciliation_reason": (record.extra or {}).get("reconciliation_reason"),
                     "guard_verdicts": guard_verdicts(actions),
                     "values": dict(resolved),
-                    "profile": tspec.PROFILE.pin() if declare_profile else None,
+                    "profile": seeded_profile.pin() if declare_profile else None,
                     "rebuild": {"performed": rebuilds > 0, "count": rebuilds},
                     "clarification": {
                         "parks": parks,
@@ -434,7 +449,7 @@ async def run_trusted_field_case(
             {
                 "guard_verdicts": [],
                 "values": dict(resolved),
-                "profile": tspec.PROFILE.pin() if declare_profile else None,
+                "profile": seeded_profile.pin() if declare_profile else None,
                 "field_provenance_stop": None,
                 "clarification": {
                     "parks": parks,

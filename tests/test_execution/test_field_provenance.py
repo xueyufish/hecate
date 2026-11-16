@@ -724,7 +724,12 @@ class TestRefusalWatch:
 
     @pytest.mark.parametrize(
         ("reason", "status"),
-        [("conflict", "failed"), ("unbound", "failed"), ("unavailable", "awaiting_reconciliation")],
+        [
+            ("conflict", "failed"),
+            ("unbound", "failed"),
+            ("unavailable", "awaiting_reconciliation"),
+            ("duplicate", "failed"),
+        ],
     )
     def test_bound_refusals_stop_with_an_explicit_terminal(self, reason: str, status: str) -> None:
         guard = fp.ControllerFieldProvenanceGuard(
@@ -746,3 +751,206 @@ class TestRefusalWatch:
         watch.observe_result("exec-1", READ, self._refusal("conflict"))
         watch.observe_result("exec-1", WRITE, {"status": "ok"})
         assert watch.requested is None and watch.stop_reason() is None
+
+
+# -- write-once duplicate admission -------------------------------------------
+
+
+WRITE_ONCE_DECLARATION: dict[str, Any] = {
+    **json.loads(json.dumps(DECLARATION)),
+    "rules": [{**DECLARATION["rules"][0], "write_once": True}],
+}
+WRITE_ONCE_PROFILE = fp.FieldProvenanceProfile.from_declaration(WRITE_ONCE_DECLARATION)
+WRITE_ONCE_RULES = WRITE_ONCE_PROFILE.rules_for(WRITE)
+
+
+def _write_fact(
+    value: str = "1",
+    *,
+    execution_id: str = "earlier-write",
+    tool: str = WRITE,
+    resource: dict[str, str] | None = None,
+    consumed: bool = True,
+    result_known: bool = True,
+) -> fp.WriteFact:
+    return fp.WriteFact(execution_id, tool, dict(resource or RESOURCE), consumed, result_known)
+
+
+class TestWriteOnceDeclaration:
+    def test_the_opt_in_is_explicit_and_normalized(self) -> None:
+        assert WRITE_ONCE_PROFILE.rules_for(WRITE)[0].write_once is True
+        assert WRITE_ONCE_PROFILE.to_dict()["rules"][0]["write_once"] is True
+        again = fp.FieldProvenanceProfile.from_declaration(WRITE_ONCE_PROFILE.to_dict())
+        assert again == WRITE_ONCE_PROFILE and again.sha256 == WRITE_ONCE_PROFILE.sha256
+
+    def test_a_profile_without_the_opt_in_keeps_its_frozen_digest(self) -> None:
+        # The key exists only when enabled: declarations committed before
+        # the opt-in keep their recorded digest byte-for-byte.
+        assert "write_once" not in PROFILE.to_dict()["rules"][0]
+        assert PROFILE.sha256 == fp.FieldProvenanceProfile.from_declaration(DECLARATION).sha256
+        assert PROFILE.sha256 != WRITE_ONCE_PROFILE.sha256
+
+    def test_rules_of_one_tool_must_opt_in_together(self) -> None:
+        divergent = json.loads(json.dumps(WRITE_ONCE_DECLARATION))
+        divergent["rules"].append({**DECLARATION["rules"][0], "field": "batch_ref"})
+        with pytest.raises(fp.FieldProvenanceDeclarationError, match="same write_once"):
+            fp.FieldProvenanceProfile.from_declaration(divergent)
+        bad_type = json.loads(json.dumps(WRITE_ONCE_DECLARATION))
+        bad_type["rules"][0]["write_once"] = "yes"
+        with pytest.raises(fp.FieldProvenanceDeclarationError, match="boolean"):
+            fp.FieldProvenanceProfile.from_declaration(bad_type)
+
+
+class TestWriteOnceVerdicts:
+    def test_a_consumed_write_refuses_a_repeat_before_sourcing(self) -> None:
+        for arguments in (_write(order_ref="PO-1"), _write(), _write(order_ref="PO-1", quantity=99)):
+            facts = fp.ProvenanceFacts(turn=3, reads=(_read("PO-1"),), writes=(_write_fact(),))
+            verdict = fp.evaluate_field_provenance(WRITE_ONCE_RULES, arguments, facts)
+            assert (verdict.kind, verdict.reason, verdict.fields) == ("refuse", "duplicate", ("order_ref",))
+            assert verdict.resource == RESOURCE
+
+    def test_the_current_action_never_blocks_itself(self) -> None:
+        own = _write_fact("1", execution_id="exec-1")
+        facts = fp.ProvenanceFacts(turn=3, reads=(_read("PO-1"),), execution_id="exec-1", writes=(own,))
+        assert fp.evaluate_field_provenance(WRITE_ONCE_RULES, _write(order_ref="PO-1"), facts).kind == "allow"
+
+    def test_an_unresolved_outcome_stops_the_resource_for_reconciliation(self) -> None:
+        facts = fp.ProvenanceFacts(turn=3, writes=(_write_fact(consumed=False, result_known=False),))
+        verdict = fp.evaluate_field_provenance(WRITE_ONCE_RULES, _write(order_ref="PO-1"), facts)
+        assert (verdict.kind, verdict.reason) == ("refuse", "unavailable")
+        # An unresolved outcome wins over a completed one.
+        both = fp.ProvenanceFacts(
+            turn=3,
+            writes=(
+                _write_fact("1"),
+                _write_fact("2", execution_id="lost-write", consumed=False, result_known=False),
+            ),
+        )
+        assert fp.evaluate_field_provenance(WRITE_ONCE_RULES, _write(order_ref="PO-1"), both).reason == "unavailable"
+
+    def test_another_resource_writes_independently(self) -> None:
+        # A consumed write of one resource leaves every other resource's
+        # single write available.
+        written = {"domain": "domain_a", "sku": "SKU-B2"}
+        current = {"domain": "domain_a", "sku": "SKU-C3"}
+        facts = fp.ProvenanceFacts(
+            turn=3, reads=(_read("PO-1", args=current),), writes=(_write_fact("1", resource=written),)
+        )
+        verdict = fp.evaluate_field_provenance(WRITE_ONCE_RULES, {**current, "quantity": 2, "order_ref": "PO-1"}, facts)
+        assert verdict.kind == "allow" and verdict.resource == current
+
+    def test_without_facts_the_verdicts_are_unchanged(self) -> None:
+        allowed = fp.evaluate_field_provenance(
+            WRITE_ONCE_RULES, _write(order_ref="PO-1"), _facts(reads=(_read("PO-1"),))
+        )
+        assert allowed.kind == "allow"
+        assert (
+            fp.evaluate_field_provenance(WRITE_ONCE_RULES, _write(order_ref="PO-X"), _facts()).kind == "input_required"
+        )
+
+    def test_other_tools_and_other_resources_never_block(self) -> None:
+        facts = fp.ProvenanceFacts(
+            turn=3,
+            reads=(_read("PO-1"),),
+            writes=(
+                _write_fact("1", tool=READ),
+                _write_fact("1", resource={"domain": "domain_b", "sku": "SKU-A1"}),
+            ),
+        )
+        assert fp.evaluate_field_provenance(WRITE_ONCE_RULES, _write(order_ref="PO-1"), facts).kind == "allow"
+
+
+class TestWriteOnceLoader:
+    def _chain(self):
+        pin = WRITE_ONCE_PROFILE.pin()
+        read = _decision(1, (READ, RESOURCE), pin=pin)
+        first = _decision(2, (WRITE, _write(order_ref="PO-1")), pin=pin)
+        repeat = _decision(3, (WRITE, _write(order_ref="PO-1", quantity=9)), pin=pin)
+        return read, first, repeat
+
+    def test_a_settled_first_write_blocks_the_next_action(self) -> None:
+        read, first, repeat = self._chain()
+        store = _Store([read, first, repeat])
+        store.settle(read, 0, payload={"status": "ok", "order_ref": "PO-1"})
+        store.settle(first, 0, payload={"status": "ok", "update_id": "UPD-1"})
+        facts = _load_with_profile(store, repeat)
+        assert facts.writes == (
+            fp.WriteFact(execution_id_for_action(RUN, first.decision_step_id, "a0"), WRITE, RESOURCE, True, True),
+        )
+        verdict = fp.evaluate_field_provenance(WRITE_ONCE_RULES, repeat.actions[0].arguments, facts)
+        assert (verdict.kind, verdict.reason) == ("refuse", "duplicate")
+
+    @pytest.mark.parametrize("settled", ["request", "refusal"])
+    def test_an_input_request_and_a_refusal_consume_nothing(self, settled: str) -> None:
+        _read_decision, first, repeat = self._chain()
+        envelope = fp.refusal_envelope(
+            execution_id=execution_id_for_action(RUN, first.decision_step_id, "a0"),
+            profile=WRITE_ONCE_PROFILE,
+            tool=WRITE,
+            fields=("order_ref",),
+            reason="conflict",
+        )
+        store = _Store([first, repeat])
+        payload = _request_payload(sha=WRITE_ONCE_PROFILE.sha256) if settled == "request" else envelope
+        store.settle(first, 0, payload=payload)
+        facts = _load_with_profile(store, repeat)
+        assert facts.writes == ()
+        verdict = fp.evaluate_field_provenance(WRITE_ONCE_RULES, repeat.actions[0].arguments, facts)
+        assert verdict.kind == "input_required"
+
+    @pytest.mark.parametrize(
+        ("row", "label"),
+        [
+            ({"pending_reconciliation": True}, "pending"),
+            ({"last_outcome": {"outcome": "failed", "result_digest": None}}, "failed-write"),
+            ({"last_outcome": None}, "claimed-no-outcome"),
+        ],
+    )
+    def test_an_unresolved_first_write_stops_the_resource(self, row: dict, label: str) -> None:
+        _read_decision, first, repeat = self._chain()
+        store = _Store([first, repeat])
+        store.settle(first, 0, payload=None, **row)
+        facts = _load_with_profile(store, repeat)
+        assert len(facts.writes) == 1 and facts.writes[0].result_known is False
+        verdict = fp.evaluate_field_provenance(WRITE_ONCE_RULES, repeat.actions[0].arguments, facts)
+        assert (verdict.kind, verdict.reason) == ("refuse", "unavailable")
+
+    def test_undispatched_earlier_actions_consume_nothing(self) -> None:
+        _read_decision, first, repeat = self._chain()
+        store = _Store([first, repeat])
+        facts = _load_with_profile(store, repeat)
+        assert facts.writes == ()
+        verdict = fp.evaluate_field_provenance(WRITE_ONCE_RULES, repeat.actions[0].arguments, facts)
+        assert verdict.kind == "input_required"
+
+    def test_a_write_of_another_profile_is_unavailable(self) -> None:
+        _read_decision, first, _repeat = self._chain()
+        foreign = _decision(
+            2, (WRITE, _write(order_ref="PO-1")), pin={"version": 1, "profile": "other", "sha256": "0" * 64}
+        )
+        store = _Store([foreign, first])
+        store.settle(foreign, 0, payload={"status": "ok", "update_id": "UPD-1"})
+        with pytest.raises(fp._UnavailableError):
+            _load_with_profile(store, first)
+
+    def test_a_ledger_that_disagrees_with_the_write_decision_is_unavailable(self) -> None:
+        _read_decision, first, repeat = self._chain()
+        store = _Store([first, repeat])
+        store.settle(first, 0, payload={"status": "ok", "update_id": "UPD-1"}, intent={"action_name": READ})
+        with pytest.raises(fp._UnavailableError):
+            _load_with_profile(store, repeat)
+
+
+def _load_with_profile(store: Any, decision, index: int = 0) -> fp.ProvenanceFacts:
+    action = decision.actions[index]
+    return fp.load_provenance_facts(
+        store,
+        WRITE_ONCE_PROFILE,
+        WRITE_ONCE_RULES,
+        task_ref=TASK,
+        run_ref=RUN_REF,
+        controller_run=RUN,
+        tool_call_id=tool_call_id_for_action(RUN, decision.decision_step_id, action.action_key),
+        tool=action.tool,
+        arguments=action.arguments,
+    )
