@@ -66,6 +66,8 @@ def main(argv: list[str] | None = None) -> Path | None:
         if args.definition
         else experiment.build_definition(repetitions=3)
     )
+    report_dir = Path(args.report_dir) if args.report_dir else experiment.BASELINE_DIR
+    experiment.validate_output_path(definition, report_dir)
     state_root = (
         Path(args.state_root) if args.state_root else Path(tempfile.mkdtemp(prefix="controller-host-experiment-"))
     )
@@ -77,9 +79,7 @@ def main(argv: list[str] | None = None) -> Path | None:
             case_pacing_seconds=args.pacing_seconds,
         )
     )
-    out = experiment.write_experiment_report(
-        report, Path(args.report_dir) if args.report_dir else experiment.BASELINE_DIR
-    )
+    out = experiment.write_experiment_report(report, report_dir)
     counts = report["aggregate"]["denominators"]
     print(
         f"{report['_meta']['status']}: trials recorded/skipped/failed = "

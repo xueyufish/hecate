@@ -186,6 +186,31 @@ The [trusted-field pilot evidence index](../research/controller-trusted-field-mo
 links the recorded round and its frozen definition. Verify the committed evidence offline with
 `python scripts/dev.py test tests/scenarios/test_controller_trusted_field_model_evidence.py -q`.
 
+## Trusted-field authorized samples: the platform_trusted_field_sample experiment
+
+`tests/scenarios/baseline/run_controller_trusted_field_sample_baseline.py`
+registers the P-A first-round entry for authorized real samples over the
+local Controller's REST routes and frozen trusted-field contract. A versioned **sample
+pack** embeds into the definition — the desensitized read-receipt body, the
+protected field's four values and the task's user prompt, plus the
+authorization and environment-reset assertions — so the definition digest
+pins the exact sample content and each pack forms its own comparison group.
+The case matrix adds the deterministic negatives to the two delivery paths:
+`guessed_value`, `substituted_value` and `replayed_value`, whose frozen
+`replay_detection_compliance` criterion records the guard's actual scope for
+model-initiated replays instead of promising containment.
+
+```bash
+python -m tests.scenarios.baseline.run_controller_trusted_field_sample_baseline            # deterministic dry run (fixture pack)
+python -m tests.scenarios.baseline.run_controller_trusted_field_sample_baseline --print-default-definition
+```
+
+Real collection, the freeze checklist, the authorized-pack handling and the
+review binding are documented in
+[Run trusted-field rounds on authorized samples](run-trusted-field-real-samples.md);
+the family's offline invariants live in
+`tests/scenarios/test_controller_trusted_field_sample.py`.
+
 ## Failure diagnostics in trial records
 
 Every platform run (all scenario families) carries a versioned `diagnostics` block in its trial record, so a model-call failure can be attributed instead of guessed from a terminal state name:

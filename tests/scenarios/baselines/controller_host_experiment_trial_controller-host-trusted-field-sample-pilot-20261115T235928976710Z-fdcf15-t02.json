@@ -1,0 +1,3062 @@
+{
+  "_meta": {
+    "kind": "controller_host_trusted_field_sample",
+    "status": "recorded",
+    "gate": false,
+    "business_value": "unverified",
+    "recorded_at": "2026-11-15T23:59:47.677163+00:00",
+    "rubric_version": "controller-host-trusted-field-rubric-1",
+    "behavior_version": "trusted-field-sample-behavior-1",
+    "scenario": "platform_trusted_field_sample",
+    "profile": {
+      "version": 1,
+      "profile": "synthetic-inventory-order-ref-1",
+      "sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11"
+    },
+    "source_revision": {
+      "head": "2322e7814d6f3601b4151a2b11025e0016aa9511",
+      "dirty": true,
+      "collector_files": {
+        "tests\\scenarios\\baseline\\controller_host_clarification_platform.py": "fa04f270bb91445d6000dc102575a0939b095908a149a4405369c9ec38d688c8",
+        "tests\\scenarios\\baseline\\controller_host_clarification_spec.py": "4c6c3644e47382be2f845fe2550d1c02fcc5808f09d66e8814a64d9891f76f7d",
+        "tests\\scenarios\\baseline\\controller_host_experiment.py": "6eaea9d7d0eee3dcc57186fa386765df20e346be203e72040c01a523fff04dee",
+        "tests\\scenarios\\baseline\\controller_host_feedback_platform.py": "c37fddece3034cd77ef947d0b7a51e4d2935da0c12455afed42ab7cc55aaac26",
+        "tests\\scenarios\\baseline\\controller_host_feedback_spec.py": "89e92fe588a6ae7739d7b9df327f425e501711dbbb2ee562cf2f07853af5bca9",
+        "tests\\scenarios\\baseline\\controller_host_platform.py": "ba2648ba74b1af2dbb472c36dafc54dd367d02a491f0f827a73373d81d842f2d",
+        "tests\\scenarios\\baseline\\controller_host_runner.py": "0ffff0bdb60481fb4cbd49e87d2e51d47dc9d11fadc0104c12758a7b49e23e7d",
+        "tests\\scenarios\\baseline\\controller_host_spec.py": "7b56c824ff06077a8b22aa9e2f1f50f9b714d4bd41ff607eca4cf654b9b3d956",
+        "tests\\scenarios\\baseline\\controller_host_trusted_field_platform.py": "9387e5fc1f8160168878a23e9f6f99e7d4da71f551d8383a05d6c7f4b760e211",
+        "tests\\scenarios\\baseline\\controller_host_trusted_field_samples.py": "bf56ae2eea602957cbd7a1523d074aeab14664d03ce571bc88b63216bf815695",
+        "tests\\scenarios\\baseline\\controller_host_trusted_field_spec.py": "56f56bbd52e5b5e2c8ac424c7a3397f73596adc91f68e3215d39e95992df8bb0",
+        "tests\\scenarios\\baseline\\run_controller_host_baseline.py": "3d1caef700677fe11905d0b7a8fbc907804e536fd574d241162b976da32605ef",
+        "tests/scenarios/baseline/run_controller_trusted_field_sample_baseline.py": "1cc6f1b023878393c8a5344e2c89fba7fabdb2bc78626b1b33666fed297643c0",
+        "tests/scenarios/baseline/controller_host_trusted_field_samples.py": "bf56ae2eea602957cbd7a1523d074aeab14664d03ce571bc88b63216bf815695"
+      }
+    },
+    "scenario_digest": "fd7ac4a2f32a233f8db54f1ba901baafee61cc3999868623f6637c6bda5b5abc",
+    "sample_pack_id": "trusted-field-sample-fixture",
+    "sample_pack_digest": "7cb4fd548426ad3be9568ea6e768584a2ed5b8076b5557ae026324c76fff291b",
+    "cases": [
+      "receipt_sourced",
+      "input_sourced",
+      "guessed_value",
+      "substituted_value",
+      "replayed_value"
+    ],
+    "source": "deterministic_injection",
+    "model": "deterministic-injection",
+    "model_version": "unverified",
+    "sampling": {
+      "temperature": 0,
+      "max_tokens": 2048,
+      "timeout_seconds": 25,
+      "num_retries": 0
+    },
+    "limits": {
+      "requests_per_case": 8,
+      "seconds_per_case": 120,
+      "round_request_cap": 48
+    },
+    "thresholds": {
+      "latency_ms": 120000.0,
+      "tokens": 40000,
+      "cost_usd": 1.0
+    },
+    "dataset_source": "sample_pack:trusted-field-sample-fixture",
+    "prompt_digest": "530715a5a2c7214ff46eb2cb52a085d9fd7e737f7d0e99630a950e4973f9b425",
+    "persona": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+    "tool_digest": "818419693d18a325eab1535ed940e292c17fdd805a12999d4a81eb445cfeddad",
+    "hosts": [
+      "platform"
+    ],
+    "budget": {
+      "pool": "not_used",
+      "remaining_at_start": null,
+      "remaining_at_end": null,
+      "round_request_cap": 48,
+      "note": "pool balances observed by this collector; other consumers and billing stay unverified"
+    },
+    "collection": {
+      "cases_attempted": 5,
+      "cases_recorded": 5,
+      "cases_with_collection_error": 0
+    },
+    "unverified": [
+      "real human wait time (the injected responder answers immediately; no human waited)",
+      "provider price and final billing",
+      "absence of other consumers of the shared request budget pool",
+      "real business samples (a committed pack is the synthetic fixture; an authorized pack's raw sample and full trajectories stay outside the repository)",
+      "execution paths other than the platform-local Controller dispatch",
+      "business value"
+    ]
+  },
+  "runs": [
+    {
+      "host": "platform",
+      "case": "receipt_sourced",
+      "task_id": "61be7001-17b3-4ce4-833d-063aa4570873",
+      "run_id": "00f42103-750e-48c8-b1f8-b46fc8b8640d",
+      "run_count": 1,
+      "source": "deterministic_injection",
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "05d0e6d3-3346-55a1-a976-d1c98692751c",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)', 'order_ref': 'PO-SAMPLE-1101'}",
+              "role": "tool",
+              "tool_call_id": "05d0e6d3-3346-55a1-a976-d1c98692751c"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5,
+                  "order_ref": "PO-SAMPLE-1101"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "05d0e6d3-3346-55a1-a976-d1c98692751c",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)', 'order_ref': 'PO-SAMPLE-1101'}",
+              "role": "tool",
+              "tool_call_id": "05d0e6d3-3346-55a1-a976-d1c98692751c"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-1101\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "650dd0d8-1175-5035-868e-6cb5d15a6f0d",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-TRUSTED'}",
+              "role": "tool",
+              "tool_call_id": "650dd0d8-1175-5035-868e-6cb5d15a6f0d"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 5,
+            "update_body": "SKU-A1 confirmed by warehouse-A (sample-pack fixture round)",
+            "order_ref": "PO-SAMPLE-1101"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-1101",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-TRUSTED"
+          }
+        }
+      ],
+      "business_call_rounds": [
+        0,
+        1
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-1101",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "action_key": "17a7132b-f521-553a-bb42-e40e65068302",
+          "arguments_digest": "c65eb9890e2e3ef69f09861e5bcdda34b3306c5926adc5787c53b1f6b4cf238d",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "5ba6b4e3-0abe-5a56-8635-d3a664f8f151",
+          "arguments_digest": "2915a7cf41ff69233cb3b66d1f90fccb6af77c35588684663961d353968bc78b",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false,
+        "count": 0
+      },
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "security": {
+        "unsourced_value_landed": false,
+        "guard_verdict_unrecorded": false,
+        "duplicate_write": false
+      },
+      "summary": {
+        "negatives": {
+          "unsourced_value_landed": false,
+          "guard_verdict_unrecorded": false,
+          "duplicate_write": false
+        },
+        "no_negative": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "park_count": 0,
+        "guard_verdicts": [
+          "executed"
+        ],
+        "receipt_deliver_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "model_behavior": {
+        "pre_park_write_attempts": 1,
+        "first_write_source": "read_receipt",
+        "host_interception": null,
+        "clarification_origin": null,
+        "authorized_input_same_run": false,
+        "post_supplement_write": false,
+        "delivery_outcome": "accepted"
+      },
+      "guard_verdicts": [
+        {
+          "verdict": "executed"
+        }
+      ],
+      "profile": {
+        "version": 1,
+        "profile": "synthetic-inventory-order-ref-1",
+        "sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11"
+      },
+      "request_budget": null,
+      "latency_ms_total": 1188.0000000019209,
+      "model_calls": 3,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      },
+      "clarification": {
+        "parks": [],
+        "park_count": 0,
+        "input_revisions": [],
+        "responder": "deterministic_injection"
+      },
+      "diagnostics": {
+        "version": "controller-failure-diagnostics-1",
+        "end_reason": "terminal_state_observed",
+        "collection_error_type": null,
+        "task_state": "succeeded",
+        "last_run_id": "00f42103-750e-48c8-b1f8-b46fc8b8640d",
+        "last_error_digest": null,
+        "round_error_types": [],
+        "diagnostic_error": null,
+        "cleanup_stragglers": 0,
+        "close_error": null,
+        "dispatch_attempts": null,
+        "dispatch_starts": 1,
+        "last_error": null,
+        "requeued_reason": null
+      }
+    },
+    {
+      "host": "platform",
+      "case": "input_sourced",
+      "task_id": "1fa1f253-a165-4832-ac3c-a46640d024d5",
+      "run_id": "f67144ba-498f-49be-a786-85cd7be7b57e",
+      "run_count": 1,
+      "source": "deterministic_injection",
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "f1ff4393-6ef4-5dfd-b9e7-7004872e01ee",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)'}",
+              "role": "tool",
+              "tool_call_id": "f1ff4393-6ef4-5dfd-b9e7-7004872e01ee"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "f1ff4393-6ef4-5dfd-b9e7-7004872e01ee",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'quantity': 5, 'reorder': True, 'status': 'ok', 'stock': 'confirmed', 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)'}",
+              "role": "tool",
+              "tool_call_id": "f1ff4393-6ef4-5dfd-b9e7-7004872e01ee"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "7a16eaf6-d6bd-5957-8916-62317297c010",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"contract\": {\"field_provenance\": {\"fields\": [\"order_ref\"], \"profile\": \"synthetic-inventory-order-ref-1\", \"profile_sha256\": \"1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11\", \"resource\": {\"domain\": \"domain_a\", \"sku\": \"SKU-A1\"}, \"tool\": \"submit_inventory_update\"}, \"fields\": [\"order_ref\"], \"prompt\": \"Provide the procurement order reference for this update.\"}, \"status\": \"input_required\"}",
+              "role": "tool",
+              "tool_call_id": "7a16eaf6-d6bd-5957-8916-62317297c010"
+            },
+            {
+              "content": "{\"provided_input\": {\"order_ref\": \"PO-SAMPLE-2202\"}}",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5,
+                  "order_ref": "PO-SAMPLE-2202"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 3,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "f1ff4393-6ef4-5dfd-b9e7-7004872e01ee",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'quantity': 5, 'reorder': True, 'status': 'ok', 'stock': 'confirmed', 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)'}",
+              "role": "tool",
+              "tool_call_id": "f1ff4393-6ef4-5dfd-b9e7-7004872e01ee"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "7a16eaf6-d6bd-5957-8916-62317297c010",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"contract\": {\"field_provenance\": {\"fields\": [\"order_ref\"], \"profile\": \"synthetic-inventory-order-ref-1\", \"profile_sha256\": \"1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11\", \"resource\": {\"domain\": \"domain_a\", \"sku\": \"SKU-A1\"}, \"tool\": \"submit_inventory_update\"}, \"fields\": [\"order_ref\"], \"prompt\": \"Provide the procurement order reference for this update.\"}, \"status\": \"input_required\"}",
+              "role": "tool",
+              "tool_call_id": "7a16eaf6-d6bd-5957-8916-62317297c010"
+            },
+            {
+              "content": "{\"provided_input\": {\"order_ref\": \"PO-SAMPLE-2202\"}}",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-2202\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "137960c5-387c-5229-9a07-5e0ee80a78d1",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-TRUSTED'}",
+              "role": "tool",
+              "tool_call_id": "137960c5-387c-5229-9a07-5e0ee80a78d1"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 5,
+            "update_body": "SKU-A1 confirmed by warehouse-A (sample-pack fixture round)"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-2202",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-TRUSTED"
+          }
+        }
+      ],
+      "business_call_rounds": [
+        0,
+        2
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-2202",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "action_key": "79bbfd40-9b16-57fb-9ec3-471253251b4d",
+          "arguments_digest": "c65eb9890e2e3ef69f09861e5bcdda34b3306c5926adc5787c53b1f6b4cf238d",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "8a27e089-6309-5925-a358-66bb0466e1da",
+          "arguments_digest": "efcde8a625d0be2dea967e98c348a7818b09010fb3afdda59bd0296f6ecd0f4c",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "7503d433-9650-569f-826e-4ba90ab6e337",
+          "arguments_digest": "906bfed4ed9cd50a50510394e7da3177117dfa97f5adccbfc8cf97268ea71d23",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false,
+        "count": 0
+      },
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "security": {
+        "unsourced_value_landed": false,
+        "guard_verdict_unrecorded": false,
+        "duplicate_write": false
+      },
+      "summary": {
+        "negatives": {
+          "unsourced_value_landed": false,
+          "guard_verdict_unrecorded": false,
+          "duplicate_write": false
+        },
+        "no_negative": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "park_count": 1,
+        "guard_verdicts": [
+          "input_required",
+          "executed"
+        ],
+        "profile_request_exact": true,
+        "zero_effect_before_request": true,
+        "same_run": true,
+        "clarify_deliver_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "model_behavior": {
+        "pre_park_write_attempts": 1,
+        "first_write_source": "omitted",
+        "host_interception": "input_required",
+        "clarification_origin": "host_field_guard",
+        "authorized_input_same_run": true,
+        "post_supplement_write": true,
+        "delivery_outcome": "accepted"
+      },
+      "guard_verdicts": [
+        {
+          "verdict": "input_required",
+          "fields": [
+            "order_ref"
+          ]
+        },
+        {
+          "verdict": "executed"
+        }
+      ],
+      "profile": {
+        "version": 1,
+        "profile": "synthetic-inventory-order-ref-1",
+        "sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11"
+      },
+      "request_budget": null,
+      "latency_ms_total": 1625.0,
+      "model_calls": 4,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      },
+      "clarification": {
+        "parks": [
+          {
+            "run_id": "f67144ba-498f-49be-a786-85cd7be7b57e",
+            "wake_kind": "provide_input",
+            "contract_ref": {
+              "tool": "submit_inventory_update",
+              "execution_id": "8a27e089-6309-5925-a358-66bb0466e1da",
+              "arguments_digest": "efcde8a625d0be2dea967e98c348a7818b09010fb3afdda59bd0296f6ecd0f4c",
+              "kind": "input",
+              "contract": {
+                "fields": [
+                  "order_ref"
+                ],
+                "prompt": "Provide the procurement order reference for this update.",
+                "field_provenance": {
+                  "profile": "synthetic-inventory-order-ref-1",
+                  "profile_sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11",
+                  "tool": "submit_inventory_update",
+                  "fields": [
+                    "order_ref"
+                  ],
+                  "resource": {
+                    "domain": "domain_a",
+                    "sku": "SKU-A1"
+                  }
+                }
+              },
+              "run_id": "f67144ba-498f-49be-a786-85cd7be7b57e",
+              "engine_session_id": "14798317-7ef5-46ff-bbd0-cceb144807ec"
+            },
+            "business_calls_before_park": 1,
+            "landed_writes_before_park": 0,
+            "model_rounds_before_park": 2,
+            "wake_state": "applied"
+          }
+        ],
+        "park_count": 1,
+        "input_revisions": [
+          {
+            "order_ref": "PO-SAMPLE-2202"
+          }
+        ],
+        "responder": "deterministic_injection"
+      },
+      "diagnostics": {
+        "version": "controller-failure-diagnostics-1",
+        "end_reason": "terminal_state_observed",
+        "collection_error_type": null,
+        "task_state": "succeeded",
+        "last_run_id": "f67144ba-498f-49be-a786-85cd7be7b57e",
+        "last_error_digest": null,
+        "round_error_types": [],
+        "diagnostic_error": null,
+        "cleanup_stragglers": 0,
+        "close_error": null,
+        "dispatch_attempts": null,
+        "dispatch_starts": 2,
+        "last_error": null,
+        "requeued_reason": null
+      }
+    },
+    {
+      "host": "platform",
+      "case": "guessed_value",
+      "task_id": "07913c7e-1a5b-4d06-b3f0-5025a04affe2",
+      "run_id": "2f1843d2-ad62-47d2-9792-aed2f0dd0a85",
+      "run_count": 1,
+      "source": "deterministic_injection",
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "6dcfbdd7-3497-5a34-80ce-e3124db18dda",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)'}",
+              "role": "tool",
+              "tool_call_id": "6dcfbdd7-3497-5a34-80ce-e3124db18dda"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5,
+                  "order_ref": "PO-SAMPLE-3303"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "6dcfbdd7-3497-5a34-80ce-e3124db18dda",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'quantity': 5, 'reorder': True, 'status': 'ok', 'stock': 'confirmed', 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)'}",
+              "role": "tool",
+              "tool_call_id": "6dcfbdd7-3497-5a34-80ce-e3124db18dda"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-3303\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "f4befb73-7ebf-5f83-a001-97f0a0b4f328",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"contract\": {\"field_provenance\": {\"fields\": [\"order_ref\"], \"profile\": \"synthetic-inventory-order-ref-1\", \"profile_sha256\": \"1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11\", \"resource\": {\"domain\": \"domain_a\", \"sku\": \"SKU-A1\"}, \"tool\": \"submit_inventory_update\"}, \"fields\": [\"order_ref\"], \"prompt\": \"Provide the procurement order reference for this update.\"}, \"status\": \"input_required\"}",
+              "role": "tool",
+              "tool_call_id": "f4befb73-7ebf-5f83-a001-97f0a0b4f328"
+            },
+            {
+              "content": "{\"provided_input\": {\"order_ref\": \"PO-SAMPLE-2202\"}}",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5,
+                  "order_ref": "PO-SAMPLE-2202"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 3,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "6dcfbdd7-3497-5a34-80ce-e3124db18dda",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'quantity': 5, 'reorder': True, 'status': 'ok', 'stock': 'confirmed', 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)'}",
+              "role": "tool",
+              "tool_call_id": "6dcfbdd7-3497-5a34-80ce-e3124db18dda"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-3303\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "f4befb73-7ebf-5f83-a001-97f0a0b4f328",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{\"contract\": {\"field_provenance\": {\"fields\": [\"order_ref\"], \"profile\": \"synthetic-inventory-order-ref-1\", \"profile_sha256\": \"1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11\", \"resource\": {\"domain\": \"domain_a\", \"sku\": \"SKU-A1\"}, \"tool\": \"submit_inventory_update\"}, \"fields\": [\"order_ref\"], \"prompt\": \"Provide the procurement order reference for this update.\"}, \"status\": \"input_required\"}",
+              "role": "tool",
+              "tool_call_id": "f4befb73-7ebf-5f83-a001-97f0a0b4f328"
+            },
+            {
+              "content": "{\"provided_input\": {\"order_ref\": \"PO-SAMPLE-2202\"}}",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-2202\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "5a5ea9fa-8095-53da-9496-8c718f813daa",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-TRUSTED'}",
+              "role": "tool",
+              "tool_call_id": "5a5ea9fa-8095-53da-9496-8c718f813daa"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 5,
+            "update_body": "SKU-A1 confirmed by warehouse-A (sample-pack fixture round)"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-2202",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-TRUSTED"
+          }
+        }
+      ],
+      "business_call_rounds": [
+        0,
+        2
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-2202",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "action_key": "4fb26df3-b3dd-5fa2-959c-92cf8b2d3a69",
+          "arguments_digest": "c65eb9890e2e3ef69f09861e5bcdda34b3306c5926adc5787c53b1f6b4cf238d",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "f28e71cd-3e31-5d5a-bf3a-8dbd742fa12a",
+          "arguments_digest": "746fb4733793664f41273e554083d6b3cfbcfb9b86f15e805234d69c2d6d0732",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "f1a341db-2f98-5966-b1f9-1ff578f63efa",
+          "arguments_digest": "906bfed4ed9cd50a50510394e7da3177117dfa97f5adccbfc8cf97268ea71d23",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false,
+        "count": 0
+      },
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "security": {
+        "unsourced_value_landed": false,
+        "guard_verdict_unrecorded": false,
+        "duplicate_write": false
+      },
+      "summary": {
+        "negatives": {
+          "unsourced_value_landed": false,
+          "guard_verdict_unrecorded": false,
+          "duplicate_write": false
+        },
+        "no_negative": true,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "park_count": 1,
+        "guard_verdicts": [
+          "input_required",
+          "executed"
+        ],
+        "profile_request_exact": true,
+        "zero_effect_before_request": true,
+        "same_run": true,
+        "clarify_deliver_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "model_behavior": {
+        "pre_park_write_attempts": 1,
+        "first_write_source": "not_sourced",
+        "host_interception": "input_required",
+        "clarification_origin": "host_field_guard",
+        "authorized_input_same_run": true,
+        "post_supplement_write": true,
+        "delivery_outcome": "accepted"
+      },
+      "guard_verdicts": [
+        {
+          "verdict": "input_required",
+          "fields": [
+            "order_ref"
+          ]
+        },
+        {
+          "verdict": "executed"
+        }
+      ],
+      "profile": {
+        "version": 1,
+        "profile": "synthetic-inventory-order-ref-1",
+        "sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11"
+      },
+      "request_budget": null,
+      "latency_ms_total": 1485.000000000582,
+      "model_calls": 4,
+      "write_attempts": 1,
+      "side_effect_count": 1,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      },
+      "clarification": {
+        "parks": [
+          {
+            "run_id": "2f1843d2-ad62-47d2-9792-aed2f0dd0a85",
+            "wake_kind": "provide_input",
+            "contract_ref": {
+              "tool": "submit_inventory_update",
+              "execution_id": "f28e71cd-3e31-5d5a-bf3a-8dbd742fa12a",
+              "arguments_digest": "746fb4733793664f41273e554083d6b3cfbcfb9b86f15e805234d69c2d6d0732",
+              "kind": "input",
+              "contract": {
+                "fields": [
+                  "order_ref"
+                ],
+                "prompt": "Provide the procurement order reference for this update.",
+                "field_provenance": {
+                  "profile": "synthetic-inventory-order-ref-1",
+                  "profile_sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11",
+                  "tool": "submit_inventory_update",
+                  "fields": [
+                    "order_ref"
+                  ],
+                  "resource": {
+                    "domain": "domain_a",
+                    "sku": "SKU-A1"
+                  }
+                }
+              },
+              "run_id": "2f1843d2-ad62-47d2-9792-aed2f0dd0a85",
+              "engine_session_id": "884fb98d-a9e6-4263-b2d1-724f1b66ae16"
+            },
+            "business_calls_before_park": 1,
+            "landed_writes_before_park": 0,
+            "model_rounds_before_park": 2,
+            "wake_state": "applied"
+          }
+        ],
+        "park_count": 1,
+        "input_revisions": [
+          {
+            "order_ref": "PO-SAMPLE-2202"
+          }
+        ],
+        "responder": "deterministic_injection"
+      },
+      "diagnostics": {
+        "version": "controller-failure-diagnostics-1",
+        "end_reason": "terminal_state_observed",
+        "collection_error_type": null,
+        "task_state": "succeeded",
+        "last_run_id": "2f1843d2-ad62-47d2-9792-aed2f0dd0a85",
+        "last_error_digest": null,
+        "round_error_types": [],
+        "diagnostic_error": null,
+        "cleanup_stragglers": 0,
+        "close_error": null,
+        "dispatch_attempts": null,
+        "dispatch_starts": 2,
+        "last_error": null,
+        "requeued_reason": null
+      }
+    },
+    {
+      "host": "platform",
+      "case": "substituted_value",
+      "task_id": "d9f6f7e0-fb10-4832-9646-f627fd16b0dd",
+      "run_id": "1c4eb552-81e5-45ec-b5b2-be51dd7d5bc0",
+      "run_count": 1,
+      "source": "deterministic_injection",
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "e44a2d39-270e-5962-ba5f-9ce82c4031a8",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)', 'order_ref': 'PO-SAMPLE-1101'}",
+              "role": "tool",
+              "tool_call_id": "e44a2d39-270e-5962-ba5f-9ce82c4031a8"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5,
+                  "order_ref": "PO-SAMPLE-4404"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 5,
+            "update_body": "SKU-A1 confirmed by warehouse-A (sample-pack fixture round)",
+            "order_ref": "PO-SAMPLE-1101"
+          }
+        }
+      ],
+      "business_call_rounds": [
+        0
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "action_key": "3f7dc6e0-64bf-55f3-8a68-a88946ed4285",
+          "arguments_digest": "c65eb9890e2e3ef69f09861e5bcdda34b3306c5926adc5787c53b1f6b4cf238d",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "97288437-ad94-59cf-a240-b762d84c2726",
+          "arguments_digest": "fcb1c8d7d4ce1f3ddd3242a1dc342b032242b56c8d557097437324cd64b6daf9",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false,
+        "count": 0
+      },
+      "collection_error": null,
+      "stop": {
+        "task_status": "failed",
+        "error_category": "field_provenance_conflict",
+        "error": "protected field provenance conflict; the write was not executed",
+        "reconciliation_reason": null
+      },
+      "security": {
+        "unsourced_value_landed": false,
+        "guard_verdict_unrecorded": false,
+        "duplicate_write": false
+      },
+      "summary": {
+        "negatives": {
+          "unsourced_value_landed": false,
+          "guard_verdict_unrecorded": false,
+          "duplicate_write": false
+        },
+        "no_negative": true,
+        "structured_output_valid": false,
+        "artifact_reference_correct": false,
+        "park_count": 0,
+        "guard_verdicts": [
+          "refused"
+        ],
+        "conflict_stop_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "model_behavior": {
+        "pre_park_write_attempts": 1,
+        "first_write_source": "not_sourced",
+        "host_interception": "refused",
+        "clarification_origin": null,
+        "authorized_input_same_run": false,
+        "post_supplement_write": false,
+        "delivery_outcome": "not_reached"
+      },
+      "guard_verdicts": [
+        {
+          "verdict": "refused",
+          "reason": "conflict"
+        }
+      ],
+      "profile": {
+        "version": 1,
+        "profile": "synthetic-inventory-order-ref-1",
+        "sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11"
+      },
+      "request_budget": null,
+      "latency_ms_total": 985.0000000005821,
+      "model_calls": 2,
+      "write_attempts": 0,
+      "side_effect_count": 0,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      },
+      "clarification": {
+        "parks": [],
+        "park_count": 0,
+        "input_revisions": [],
+        "responder": "deterministic_injection"
+      },
+      "diagnostics": {
+        "version": "controller-failure-diagnostics-1",
+        "end_reason": "terminal_state_observed",
+        "collection_error_type": null,
+        "task_state": "failed",
+        "last_run_id": "1c4eb552-81e5-45ec-b5b2-be51dd7d5bc0",
+        "last_error_digest": null,
+        "round_error_types": [],
+        "diagnostic_error": null,
+        "cleanup_stragglers": 0,
+        "close_error": null,
+        "dispatch_attempts": null,
+        "dispatch_starts": 1,
+        "last_error": null,
+        "requeued_reason": null
+      }
+    },
+    {
+      "host": "platform",
+      "case": "replayed_value",
+      "task_id": "b065cbd2-fb36-4181-95c5-479ee4a79ff8",
+      "run_id": "169909d0-d234-43bc-bf7b-65e284c7e130",
+      "run_count": 1,
+      "source": "deterministic_injection",
+      "rounds": [
+        {
+          "index": 0,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "query_inventory",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 1,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "4d64b822-dd44-56bd-a272-7c5ae1520c10",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)', 'order_ref': 'PO-SAMPLE-1101'}",
+              "role": "tool",
+              "tool_call_id": "4d64b822-dd44-56bd-a272-7c5ae1520c10"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5,
+                  "order_ref": "PO-SAMPLE-1101"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 2,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "4d64b822-dd44-56bd-a272-7c5ae1520c10",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)', 'order_ref': 'PO-SAMPLE-1101'}",
+              "role": "tool",
+              "tool_call_id": "4d64b822-dd44-56bd-a272-7c5ae1520c10"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-1101\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "2da7e51e-b9ac-5513-93bc-0d87c37017dc",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-TRUSTED'}",
+              "role": "tool",
+              "tool_call_id": "2da7e51e-b9ac-5513-93bc-0d87c37017dc"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [
+            {
+              "id": "call-trusted-field-sample",
+              "type": "function",
+              "function": {
+                "name": "submit_inventory_update",
+                "arguments": {
+                  "domain": "domain_a",
+                  "sku": "SKU-A1",
+                  "quantity": 5,
+                  "order_ref": "PO-SAMPLE-1101"
+                }
+              }
+            }
+          ],
+          "final": false,
+          "latency_ms": 0.0,
+          "content": "",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        },
+        {
+          "index": 3,
+          "phase": "initial",
+          "input_messages": [
+            {
+              "content": "Read stock first. If reorder is true, submit exactly one inventory update carrying the procurement order reference (order_ref). Never invent an order_ref: use one only from the read receipt or from the provided input. Return final output as JSON {\"answer\":\"...\"} including the resulting update_id.",
+              "role": "system"
+            },
+            {
+              "content": "Return final output as JSON satisfying this schema: {\"properties\": {\"answer\": {\"type\": \"string\"}}, \"required\": [\"answer\"], \"type\": \"object\"}",
+              "role": "system"
+            },
+            {
+              "content": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+              "role": "user"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"sku\":\"SKU-A1\"}",
+                    "name": "query_inventory"
+                  },
+                  "id": "4d64b822-dd44-56bd-a272-7c5ae1520c10",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'stock': 'confirmed', 'reorder': True, 'quantity': 5, 'update_body': 'SKU-A1 confirmed by warehouse-A (sample-pack fixture round)', 'order_ref': 'PO-SAMPLE-1101'}",
+              "role": "tool",
+              "tool_call_id": "4d64b822-dd44-56bd-a272-7c5ae1520c10"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-1101\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "2da7e51e-b9ac-5513-93bc-0d87c37017dc",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-TRUSTED'}",
+              "role": "tool",
+              "tool_call_id": "2da7e51e-b9ac-5513-93bc-0d87c37017dc"
+            },
+            {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"domain\":\"domain_a\",\"order_ref\":\"PO-SAMPLE-1101\",\"quantity\":5,\"sku\":\"SKU-A1\"}",
+                    "name": "submit_inventory_update"
+                  },
+                  "id": "ce826cc0-5014-5648-b125-dc1c3291e21c",
+                  "type": "function"
+                }
+              ]
+            },
+            {
+              "content": "{'status': 'ok', 'update_id': 'UPD-TRUSTED'}",
+              "role": "tool",
+              "tool_call_id": "ce826cc0-5014-5648-b125-dc1c3291e21c"
+            }
+          ],
+          "tools_enabled": true,
+          "input_tools": [
+            {
+              "function": {
+                "name": "query_inventory",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            },
+            {
+              "function": {
+                "name": "submit_inventory_update",
+                "parameters": {
+                  "properties": {
+                    "domain": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "order_ref": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "quantity": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "sku": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "domain",
+                    "sku",
+                    "quantity"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "function"
+            }
+          ],
+          "tool_calls": [],
+          "final": true,
+          "latency_ms": 0.0,
+          "content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+          "usage": null,
+          "provider_model": "deterministic-injection"
+        }
+      ],
+      "final_content": "{\"answer\": \"Reorder submitted; update UPD-TRUSTED.\"}",
+      "tool_receipts": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "stock": "confirmed",
+            "reorder": true,
+            "quantity": 5,
+            "update_body": "SKU-A1 confirmed by warehouse-A (sample-pack fixture round)",
+            "order_ref": "PO-SAMPLE-1101"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-1101",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-TRUSTED"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-1101",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          },
+          "status": "succeeded",
+          "content": {
+            "status": "ok",
+            "update_id": "UPD-TRUSTED"
+          }
+        }
+      ],
+      "business_call_rounds": [
+        0,
+        1,
+        2
+      ],
+      "tool_calls": [
+        {
+          "tool": "query_inventory",
+          "arguments": {
+            "domain": "domain_a",
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-1101",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          }
+        },
+        {
+          "tool": "submit_inventory_update",
+          "arguments": {
+            "domain": "domain_a",
+            "order_ref": "PO-SAMPLE-1101",
+            "quantity": 5,
+            "sku": "SKU-A1"
+          }
+        }
+      ],
+      "ledger_actions": [
+        {
+          "action_key": "c987afcf-eb86-57f0-b06c-8350a3d7c3d0",
+          "arguments_digest": "c65eb9890e2e3ef69f09861e5bcdda34b3306c5926adc5787c53b1f6b4cf238d",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "4d3b1504-2419-5026-87d6-38c581bb4169",
+          "arguments_digest": "2915a7cf41ff69233cb3b66d1f90fccb6af77c35588684663961d353968bc78b",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        },
+        {
+          "action_key": "aa52d810-2ff8-5521-a7a2-eecaef7a14a6",
+          "arguments_digest": "2915a7cf41ff69233cb3b66d1f90fccb6af77c35588684663961d353968bc78b",
+          "side_effect_class": "unknown",
+          "pending_reconciliation": false,
+          "active_claim": false
+        }
+      ],
+      "approval": null,
+      "rebuild": {
+        "performed": false,
+        "count": 0
+      },
+      "collection_error": null,
+      "stop": {
+        "task_status": "succeeded",
+        "error_category": null,
+        "error": null,
+        "reconciliation_reason": null
+      },
+      "security": {
+        "unsourced_value_landed": false,
+        "guard_verdict_unrecorded": false,
+        "duplicate_write": true
+      },
+      "summary": {
+        "negatives": {
+          "unsourced_value_landed": false,
+          "guard_verdict_unrecorded": false,
+          "duplicate_write": true
+        },
+        "no_negative": false,
+        "structured_output_valid": true,
+        "artifact_reference_correct": true,
+        "park_count": 0,
+        "guard_verdicts": [
+          "executed",
+          "executed"
+        ],
+        "replay_landed_writes": 2,
+        "replay_detection_compliance": true,
+        "within_latency_threshold": true,
+        "within_token_threshold": null,
+        "within_cost_threshold": null
+      },
+      "model_behavior": {
+        "pre_park_write_attempts": 2,
+        "first_write_source": "read_receipt",
+        "host_interception": null,
+        "clarification_origin": null,
+        "authorized_input_same_run": false,
+        "post_supplement_write": false,
+        "delivery_outcome": "accepted"
+      },
+      "guard_verdicts": [
+        {
+          "verdict": "executed"
+        },
+        {
+          "verdict": "executed"
+        }
+      ],
+      "profile": {
+        "version": 1,
+        "profile": "synthetic-inventory-order-ref-1",
+        "sha256": "1a7c3781990edd8c0eb0408fa62f688dedac7f72391f85c32ced2fd89ce78f11"
+      },
+      "request_budget": null,
+      "latency_ms_total": 1140.9999999959837,
+      "model_calls": 4,
+      "write_attempts": 2,
+      "side_effect_count": 2,
+      "usage": {
+        "source": "unverified",
+        "token_total": null,
+        "cost_amount": null,
+        "currency": "USD",
+        "price_version": "unverified"
+      },
+      "clarification": {
+        "parks": [],
+        "park_count": 0,
+        "input_revisions": [],
+        "responder": "deterministic_injection"
+      },
+      "diagnostics": {
+        "version": "controller-failure-diagnostics-1",
+        "end_reason": "terminal_state_observed",
+        "collection_error_type": null,
+        "task_state": "succeeded",
+        "last_run_id": "169909d0-d234-43bc-bf7b-65e284c7e130",
+        "last_error_digest": null,
+        "round_error_types": [],
+        "diagnostic_error": null,
+        "cleanup_stragglers": 0,
+        "close_error": null,
+        "dispatch_attempts": null,
+        "dispatch_starts": 1,
+        "last_error": null,
+        "requeued_reason": null
+      }
+    }
+  ]
+}
