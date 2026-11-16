@@ -541,3 +541,29 @@ recorded_tracks:
       to this frozen configuration, the synthetic samples and the
       platform-local Controller dispatch.
     ci_gate: false
+  - id: controller_host_trusted_field_sample
+    tier: 2
+    runner: tests/scenarios/baseline/run_controller_trusted_field_sample_baseline.py
+    record: tests/scenarios/baselines/controller_host_experiment_controller-host-trusted-field-sample-pilot-20261115T235928976710Z-fdcf15.json
+    status: skipped
+    reason: >-
+      committed record is the deterministic-injection fixture-pack matrix of
+      the P-A authorized-sample family (scenario
+      platform_trusted_field_sample, definition digest
+      dec2c5823cd205a74535338fcf5ccede0527315a29a9ffba03906bc22cd95c6c; the
+      embedded synthetic fixture pack carries the desensitized sample
+      content and the authorization/environment assertions). The five
+      pre-registered cases (receipt_sourced, input_sourced, guessed_value,
+      substituted_value, replayed_value) ran over the real platform
+      dispatch, 3 repetitions, and every frozen case criterion passed. The
+      security block records the pre-registered replay finding: the field
+      provenance guard does not intercept a model-initiated replay of an
+      already-sourced value, so each scripted replay run exceeds the
+      side-effect ceiling (observed 2) and the duplicate_write negative
+      detects it from the registry facts; containment routes to the P-D
+      egress profile. Authorized real samples, a resettable target
+      environment, the model-call budget and the independent reviewer are
+      not provisioned yet - collection stays a deterministic dry run per
+      docs/how-to/run-trusted-field-real-samples.md; offline invariants in
+      test_controller_trusted_field_sample.py.
+    ci_gate: false

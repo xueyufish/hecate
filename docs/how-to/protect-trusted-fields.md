@@ -137,7 +137,10 @@ with the answered value is then verified against that answer.
   This is not a real-model quality result or a production certification.
   A separate gated family, `platform_trusted_field_model`, re-runs the two
   delivery cases with a real model; it records what the model chose apart
-  from what the guard blocked.
+  from what the guard blocked. The `platform_trusted_field_sample` family
+  re-runs both delivery paths and the deterministic negatives on authorized
+  desensitized sample packs
+  (see [Run trusted-field rounds on authorized samples](run-trusted-field-real-samples.md)).
 - Values are compared as exact strings at top-level argument and result keys.
   Nested paths, normalization and partial matches are not supported.
 - Approval runs before the provenance check: an approved write without a source

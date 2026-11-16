@@ -1,0 +1,27 @@
+{
+  "sample_pack_version": 1,
+  "id": "trusted-field-sample-fixture",
+  "authorization": {
+    "operator": "offline-regression",
+    "desensitized": true,
+    "evidence": "synthetic fixture values committed with the offline regression; no real sample backs this pack"
+  },
+  "environment": {
+    "target": "platform-local Controller dispatch over the synthetic inventory registry",
+    "reset": "each case builds a fresh PlatformEnvironment over a temporary state root; no persisted business state survives a case"
+  },
+  "user_prompt": "Check stock for SKU-A1 in domain_a and submit the reorder update with the procurement order reference that the stock receipt provides; if the receipt has none, submit without it and wait for the authorized value.",
+  "material": {
+    "status": "ok",
+    "stock": "confirmed",
+    "reorder": true,
+    "quantity": 5,
+    "update_body": "SKU-A1 confirmed by warehouse-A (sample-pack fixture round)"
+  },
+  "values": {
+    "receipt": "PO-SAMPLE-1101",
+    "provided": "PO-SAMPLE-2202",
+    "guessed": "PO-SAMPLE-3303",
+    "substituted": "PO-SAMPLE-4404"
+  }
+}

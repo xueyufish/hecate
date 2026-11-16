@@ -90,6 +90,7 @@ class ScenarioAdapter:
     # system prompt pinned in the definition) derives them here, so a
     # pinned definition drives the real assembly without a parallel path.
     definition_collect_extras: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    validate_output_path: Callable[[dict[str, Any], Path], None] | None = None
 
 
 _SCENARIO_ADAPTERS: dict[str, ScenarioAdapter] = {}
@@ -119,6 +120,9 @@ def resolve_scenario(name: str | None) -> ScenarioAdapter:
 
     if resolved == "platform_trusted_field_model" and resolved not in _SCENARIO_ADAPTERS:
         from tests.scenarios.baseline import run_controller_trusted_field_model_baseline  # noqa: F401
+
+    if resolved == "platform_trusted_field_sample" and resolved not in _SCENARIO_ADAPTERS:
+        from tests.scenarios.baseline import run_controller_trusted_field_sample_baseline  # noqa: F401
 
     if resolved not in _SCENARIO_ADAPTERS:
         raise ValueError(f"unknown scenario {resolved!r}; registered: {sorted(_SCENARIO_ADAPTERS)}")
@@ -243,7 +247,7 @@ REVIEW_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "trial_id": {"type": "string", "minLength": 1},
                     "host": {"enum": [None, *spec.HOSTS]},
-                    "case": {"enum": [None, *spec.CASES]},
+                    "case": {"type": ["string", "null"], "minLength": 1},
                     "reason": {"type": "string", "minLength": 1},
                 },
             },
@@ -467,6 +471,7 @@ def dump_definition(definition: dict[str, Any], path: Path) -> Path:
     """Write a definition file; the file's digest is the definition digest."""
 
     definition_digest(definition)
+    validate_output_path(definition, path.resolve().parent)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(definition, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return path
@@ -734,6 +739,13 @@ def _by_source_summary(trial_records: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
+def validate_output_path(definition: dict[str, Any], path: Path) -> None:
+    """Check where this scenario can store evidence before collecting or writing it."""
+    adapter = resolve_scenario(definition.get("scenario"))
+    if adapter.validate_output_path is not None:
+        adapter.validate_output_path(definition, path)
+
+
 async def run_experiment(
     *,
     definition: dict[str, Any],
@@ -757,6 +769,8 @@ async def run_experiment(
     _validate_collection_definition(definition, adapter)
     state_root = Path(state_root)
     trial_report_dir = Path(trial_report_dir)
+    validate_output_path(definition, state_root)
+    validate_output_path(definition, trial_report_dir)
     trial_report_dir.mkdir(parents=True, exist_ok=True)
     hermetic = definition["source_mode"] == "deterministic_injection"
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
@@ -947,9 +961,11 @@ def _usage_summary(trial_records: list[dict[str, Any]]) -> dict[str, Any]:
 def write_experiment_report(report: dict[str, Any], out_dir: Path = BASELINE_DIR) -> Path:
     """Write the aggregate as a new immutable record; never overwrite."""
 
-    adapter = resolve_scenario((report.get("_meta", {}).get("definition") or {}).get("scenario"))
+    definition = report.get("_meta", {}).get("definition") or {}
+    adapter = resolve_scenario(definition.get("scenario"))
     Draft202012Validator(adapter.report_schema).validate(report)
     out_dir = Path(out_dir)
+    validate_output_path(definition, out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"controller_host_experiment_{report['_meta']['experiment_run_id']}.json"
     with out.open("xb") as output:
@@ -1030,6 +1046,14 @@ def compare_records(first: dict[str, Any], second: dict[str, Any]) -> dict[str, 
     }
 
 
+def _validate_review_cases(review: dict[str, Any], definition: dict[str, Any]) -> None:
+    cases = definition.get("cases", spec.CASES)
+    for disagreement in review.get("disagreements", []):
+        case = disagreement.get("case")
+        if case is not None and case not in cases:
+            raise ValueError(f"review case {case!r} is outside the experiment definition")
+
+
 def write_review_record(
     report_path: Path,
     review: dict[str, Any],
@@ -1051,6 +1075,10 @@ def write_review_record(
     if meta.get("kind") != "controller_host_experiment":
         raise ValueError("review records target experiment aggregate records only")
     Draft202012Validator(REVIEW_SCHEMA).validate(review)
+    definition = meta.get("definition") or {}
+    _validate_review_cases(review, definition)
+    out_dir = Path(out_dir)
+    validate_output_path(definition, out_dir)
     record = {
         "kind": "controller_host_experiment_review",
         "review_version": REVIEW_VERSION,
@@ -1062,7 +1090,6 @@ def write_review_record(
         "recorded_at": datetime.now(UTC).isoformat(),
     }
     Draft202012Validator(REVIEW_RECORD_SCHEMA).validate(record)
-    out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     out = out_dir / f"controller_host_experiment_review_{stamp}.json"
@@ -1075,12 +1102,15 @@ def load_review_records(report_path: Path, *, search_dir: Path = BASELINE_DIR) -
     """Load the review records bound to one aggregate report file."""
 
     report_path = Path(report_path)
-    digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    report_bytes = report_path.read_bytes()
+    digest = hashlib.sha256(report_bytes).hexdigest()
+    definition = json.loads(report_bytes)["_meta"].get("definition") or {}
     records: list[dict[str, Any]] = []
     for path in sorted(Path(search_dir).glob("controller_host_experiment_review_*.json")):
         record = json.loads(path.read_text(encoding="utf-8"))
         Draft202012Validator(REVIEW_RECORD_SCHEMA).validate(record)
         if record["target"]["report_digest"] == digest:
+            _validate_review_cases(record["review"], definition)
             records.append(record)
     records.sort(key=lambda record: record["recorded_at"])
     return records
