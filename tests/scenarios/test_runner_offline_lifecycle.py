@@ -27,18 +27,23 @@ OUTSIDE the isolated phase so the namespace never resolves or downloads
 dependencies — the isolated phase installs from the locked wheelhouse
 with the standalone installer and runs everything on loopback.
 
-Two fault windows extend the drill beyond the happy path, after release
+Three fault windows extend the drill beyond the happy path, after release
 A has completed one business run and stopped: activating a tampered
 INSTALLED candidate must refuse through the real release CLI without
-moving the pointer (bytes and generation preserved), and a switch
-subprocess interrupted before the pointer commit must preserve the
-previous selection with the host lock immediately re-acquirable. In both
-windows release A cold starts again, the completed run's Task/Run and
-action ledger still resolve over HTTP and from the durable store, the
-fault itself makes zero business calls, and the interrupted switch's
-retried candidate commits cleanly. The verified boundary is process
-interruption at the activation seams — not host-wide power loss or disk
-corruption (see the install guide's verified scope).
+moving the pointer (bytes and generation preserved), a switch subprocess
+interrupted before the pointer commit must preserve the previous selection
+with the host lock immediately re-acquirable, and — after the switch to B,
+signed by the publisher's rotated key — revoking ONLY A's signing key must
+refuse a rollback through the real release CLI (the refusal names the
+revoked key), leaving the pointer bytes and generation on the still-trusted
+B, which then cold starts under the same revoked policy and serves A's
+historical Task/Run and action ledger. In the first two windows release A
+cold starts again, the completed run's Task/Run and action ledger still
+resolve over HTTP and from the durable store, the fault itself makes zero
+business calls, and the interrupted switch's retried candidate commits
+cleanly. The verified boundary is process interruption at the activation
+seams and startup-time trust — not host-wide power loss or disk corruption
+(see the install guide's verified scope).
 """
 
 from __future__ import annotations
@@ -56,7 +61,13 @@ from hecate_durable.contracts.durable import TaskLifecycleState
 from hecate_durable.contracts.references import BackendRef, RefKind
 from hecate_durable.storage import SqlDurableStore
 
-from tests.scenarios.test_deployment_manifest import _assert_refusal, _DeploymentStack, _script
+from tests.scenarios.test_deployment_manifest import (
+    KEY_ID,
+    PUBLISHER,
+    _assert_refusal,
+    _DeploymentStack,
+    _script,
+)
 from tests.scenarios.tools import runner_harness
 
 
@@ -614,6 +625,128 @@ def test_switch_interrupted_before_pointer_commit_preserves_a_and_retries(fault_
             "retry_switch_b": {"run_id": history["run_id"], "business_calls": calls_after_retry},
         },
         "business_calls_total": calls_after_retry,
+    }
+    evidence_path = tmp_path / "lifecycle-evidence.json"
+    evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding="utf-8")
+    print(f"\nlifecycle evidence: {evidence_path}\n{evidence_path.read_text(encoding='utf-8')}")
+
+
+def test_revoked_legacy_key_refuses_rollback_and_the_trusted_release_serves(fault_stack, tmp_path: Path) -> None:
+    """Fault window 3: the legacy signing key is revoked after the A → B switch.
+
+    Release A was signed by the publisher's original key, B by the rotated
+    one. After A has served one real run and B is active, the operator
+    revokes ONLY A's signing key and runs the real release-CLI rollback
+    with the correct generation: the rollback candidate A is re-verified
+    under the CURRENT policy and refused by name (signing key revoked),
+    leaving active.json byte-for-byte on B with its generation intact. The
+    still-trusted B then cold starts under the SAME revoked policy, serves
+    A's historical Task/Run and action ledger from the durable SQLite
+    authority, and accepts a new authorized read — the refused rollback,
+    the startup and the history queries made zero business calls.
+    """
+    stack, calls, database_url = fault_stack
+    isolation = _isolation_evidence()
+    history = _a_with_one_completed_run(stack, calls, database_url, tmp_path)
+
+    # -- Switch to B, signed by the publisher's rotated key. ---------------
+    stack.activate(stack.sha_b)
+    selection_b = json.loads(stack.pointer())
+    assert selection_b["manifest_sha256"] == stack.sha_b
+    assert selection_b["previous"] == stack.sha_a
+    assert selection_b["generation"] == history["generation"] + 1
+    # The refused rollback must preserve THIS selection byte-for-byte: B
+    # active with A recorded as its previous version.
+    pointer_before_rollback = stack.pointer()
+    deployment_b, digest_b = stack.compose(stack.sha_b, tmp_path)
+
+    # -- Revoke only A's signing key; B's key stays trusted. ---------------
+    stack._write_policy(revoked_key_ids=[KEY_ID])
+    result = stack.run_release_cli(
+        "rollback",
+        "--host",
+        str(stack.host),
+        "--expected-generation",
+        str(selection_b["generation"]),
+    )
+    assert result.returncode == 2, result.stderr[-2000:]
+    assert "candidate release does not pass the current gates" in result.stderr
+    assert f"signing key '{KEY_ID}' is revoked for publisher '{PUBLISHER}'" in result.stderr
+    pointer_after = stack.pointer()
+    assert pointer_after == pointer_before_rollback
+    selection_after = json.loads(pointer_after)
+    assert selection_after["manifest_sha256"] == stack.sha_b
+    assert selection_after["generation"] == selection_b["generation"]
+    calls_after_fault = len(calls)
+    assert calls_after_fault == history["business_calls"]
+
+    # -- Cold start B under the SAME revoked policy. -----------------------
+    process, serving = stack.start(deployment_b, digest_b)
+    try:
+        assert "serving on" in serving, serving[-800:]
+        port = _port(stack, deployment_b)
+        runner = _instance(stack, process, port)
+        status, health = runner.request("GET", "/healthz", token=None)
+        assert status == 200 and health["ready"] is True
+        calls_after_start = len(calls)
+        assert calls_after_start == calls_after_fault
+        _assert_historical_delivery(runner, history)
+        calls_after_history = len(calls)
+        assert calls_after_history == calls_after_start
+        run_b, _body_b = _authorized_read(stack, port)
+        assert run_b != history["run_id"]
+        calls_after_read = len(calls)
+        assert calls_after_read == calls_after_history + 1
+        _graceful_stop(stack, process, port)
+    finally:
+        stack.stop(process)
+
+    calls_total = len(calls)
+    assert calls_total == calls_after_read
+    # The completed run's durable record is untouched by the revocation,
+    # the refused rollback and B's serving.
+    task_after, snapshot_after = _terminal_record(database_url, history["run_id"])
+    assert task_after == history["task_ref"] and snapshot_after == history["snapshot"]
+    task_b, snapshot_b = _terminal_record(database_url, run_b)
+    assert task_b != task_after
+
+    evidence = {
+        "isolation": isolation,
+        "delivery_reused_from_env": bool(os.environ.get("HECATE_LIFECYCLE_DELIVERY")),
+        "scenario": "revoked-legacy-key-rollback-refusal",
+        "fault": {
+            "boundary": (
+                f"publisher key {KEY_ID} (release A's signing key) revoked in the trust policy; "
+                "the rotated key that signed release B stays trusted"
+            ),
+            "cli_exit_code": result.returncode,
+            "refusal": result.stderr.strip(),
+        },
+        "pointer": {
+            "before_rollback_sha256": hashlib.sha256(pointer_before_rollback).hexdigest(),
+            "after_sha256": hashlib.sha256(pointer_after).hexdigest(),
+            "bytes_unchanged": pointer_after == pointer_before_rollback,
+            "active": selection_after["manifest_sha256"],
+            "generation": selection_after["generation"],
+        },
+        "durable_history": {
+            "run_id": history["run_id"],
+            "actions": len(history["snapshot"]["actions"]),
+            "unchanged_after_serving": snapshot_after == history["snapshot"],
+        },
+        "phases": {
+            "initial_a": {"run_id": history["run_id"], "business_calls": history["business_calls"]},
+            "after_fault": {"business_calls": calls_after_fault},
+            "b_cold_start": {"active": stack.sha_b, "business_calls": calls_after_start},
+            "b_serves_history": {"run_id": history["run_id"], "business_calls": calls_after_history},
+            "new_read_b": {
+                "run_id": run_b,
+                "task_id": task_b.id,
+                "actions": len(snapshot_b["actions"]),
+                "business_calls": calls_after_read,
+            },
+        },
+        "business_calls_total": calls_total,
     }
     evidence_path = tmp_path / "lifecycle-evidence.json"
     evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding="utf-8")

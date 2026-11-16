@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 REPO_ROOT = SCRIPTS.parent
 PUBLISHER = "publisher:acme"
 KEY_ID = "acme-1"
+KEY_ID_B = "acme-2"
 
 pytestmark = pytest.mark.skipif(
     not runner_harness.uv_available(),
@@ -45,7 +47,9 @@ def _script(name: str, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _write_signed_artifact(tmp_root: Path, name: str, marker: str, private_pem: bytes) -> tuple[Path, str]:
+def _write_signed_artifact(
+    tmp_root: Path, name: str, marker: str, private_pem: bytes, *, key_id: str = KEY_ID
+) -> tuple[Path, str]:
     from hecate_runner.artifact_signing import canonical_manifest_bytes, sign_manifest
     from hecate_runtime.manifest import sha256_hex
 
@@ -65,7 +69,7 @@ def _write_signed_artifact(tmp_root: Path, name: str, marker: str, private_pem: 
     }
     (artifact / "agent-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     raw = json.loads((artifact / "agent-manifest.json").read_text(encoding="utf-8"))
-    envelope = sign_manifest(raw, private_pem, publisher_ref=PUBLISHER, key_id=KEY_ID)
+    envelope = sign_manifest(raw, private_pem, publisher_ref=PUBLISHER, key_id=key_id)
     (artifact / "artifact-signature.json").write_text(json.dumps(envelope), encoding="utf-8")
     return artifact, sha256_hex(canonical_manifest_bytes(raw))
 
@@ -114,15 +118,22 @@ class _DeploymentStack:
         self.root = tmp_root
         self.offline_python = offline_python
         self.delivery = delivery
-        private_pem, public_pem = generate_keypair()
-        self.public_pem = public_pem.decode("ascii")
+        # Two keys of one publisher: release A is signed by the original
+        # key, release B by the rotated one — the key-revocation drill
+        # revokes only the original key and must leave B trusted.
+        private_pem_a, public_pem_a = generate_keypair()
+        private_pem_b, public_pem_b = generate_keypair()
+        self.public_pem_a = public_pem_a.decode("ascii")
+        self.public_pem_b = public_pem_b.decode("ascii")
         self.host = tmp_root / "host"
         runner_harness._write_profile(self.host, business_api_port=business_port, durable=durable)
         self.policy_path = tmp_root / "artifact-trust.json"
         self._write_policy()
 
-        self.artifact_a, self.sha_a = _write_signed_artifact(tmp_root, "artifact-a", "version-a", private_pem)
-        self.artifact_b, self.sha_b = _write_signed_artifact(tmp_root, "artifact-b", "version-b", private_pem)
+        self.artifact_a, self.sha_a = _write_signed_artifact(tmp_root, "artifact-a", "version-a", private_pem_a)
+        self.artifact_b, self.sha_b = _write_signed_artifact(
+            tmp_root, "artifact-b", "version-b", private_pem_b, key_id=KEY_ID_B
+        )
         for artifact in (self.artifact_a, self.artifact_b):
             bundle = self.root / f"{artifact.name}.tar.gz"
             self._release_cli("pack", "--artifact", str(artifact), "--out", str(bundle))
@@ -156,13 +167,20 @@ class _DeploymentStack:
         """The digest-addressed installed release directory on disk."""
         return self.host / "releases" / sha
 
-    def _write_policy(self, *, revoked: bool = False) -> Path:  # noqa: S107 - test fixture token
+    def _write_policy(self, *, revoked: bool = False, revoked_key_ids: Sequence[str] = ()) -> Path:
         self.policy_path.write_text(
             json.dumps(
                 {
                     "artifact_trust_version": "1",
                     "publishers": {
-                        PUBLISHER: {"keys": [{"key_id": KEY_ID, "public_key": self.public_pem}], "revoked": revoked}
+                        PUBLISHER: {
+                            "keys": [
+                                {"key_id": KEY_ID, "public_key": self.public_pem_a},
+                                {"key_id": KEY_ID_B, "public_key": self.public_pem_b},
+                            ],
+                            "revoked": revoked,
+                            "revoked_key_ids": list(revoked_key_ids),
+                        }
                     },
                 }
             ),
