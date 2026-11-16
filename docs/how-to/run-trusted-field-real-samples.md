@@ -57,25 +57,45 @@ real business work.
   side effects.
 - **replayed_value** — the model re-submits an identical, already-sourced
   write. The field provenance guard judges each action's sources and does
-  not intercept a model-initiated replay, so the duplicate write lands and
-  the pre-registered `duplicate_write` negative detects it from the business
-  registry's facts. The case's frozen criterion
-  `replay_detection_compliance` pins the detection contract — the replay
-  attempt appears as its own ledger action, the recorded side-effect counter
-  agrees with the landed-write receipts, no unsourced value lands, and
-  delivery acceptance still judges the artifact — not a containment promise
-  the guard does not make. Containment of model-initiated replays relies on
-  the business registry or the egress profile's own controls; host-level
-  action redelivery still executes exactly once (see
+  not intercept a model-initiated replay, so under the frozen profile the
+  duplicate write lands and the pre-registered `duplicate_write` negative
+  detects it from the business registry's facts. The case's frozen
+  criterion `replay_detection_compliance` pins the detection contract —
+  the replay attempt appears as its own ledger action, the recorded
+  side-effect counter agrees with the landed-write receipts, no unsourced
+  value lands, and delivery acceptance still judges the artifact — not a
+  containment promise the guard does not make. Host-level action
+  redelivery still executes exactly once (see
   [Protect write fields with trusted provenance](protect-trusted-fields.md)).
 
-The current collector always seeds the frozen provenance profile and uses
-the replay-detection criterion above. The platform's opt-in
-[`write_once` rules](protect-trusted-fields.md#declare-a-profile) have a
-separate deterministic conformance scenario. A future sample round with
-the opt-in requires a definition that pins the enabled profile, scores a
-refused repeat with only one landed write, and forms its own comparison
-group.
+## The write-once dedup round
+
+The platform's [`write_once` rules](protect-trusted-fields.md#declare-a-profile)
+change what a replay should show: the host refuses the repeat before the
+business call. Collect that round with the collector's explicit option —
+
+```bash
+python -m tests.scenarios.baseline.run_controller_trusted_field_sample_baseline \
+    --write-once --print-default-definition
+python -m tests.scenarios.baseline.run_controller_trusted_field_sample_baseline --write-once ...
+python -m tests.scenarios.baseline.run_controller_trusted_field_sample_baseline \
+    --definition /path/outside/repo/write-once-definition.json ...
+```
+
+The variant is its own scenario (`platform_trusted_field_sample_write_once`)
+with its own digest space and criteria, so frozen definitions, digests and
+archived records stay byte-for-byte valid and a write-once round never
+shares a comparison group with a frozen one. Its definition pins the
+enabled profile declaration verbatim and replaces the replay criterion
+with `replay_containment_compliance`: the replay attempt appears as its
+own ledger action with identical arguments, the first sourced write lands
+exactly once, the second business call is never issued, the refusal is
+recorded as the second action's outcome with the `duplicate` reason, the
+task fails with `field_provenance_duplicate`, and the REST inbox delivers
+the stop notice. A second issued call, a lost first receipt, or a failure
+for any other reason fails the criterion. The delivery cases still use
+the frozen rubric — a trusted read or an authorized supplement completes
+the Run's first write and passes delivery acceptance.
 
 ## Freeze before real collection
 
