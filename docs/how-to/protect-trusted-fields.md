@@ -32,7 +32,8 @@ tool arguments can never declare, widen or satisfy it.
           "read_receipts": [{"tool": "query_inventory", "field": "order_ref"}],
           "provided_input": true
         },
-        "prompt": "Provide the procurement order reference for this update."
+        "prompt": "Provide the procurement order reference for this update.",
+        "write_once": true
       }
     ]
   }
@@ -49,6 +50,11 @@ tool arguments can never declare, widen or satisfy it.
   source its own field.
 - `sources.provided_input` admits an authorized human answer to this profile's
   own input request.
+- `write_once` is the explicit duplicate-write opt-in for the tool: one Run
+  may write one resource through it at most once (see
+  [Verdicts](#verdicts)). Rules of one tool must opt in together, like
+  their resource keys. The normalized declaration carries the key only when
+  enabled, so declarations committed without it keep their frozen digest.
 - Unknown keys, duplicate rules, reserved control keys (`approval_ref`,
   `wait_token`, `agent_child_result`) and rules without any legal source are
   rejected.
@@ -103,6 +109,8 @@ value came from, and a sourced value never bypasses authorization.
 | Sources disagree, or the argument contradicts the sourced value | refusal `conflict`; task `failed`, `error_category: field_provenance_conflict` | none |
 | Missing resource key, malformed source value, a receipt naming another resource, or the call is not the verified action of a decision under this profile | refusal `unbound`; task `failed`, `field_provenance_unbound` | none |
 | Decision chain, ledger or input history unreadable or inconsistent | refusal `unavailable`; task `reconciliation_required`, `field_provenance_unavailable` | none |
+| The rule opts into `write_once` and this Run already wrote the same tool and resource — even with a sourced value and different other arguments | refusal `duplicate`; task `failed`, `field_provenance_duplicate` | none (the first receipt stays) |
+| The rule opts into `write_once` and an earlier same-resource write's outcome is not established (claimed, lost, or failed with a pending reconciliation) | refusal `unavailable`; task `reconciliation_required` | none |
 
 The refusal envelope is recorded as the blocked action's outcome. It names the
 profile, tool, fields, reason and action identity, never a protected or
@@ -124,6 +132,12 @@ with the answered value is then verified against that answer.
   the Controller. Replay reapplies tool-result governance, and a receipt can
   supply a protected field only if both projections released it. Business
   tool results cannot issue the host's provenance request or refusal markers.
+- Write-once admission is judged from the committed decisions and the ledger
+  alone, so a rebuilt host re-derives it exactly. A redelivered action that
+  already completed reuses its original receipt through the claim path; a
+  sibling write of the same resource is refused as a duplicate. An input
+  request and a refusal never consume the write: the authorization
+  supplement can still complete the Run's first write.
 
 ## Support boundary
 
@@ -148,5 +162,6 @@ with the answered value is then verified against that answer.
 
 The implementation is `src/hecate/execution/field_provenance.py`, consumed by
 `PlatformGovernance.execute_tool` and the Controller dispatch. Coverage lives
-in `tests/test_execution/test_field_provenance.py` and
-`tests/scenarios/test_controller_trusted_field.py`.
+in `tests/test_execution/test_field_provenance.py`,
+`tests/scenarios/test_controller_trusted_field.py` and — for the write-once
+opt-in — `tests/scenarios/test_controller_write_dedup.py`.

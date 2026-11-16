@@ -69,6 +69,14 @@ real business work.
   action redelivery still executes exactly once (see
   [Protect write fields with trusted provenance](protect-trusted-fields.md)).
 
+The current collector always seeds the frozen provenance profile and uses
+the replay-detection criterion above. The platform's opt-in
+[`write_once` rules](protect-trusted-fields.md#declare-a-profile) have a
+separate deterministic conformance scenario. A future sample round with
+the opt-in requires a definition that pins the enabled profile, scores a
+refused repeat with only one landed write, and forms its own comparison
+group.
+
 ## Freeze before real collection
 
 A real round runs only after all of the following are frozen into the
