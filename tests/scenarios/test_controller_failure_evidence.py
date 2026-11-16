@@ -510,6 +510,36 @@ async def test_non_deadline_timeout_is_not_attributed_to_case_budget(family, tmp
 # --- consumers: clarification and feedback carry the same diagnostics ---
 
 
+async def _bounded_consumer_case(
+    case: str, run_case: Any, tmp_path, provider: Any, timeout_seconds: float = 150.0
+) -> dict[str, Any]:
+    """Run one consumer-driver case under a hard outer evidence bound.
+
+    ``wait_for(90)`` is the expected-timeout safety net for the injected
+    20 s case budget, but it can only complete once the cancelled case
+    finishes its own cleanup. A cleanup that stalls under heavy parallel
+    collection would otherwise hold the test until pytest-timeout kills
+    it with no evidence. The hard outer bound fails fast instead, and
+    dumps every live task's stack so the stall point is in the CI log.
+    """
+
+    loop = asyncio.get_running_loop()
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            return await asyncio.wait_for(run_case(case, provider, tmp_path), timeout=90)
+    except TimeoutError as exc:
+        stacks = []
+        for task in asyncio.all_tasks(loop):
+            if task is asyncio.current_task():
+                continue
+            rendered = "".join(str(frame) for frame in task.get_stack(limit=12)) or f"{task!r}: no Python stack"
+            stacks.append(rendered)
+        raise AssertionError(
+            f"the injected-failure case for {case!r} did not converge within its "
+            f"safety nets ({timeout_seconds}s); live task stacks follow:\n" + "\n\n".join(stacks)
+        ) from exc
+
+
 async def test_consumer_drivers_carry_diagnostics_on_failure(tmp_path, monkeypatch) -> None:
     from tests.scenarios.baseline import controller_host_clarification_platform as clar_driver
     from tests.scenarios.baseline import controller_host_feedback_platform as fb_driver
@@ -520,7 +550,7 @@ async def test_consumer_drivers_carry_diagnostics_on_failure(tmp_path, monkeypat
         (fb_driver, ("rejection_correction", fb_driver.run_feedback_case)),
     ):
         case, run_case = entry
-        observation = await asyncio.wait_for(run_case(case, HangingProvider(), tmp_path), timeout=90)
+        observation = await _bounded_consumer_case(case, run_case, tmp_path, HangingProvider())
         assert "TimeoutError" in (observation["collection_error"] or "")
         assert observation["task_id"], f"{case}: identity must survive the case timeout"
         assert observation["diagnostics"]["end_reason"] == "case_deadline_exceeded"
