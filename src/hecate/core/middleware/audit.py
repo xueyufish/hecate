@@ -27,6 +27,9 @@ _EXCLUDED_PATHS: frozenset[str] = frozenset(
         "/docs",
         "/openapi.json",
         "/redoc",
+        # The public Slack callback keeps its own bounded, content-free ledger.
+        "/v1/slack-events",
+        "/v1/slack-events/",
     }
 )
 

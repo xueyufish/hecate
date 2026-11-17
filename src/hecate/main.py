@@ -607,5 +607,12 @@ from hecate.channel.api.v1.im_bindings import router as im_bindings_router  # no
 app.include_router(im_channels_router)
 app.include_router(im_bindings_router)
 
+# Slack event observation (P-C phase 1) — isolated observe-only entry,
+# default off. Shares nothing with the IM webhook path above: no adapter
+# registry, no IMMessageBus, no dispatching services.
+from hecate.channel.api.v1.slack_events import router as slack_events_router  # noqa: E402
+
+app.include_router(slack_events_router)
+
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 # (mount block is above, near the start of router registration)

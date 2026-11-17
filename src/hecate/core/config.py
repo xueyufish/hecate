@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import MutableMapping
-from typing import Any
+from typing import Annotated, Any
 
 from dotenv import dotenv_values
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ENV_FILE = ".env"
@@ -264,6 +265,25 @@ class Settings(BaseSettings):
     # own HECATE_IM_* env vars; unconfigured (None) or raising factories
     # are skipped without blocking boot.
     CHANNEL_PROVIDERS: tuple[str, ...] = ("feishu", "slack")
+
+    # Slack event observation (P-C phase 1) — a default-off, observe-only
+    # entry point for one signed Slack event source. All bindings are
+    # server-side configuration: the dedicated app's signing secret, the
+    # one allowed app/team/channel, and the Hecate workspace the evidence
+    # belongs to. The entry never dispatches tasks and never touches the
+    # IM message bus; it only writes the observation ledger. See
+    # docs/how-to/observe-slack-events.md.
+    SLACK_EVENT_OBSERVATION_ENABLED: bool = False
+    SLACK_EVENT_OBSERVATION_SIGNING_SECRET: SecretStr = SecretStr("")
+    SLACK_EVENT_OBSERVATION_APP_ID: str = ""
+    SLACK_EVENT_OBSERVATION_TEAM_ID: str = ""
+    SLACK_EVENT_OBSERVATION_CHANNEL_ID: str = ""
+    SLACK_EVENT_OBSERVATION_WORKSPACE_ID: str = ""
+    # Refusal counters saturate per reason and time window.
+    SLACK_EVENT_OBSERVATION_RETENTION_DAYS: Annotated[int, Field(ge=1, le=3650)] = 30
+    SLACK_EVENT_OBSERVATION_REJECT_LOG_LIMIT: Annotated[int, Field(ge=0, le=1_000_000)] = 500
+    SLACK_EVENT_OBSERVATION_REJECT_LOG_WINDOW_SECONDS: Annotated[int, Field(ge=60, le=86400)] = 3600
+    SLACK_EVENT_OBSERVATION_MAX_BODY_BYTES: Annotated[int, Field(ge=1, le=1_048_576)] = 65536
 
     VECTOR_STORE_TYPE: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
