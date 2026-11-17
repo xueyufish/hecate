@@ -42,10 +42,12 @@ from hecate_governance.usage import BudgetGate, ReservationStatus, UsageRecord, 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.execution.governance_revocation import PrincipalLifecycleRevocation
+from hecate.execution.rest_write import RestWriteRefusedError
 from hecate.tools.policy.governance_adapter import PipelinePolicyProfile
 
 if TYPE_CHECKING:
     from hecate.execution.field_provenance import ControllerFieldProvenanceGuard
+    from hecate.execution.rest_write import RestWriteExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,7 @@ class PlatformGovernance:
         identity: dict[str, Any] | None = None,
         workspace_id: Any = None,
         field_guard: ControllerFieldProvenanceGuard | None = None,
+        rest_write_guard: RestWriteExecutor | None = None,
     ) -> None:
         self._identity = dict(identity or {})
         self._workspace_id = workspace_id
@@ -111,6 +114,10 @@ class PlatformGovernance:
         # Trusted field provenance of one protected controller Run; absent
         # everywhere else, so every other path keeps its exact behavior.
         self._field_guard = field_guard
+        # REST write account constraint of one declared controller Run;
+        # absent everywhere else, so every other path keeps its exact
+        # behavior (no REST executor, no account checks).
+        self._rest_write_guard = rest_write_guard
 
     def with_identity(self, identity: dict[str, Any], workspace_id: Any = None) -> PlatformGovernance:
         """Bind a verified entry without mutating a facade shared by callers."""
@@ -128,6 +135,14 @@ class PlatformGovernance:
 
         bound = copy(self)
         bound._field_guard = guard
+        return bound
+
+    def with_rest_write_guard(self, guard: RestWriteExecutor) -> PlatformGovernance:
+        """Bind one Run's REST write account guard without mutating a shared facade."""
+        from copy import copy
+
+        bound = copy(self)
+        bound._rest_write_guard = guard
         return bound
 
     async def authorize_tool_call(
@@ -294,9 +309,12 @@ class PlatformGovernance:
         owns_claim = not call_context.get("ledger_owned")
         if hasattr(registry, "describe"):
             call_context["tool_metadata"] = await registry.describe(name)
+        blocked = (
+            self._rest_write_guard.check_arguments(name, arguments) if self._rest_write_guard is not None else None
+        )
         metadata = call_context.get("tool_metadata") or {}
         schema = metadata.get("parameters")
-        if schema:
+        if schema and blocked is None:
             errors = list(Draft202012Validator(schema).iter_errors(arguments))
             if errors:
                 raise GovernanceDeniedError(f"input schema invalid: {errors[0].message}")
@@ -311,35 +329,38 @@ class PlatformGovernance:
                 raise GovernanceDeniedError(claim.detail or "invocation conflict")
             if claim.status is ClaimStatus.DUPLICATE_IN_FLIGHT:
                 raise OutcomeUnknownError(claim.detail or "invocation already claimed")
-        if self._field_guard is not None:
+        if blocked is None and self._field_guard is not None:
             # Authorization never vouches for where a protected value came
             # from: after permission, approval and the claim, an unsourced
             # value becomes an input request or a typed refusal here — the
             # action's recorded outcome, before any business effect.
             blocked = await self._field_guard.check(name, arguments, call_context)
-            if blocked is not None:
-                if owns_claim:
-                    try:
-                        await self.finish_claim(key, succeeded=True, result=blocked)
-                    except Exception as exc:
-                        raise OutcomeUnknownError("receipt write failed after a provenance verdict") from exc
-                self.record_tool_facts(
-                    invocation_id=key,
-                    candidates=[],
-                    actual={"tool_name": name, "arguments_digest": tool_arguments_digest(arguments)},
-                    context=call_context,
-                )
-                return blocked
+        if blocked is not None:
+            if owns_claim:
+                try:
+                    await self.finish_claim(key, succeeded=True, result=blocked)
+                except Exception as exc:
+                    raise OutcomeUnknownError("receipt write failed after a pre-dispatch refusal") from exc
+            self.record_tool_facts(
+                invocation_id=key,
+                candidates=[],
+                actual={"tool_name": name, "arguments_digest": tool_arguments_digest(arguments)},
+                context=call_context,
+            )
+            return blocked
         # Exceptions after entering the executor do not establish absence of effects.
         try:
             result = await registry.execute(name, arguments, call_context)
+        except RestWriteRefusedError as exc:
+            result = exc.verdict
         except Exception as exc:
             raise OutcomeUnknownError(f"tool dispatch did not establish an outcome: {exc}") from exc
-        output_schema = metadata.get("returns")
-        if output_schema and list(Draft202012Validator(output_schema).iter_errors(result)):
-            raise OutcomeUnknownError("tool result violates output schema; reconcile the claimed action")
-        if self._field_guard is not None:
-            result = self._field_guard.prepare_business_result(result)
+        else:
+            output_schema = metadata.get("returns")
+            if output_schema and list(Draft202012Validator(output_schema).iter_errors(result)):
+                raise OutcomeUnknownError("tool result violates output schema; reconcile the claimed action")
+            if self._field_guard is not None:
+                result = self._field_guard.prepare_business_result(result)
         if owns_claim:
             try:
                 await self.finish_claim(key, succeeded=True, result=result)

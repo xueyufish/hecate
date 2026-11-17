@@ -1462,6 +1462,16 @@ class PlatformTaskDispatcher:
                 "error": "field provenance profiles are enforced only for controller_loop tasks",
                 "error_category": "field_provenance_unsupported",
             }
+        if config.get("rest_write") is not None:
+            # Same boundary for the REST write account profile: no other
+            # entry wires a REST executor, so a declared profile must not
+            # run where its account constraint would be skipped.
+            return {
+                "status": "failed",
+                "content": "",
+                "error": "rest write profiles are enforced only for controller_loop tasks",
+                "error_category": "rest_write_unsupported",
+            }
         tool_refs = config.get("tools") or []
         event_store = None
         tool_registry = None
@@ -1713,6 +1723,30 @@ class PlatformTaskDispatcher:
                 }
         event_store = get_shared_event_store()
         tool_registry = None
+        rest_executor = None
+        if config.get("rest_write") is not None:
+            # The host-declared REST write profile is frozen with the
+            # version. A broken declaration stops before any model call
+            # instead of running gateway writes unguarded.
+            from hecate.execution.rest_write import (
+                RestWriteDeclarationError,
+                RestWriteExecutor,
+                parse_rest_write_declaration,
+            )
+
+            try:
+                rest_write = parse_rest_write_declaration(config["rest_write"])
+                if rest_write.tool not in tool_refs:
+                    raise RestWriteDeclarationError("rest_write.tool is not in the frozen tool surface")
+                rest_executor = RestWriteExecutor(rest_write, workspace_id=context.workspace_id)
+                await rest_executor.validate_setup(db)
+            except RestWriteDeclarationError as exc:
+                return {
+                    "status": "failed",
+                    "content": "",
+                    "error": f"rest write profile is invalid: {exc}",
+                    "error_category": "rest_write_invalid",
+                }
         effective_tools: list[dict[str, Any]] = []
         # Explicit skill-catalog opt-in: freeze the governed skill surface
         # (rendered catalog, advertised L2 membership, version pins,
@@ -1778,6 +1812,7 @@ class PlatformTaskDispatcher:
             # Opt-in tasks always get a wired registry: load_skill must be
             # executable (and L2-pinned) even with zero business tools, and
             # a delegating task needs the registry to route its host tool.
+            rest_options = {"rest_executor": rest_executor} if rest_executor is not None else {}
             if skill_catalog_row is not None:
                 skill_loader = ControllerSkillLoader(db, skill_catalog_row)
                 tool_registry = build_tool_registry(
@@ -1785,10 +1820,11 @@ class PlatformTaskDispatcher:
                     skill_loader=skill_loader,
                     workspace_id=context.workspace_id,
                     host_tools=agent_child_tool_map,
+                    **rest_options,
                 )
             else:
                 tool_registry = build_tool_registry(
-                    db, workspace_id=context.workspace_id, host_tools=agent_child_tool_map
+                    db, workspace_id=context.workspace_id, host_tools=agent_child_tool_map, **rest_options
                 )
             effective_tools = await load_agent_tools(db, tool_refs, workspace_id=context.workspace_id)
         bundle = await assemble_guardrails(
@@ -1881,6 +1917,14 @@ class PlatformTaskDispatcher:
                     db, agent_id=agent.id, workspace_id=context.workspace_id
                 )
             governance_for_port = governance_for_port.with_field_guard(field_guard)
+        if rest_executor is not None:
+            from hecate.core.composition.governance import build_platform_governance
+
+            if governance_for_port is None:
+                governance_for_port = build_platform_governance(
+                    db, agent_id=agent.id, workspace_id=context.workspace_id
+                )
+            governance_for_port = governance_for_port.with_rest_write_guard(rest_executor)
         await self._wire_approval_backend(db, context, bundle, resume_interrupted=resume_interrupted)
 
         # The slice gate and the field provenance guard ride an explicit

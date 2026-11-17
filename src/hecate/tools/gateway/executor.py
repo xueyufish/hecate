@@ -41,7 +41,8 @@ _RESERVED_IDENTITY_HEADERS = (
 )
 
 
-def _extract_gateway_meta(tool: ToolModel) -> dict[str, Any]:
+def gateway_meta(tool: ToolModel) -> dict[str, Any]:
+    """Read and validate a projected operation's routing metadata."""
     parameters = tool.parameters
     meta = parameters.get("x-gateway") if isinstance(parameters, dict) else None
     if not isinstance(meta, dict) or "method" not in meta or "path" not in meta:
@@ -126,11 +127,13 @@ class RestToolExecutor:
         client: Optional pre-configured ``httpx.AsyncClient`` (tests inject
             a ``MockTransport`` client here). The caller owns its lifecycle.
             Redirects are disabled for each execution request.
+        trust_env: Allow environment settings on clients created here.
     """
 
-    def __init__(self, timeout: int = 30, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, timeout: int = 30, client: httpx.AsyncClient | None = None, *, trust_env: bool = True) -> None:
         self._timeout = timeout
         self._client = client
+        self._trust_env = trust_env
 
     async def execute(
         self,
@@ -151,7 +154,7 @@ class RestToolExecutor:
             RestExecutionError: On upstream errors (non-2xx, redirects) or
                 connection failures. Never includes credentials.
         """
-        meta = _extract_gateway_meta(tool)
+        meta = gateway_meta(tool)
         arguments = arguments or {}
         base_url = _validate_target(target)
 
@@ -187,7 +190,9 @@ class RestToolExecutor:
         if body:
             request_kwargs["json"] = body
 
-        client = self._client or httpx.AsyncClient(timeout=self._timeout, follow_redirects=False)
+        client = self._client or httpx.AsyncClient(
+            timeout=self._timeout, follow_redirects=False, trust_env=self._trust_env
+        )
         try:
             try:
                 request = client.build_request(meta["method"], url, **request_kwargs)
