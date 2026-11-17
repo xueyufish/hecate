@@ -12,10 +12,7 @@ Design references: D1, D2 in ``openspec/changes/multi-channel-feishu-slack/desig
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
-import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -37,11 +34,6 @@ try:
 except ImportError:  # pragma: no cover - guarded by extras
     SlackBoltApp = None
     _SLACK_AVAILABLE = False
-
-
-# Slack's signing-secrets spec rejects requests whose signature basestring
-# is older than five minutes (replay protection).
-_SIGNATURE_REPLAY_WINDOW_SECONDS = 300
 
 
 class SlackChannel(ChannelBase):
@@ -100,31 +92,20 @@ class SlackChannel(ChannelBase):
     async def verify_webhook(self, headers: dict[str, str], raw_body: bytes) -> tuple[int, dict]:
         """Verify the Slack signing-secrets signature (``v0`` scheme).
 
-        Implemented directly (HMAC-SHA256 over ``v0:<timestamp>:<body>``)
-        rather than delegated to Bolt's ``RequestVerification`` middleware:
-        webhook POSTs terminate at Hecate's FastAPI endpoint and never flow
-        through the Bolt request pipeline, so the middleware does not run
-        on this path.
+        Delegates to the shared verifier in :mod:`hecate.channel.slack_signature`
+        so the IM webhook path and the observation entry apply exactly the
+        same scheme. Implemented outside Bolt (HMAC-SHA256 over
+        ``v0:<timestamp>:<body>``): webhook POSTs terminate at Hecate's
+        FastAPI endpoint and never flow through the Bolt request pipeline,
+        so the middleware does not run on this path.
 
         Returns:
             ``(200, {})`` when the signature is valid and fresh; a 401
             payload describing the failure otherwise.
         """
-        signature = headers.get("x-slack-signature") or headers.get("X-Slack-Signature")
-        timestamp = headers.get("x-slack-request-timestamp") or headers.get("X-Slack-Request-Timestamp")
-        if not signature or not timestamp:
-            return 401, {"error": "missing X-Slack-Signature / X-Slack-Request-Timestamp headers"}
-        try:
-            ts = int(timestamp)
-        except ValueError:
-            return 401, {"error": "invalid X-Slack-Request-Timestamp header"}
-        if abs(int(time.time()) - ts) > _SIGNATURE_REPLAY_WINDOW_SECONDS:
-            return 401, {"error": "request timestamp outside the replay window"}
-        basestring = b"v0:" + timestamp.encode("utf-8") + b":" + raw_body
-        digest = hmac.new(self._signing_secret.encode("utf-8"), basestring, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(f"v0={digest}", signature):
-            return 401, {"error": "signature verification failed"}
-        return 200, {}
+        from hecate.channel.slack_signature import verify_slack_signature
+
+        return verify_slack_signature(self._signing_secret, headers, raw_body)
 
     async def receive(self, raw: object) -> CanonicalMessage:
         """Convert a Slack ``event_callback`` payload to a :class:`CanonicalMessage`.
