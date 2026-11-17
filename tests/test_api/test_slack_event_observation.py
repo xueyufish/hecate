@@ -350,7 +350,16 @@ async def test_bot_authored_mention_is_observed_and_dropped(client):
     assert bus.enqueued == []
 
 
-@pytest.mark.parametrize("binding", ["", "bogus", str(uuid.uuid4())])
+@pytest.mark.parametrize(
+    "binding",
+    [
+        "",
+        "bogus",
+        # Well-formed but nonexistent: collection must be deterministic
+        # across xdist workers, so this literal cannot be generated.
+        "496ff0d8-a385-4856-8ac9-6585da14e809",
+    ],
+)
 async def test_invalid_workspace_binding_refuses_callback(client, observation_settings, binding):
     http, bus, ledger, _app = client
     observation_settings(SLACK_EVENT_OBSERVATION_WORKSPACE_ID=binding)
