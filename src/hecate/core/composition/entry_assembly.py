@@ -184,6 +184,7 @@ def build_tool_registry(
     strict_pins: bool = False,
     skill_loader: Any | None = None,
     host_tools: dict[str, Any] | None = None,
+    rest_executor: Any | None = None,
 ) -> Any:
     """Construct a ToolRegistry wired to builtin + DB tools using app settings.
 
@@ -198,6 +199,9 @@ def build_tool_registry(
         host_tools: Optional host-provided tools for this one execution
             (name → object with ``definition`` and ``async execute``), e.g.
             the controller's durable ``delegate_agent``.
+        rest_executor: Optional gateway REST executor for ``source="rest"``
+            tools. Only the explicitly opted-in Controller path supplies
+            one; every other entry keeps REST tools unconfigured.
 
     Returns:
         A configured ToolRegistry.
@@ -240,4 +244,6 @@ def build_tool_registry(
         memory_backend=memory_backend,
         host_tools=host_tools,
     )
-    return ToolRegistry(db=db, builtin_executor=builtin_executor, workspace_id=workspace_id)
+    return ToolRegistry(
+        db=db, builtin_executor=builtin_executor, workspace_id=workspace_id, rest_executor=rest_executor
+    )

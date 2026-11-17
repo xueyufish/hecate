@@ -90,6 +90,50 @@ The executor closes clients it creates on success, failure and cancellation.
 The caller closes any client it supplies. Client defaults remain available for
 the caller's other operations.
 
+## Write with an account-constrained Controller profile
+
+By default no Controller task can execute a REST tool: the production tool
+assembly wires no REST executor, so a projected tool refuses with no
+network effect. A platform-local `controller_loop` task can opt in by
+freezing a `rest_write` declaration in its agent version configuration:
+
+```json
+{
+  "rest_write": {
+    "version": 1,
+    "tool": "crm__create_contact",
+    "target": "crm",
+    "target_id": "196b03fa-8fd5-41fd-a334-39a2525b768f",
+    "base_url": "https://crm.example.internal/v2",
+    "path": "/accounts/{account_id}/contacts",
+    "account_param": "account_id",
+    "allowed_accounts": ["account-a"],
+    "body_params": ["note"]
+  }
+}
+```
+
+Use the registered target's UUID, name and full base URL, including its
+base path. Pin the projected POST path and the specific body fields
+whose business meanings the target owner has verified. This profile
+accepts one account path parameter and explicitly listed scalar body
+fields. Undeclared arguments, nested body values and query routing are
+rejected. The upstream must use the path segment as its account
+authority.
+
+The Controller checks the binding before the first model call. When it
+dispatches an action, the executor verifies the same tool and target
+records it uses to construct the request. A different target, workspace,
+base path, operation or parameter routing prevents dispatch. A blocked
+action records a refusal and sends no HTTP request. The Controller may
+use that result to decide how to finish the task.
+
+This profile applies to the opted-in platform Controller. REST target
+credentials come from the registered target. The executor disables
+environment-provided proxies and redirects for this profile. A write
+the receiver accepted without a confirmed receipt parks the task for
+reconciliation.
+
 ## Verify the profile
 
 ```bash
@@ -97,6 +141,7 @@ python scripts/dev.py check all
 python scripts/dev.py test tests/test_tools/test_gateway/ \
   tests/test_core/test_credential_governance.py -q
 python scripts/dev.py test tests/test_tools/test_gateway/test_rest_boundary_http.py -q -rA
+python scripts/dev.py test tests/scenarios/test_controller_rest_write_account.py -q -rA
 ```
 
 The management authorization matrix above is asserted over the real routes by
@@ -111,3 +156,11 @@ the rejected call is checked against receiver request counts. A separate direct
 registry call verifies the target service's own 403 response. This profile
 demonstrates the registered REST boundary and these account rules. The upstream
 application remains responsible for its business authorization.
+
+The Controller account-constraint scenario
+(`tests/scenarios/test_controller_rest_write_account.py`) submits real
+tasks through the authenticated task REST routes and drives the
+production Controller, registry and HTTP transport against real loopback
+receivers: the allowed account receives exactly one POST, every refused
+shape shows a zero request increment on every receiver, redirects get no
+follow-up request, and a lost receipt reconciles without a retry.
