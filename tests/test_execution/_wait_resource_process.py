@@ -18,6 +18,16 @@ Environment:
   append-only JSONL evidence of real business executions and model asks.
 - ``HECATE_WAITRES_READY_FILE`` / ``HECATE_WAITRES_PID_FILE`` — the parent's
   inter-process ready signal and process identity record.
+- ``HECATE_WAITRES_WAKE_SECONDS`` — declared timer-wait duration (default
+  ``300``); the backlog drills shorten it so the deadline falls inside the
+  observed window and the production scan consumes it on the database clock.
+- ``HECATE_WAITRES_ASK_DELAY_SECONDS`` — deterministic per-model-ask cost
+  (default ``0``) that turns a submitted task backlog into measurable work.
+- ``HECATE_WAITRES_BATCH`` / ``HECATE_WAITRES_POLL_INTERVAL`` — dispatch
+  batch size and loop cadence of the worker under test (defaults ``32`` and
+  ``0.2``). An explicit batch enables queue and scan observations.
+- ``HECATE_WAITRES_PAUSE_AFTER_BACKLOG_CYCLE`` — hold the worker after a
+  completed multi-batch cycle so the parent can stop it at that boundary.
 """
 
 from __future__ import annotations
@@ -50,7 +60,9 @@ class _WaitResourcePort(StubRuntimePort):
 
     Every model ask and business execution is traced, so the parent can
     prove across process boundaries that committed decisions are never
-    re-asked and completed actions never re-executed.
+    re-asked and completed actions never re-executed. Model asks carry a
+    ``task_kind`` tag (``direct`` vs ``controller``) so the parent can
+    attribute counts to the task kind across processes.
     """
 
     def __init__(self) -> None:
@@ -58,12 +70,14 @@ class _WaitResourcePort(StubRuntimePort):
         self.mode = os.environ["HECATE_WAITRES_MODE"]
         self.tool_trace = os.environ["HECATE_WAITRES_TOOL_TRACE"]
         self.model_trace = os.environ["HECATE_WAITRES_MODEL_TRACE"]
+        self.wake_seconds = float(os.environ.get("HECATE_WAITRES_WAKE_SECONDS", "300") or 300)
+        self.ask_delay = float(os.environ.get("HECATE_WAITRES_ASK_DELAY_SECONDS", "0") or 0)
         self.model_calls = 0
         self.business_calls = 0
 
-    def _record_model(self) -> None:
+    def _record_model(self, task_kind: str) -> None:
         self.model_calls += 1
-        _append_trace(self.model_trace, {"event": "model_ask", "mode": self.mode})
+        _append_trace(self.model_trace, {"event": "model_ask", "mode": self.mode, "task_kind": task_kind})
 
     def _propose(self, call_id: str, tool: str, arguments: dict) -> dict:
         return {
@@ -74,7 +88,6 @@ class _WaitResourcePort(StubRuntimePort):
         }
 
     async def llm_invoke_structured(self, messages: list[dict], config: dict):
-        self._record_model()
         tool_messages = [message for message in messages if message.get("role") == "tool"]
         provided = [
             json.loads(message["content"])["provided_input"]
@@ -83,6 +96,9 @@ class _WaitResourcePort(StubRuntimePort):
         ]
         first_user = next((message.get("content") for message in messages if message.get("role") == "user"), "")
         direct = isinstance(first_user, str) and "direct" in first_user
+        self._record_model("direct" if direct else "controller")
+        if self.ask_delay:
+            await asyncio.sleep(self.ask_delay)
         if direct:
             yield {"content": json.dumps({"answer": "direct done"}), "tool_calls": None}
             return
@@ -106,7 +122,10 @@ class _WaitResourcePort(StubRuntimePort):
         if self.mode == "input" and "region" not in args:
             return {"status": "input_required", "contract": {"fields": ["region"]}}
         if self.mode == "timer" and "region" not in args:
-            return {"status": "timer_wait_required", "wait": {"version": 1, "wake_in_seconds": 300, "reason": "stock"}}
+            return {
+                "status": "timer_wait_required",
+                "wait": {"version": 1, "wake_in_seconds": self.wake_seconds, "reason": "stock"},
+            }
         return {"quantity": 3, "region": args.get("region", "n/a")}
 
 
@@ -203,15 +222,52 @@ async def _serve() -> None:
     )
     cycles = 0
 
+    from hecate_durable.contracts.durable import TaskLifecycleState
+
+    batch = int(os.environ.get("HECATE_WAITRES_BATCH", "32"))
+    observe_backlog = "HECATE_WAITRES_BATCH" in os.environ
+    pause_after_backlog_cycle = os.environ.get("HECATE_WAITRES_PAUSE_AFTER_BACKLOG_CYCLE") == "1"
+    base_wait_reconciler = _wait_reconciler(store, async_session_factory)
+    wait_processed = 0
+    queued_at_scan = 0
+    wake_observed_at = None
+
+    async def queue_depth() -> int:
+        return len(await asyncio.to_thread(store.list_tasks, {TaskLifecycleState.QUEUED}))
+
+    async def counting_wait_reconciler() -> int:
+        nonlocal wait_processed, queued_at_scan, wake_observed_at
+        # Sample before the scanner can add the resumed timer to the queue.
+        queued_at_scan = await queue_depth()
+        processed = await base_wait_reconciler()
+        wait_processed += processed
+        if processed:
+            wake_observed_at = (await asyncio.to_thread(store.wait_now)).isoformat()
+        return processed
+
     class ObservedWorker(DurableWorker):
         """Measure completed production cycles after dispatch cleanup and relay."""
 
         async def reconcile(self) -> int:
             """Publish process costs and resource ownership at a completed cycle."""
             nonlocal cycles
+            queued_before = await queue_depth() if observe_backlog else 0
             dispatched = await super().reconcile()
             await relay.pump_once()
             cycles += 1
+            backlog_sample = {}
+            paused = False
+            if observe_backlog:
+                queued_after = await queue_depth()
+                paused = pause_after_backlog_cycle and queued_before > batch and queued_after > 0
+                backlog_sample = {
+                    "queued_before": queued_before,
+                    "queued_at_scan": queued_at_scan,
+                    "queued_after": queued_after,
+                    "wait_processed": wait_processed,
+                    "wake_observed_at": wake_observed_at,
+                    "paused_after_cycle": paused,
+                }
             _append_trace(
                 os.environ["HECATE_WAITRES_CYCLE_TRACE"],
                 {
@@ -224,8 +280,11 @@ async def _serve() -> None:
                     "model_calls": port.model_calls,
                     "tool_calls": port.business_calls,
                     "dispatched": dispatched,
+                    **backlog_sample,
                 },
             )
+            if paused:
+                await asyncio.Event().wait()
             return dispatched
 
     dispatcher = PlatformTaskDispatcher(store, async_session_factory)
@@ -237,9 +296,10 @@ async def _serve() -> None:
         # assembly; a short TTL would expire mid-dispatch and fence the
         # executor before the park is ever reached.
         lease_ttl=float(os.environ.get("HECATE_WAITRES_LEASE_TTL", "30")),
-        poll_interval=0.2,
+        poll_interval=float(os.environ.get("HECATE_WAITRES_POLL_INTERVAL", "0.2") or 0.2),
         max_attempts=3,
-        wait_reconciler=_wait_reconciler(store, async_session_factory),
+        batch=batch,
+        wait_reconciler=counting_wait_reconciler if observe_backlog else base_wait_reconciler,
     )
     mode = os.environ["HECATE_WAITRES_MODE"]
     from hecate_runtime.tool_side_effects import _BUILTIN_CLASSIFICATIONS, SideEffectClass
