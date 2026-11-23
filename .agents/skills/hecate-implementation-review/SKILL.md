@@ -1,5 +1,5 @@
 ---
-name: hecate-glm-review
+name: hecate-implementation-review
 description: Review and repair a completed implementation in an existing Hecate worktree. Use when an implementer hands off a branch for verification, regression analysis, direct fixes, and an integration-readiness decision.
 license: MIT
 ---
@@ -21,10 +21,11 @@ worktrees with:
 git worktree list --porcelain
 ```
 
-Choose a target only when its branch and task can be identified uniquely. Never
-silently review or edit a different checkout. A path under a requested worktree
-directory that is not registered by Git is evidence to report, not a branch to
-guess.
+Choose a target only when its branch and task can be identified uniquely.
+Assess the target against its comparison base and any documented dependency
+that affects integration. Use other worktree entries only to resolve the
+target or verify a relevant dependency. An unregistered handoff path requires
+clarification before any edit.
 
 Before any write, confirm that the target is a registered Git worktree on the
 implementation branch. Reject `main` and other protected integration branches.

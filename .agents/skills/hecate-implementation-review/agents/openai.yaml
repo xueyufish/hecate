@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hecate Implementation Review"
+  short_description: "Review and repair completed Hecate worktree changes"
+  default_prompt: "Use $hecate-implementation-review to review the implementer's Hecate worktree, fix confirmed findings in place, and report integration readiness."
