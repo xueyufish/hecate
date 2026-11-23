@@ -32,26 +32,24 @@ Read the current repository's `AGENTS.md`. Refresh `origin/main` with
 offline work. Fetch failure or offline mode means freshness is unverified: report
 that limitation and use the available SHA without describing it as latest.
 
-From the repository root, run the bundled inventory helper with the local Python
+Check concurrent work when the user asks for a comparison or available evidence
+suggests a change or dependency that could affect the package. For that check,
+run the bundled inventory helper from the repository root with the local Python
 environment (on Windows use `.venv/Scripts/python.exe`):
 
 ```bash
 python .agents/skills/hecate-parallel-plan/scripts/inventory_worktrees.py --repo .
 ```
 
-For each user-specified worktree directory, add `--root "absolute-directory"`.
-The option is repeatable. Always enumerate all registered worktrees, including
-those outside that directory. Resolve paths from Git and the user's request;
-do not hardcode a machine path or silently replace a missing directory with a
-similarly named one. The helper reads local Git metadata only; it never fetches,
-checks out branches, or changes files. Nonzero exit still emits JSON describing
-partial results and errors. Diagnose those errors before making recommendations.
-
-The snapshot includes mainline SHA, branch/HEAD, merge base, divergence, recent
-commits, committed file changes, staged/unstaged/untracked paths, and worktree
-flags. Merge base is an integration reference, not proof of the original branch
-creation point. Separate clones found under requested roots are reported but
-are not compared as if they shared this repository's refs.
+Add `--root "absolute-directory"` for each worktree directory the user specifies.
+Resolve paths from Git and the user's request. The helper reads local Git
+metadata and includes all registered worktrees. Use its output to locate
+user-specified targets and screen for relevant paths, contracts, and integration
+dependencies. Inspect and report worktrees only when the user included them
+in scope or the evidence connects them to a candidate. Registration, branch
+names, and unknown future plans alone do not establish relevance. Report
+inventory errors that limit a conclusion about the task. Separate clones do
+not share this repository's refs. A merge base serves as a comparison point.
 
 Inspect relevant diffs, tests, callers, and architecture at the recorded revisions.
 Use file lists to narrow reads; avoid dumping entire repositories or untracked
@@ -62,9 +60,9 @@ In Hecate, account for `packages/hecate-runtime` versus forwarding shims under
 Git reveals completed edits, not future intent. Combine observed changes with
 available task descriptions and plans from implementers. Existing OpenSpec
 artifacts can be read as evidence, but their presence does not activate OpenSpec.
-Mark unknown future scope explicitly. A clean or old worktree is not evidence
-that its owner has finished. Do not message other chats or developers merely
-because this skill is being used.
+Call out unknown work only when it could materially change the proposed scope
+or landing order. Do not message other chats or developers merely because this
+skill is being used.
 
 ## Choose package boundaries
 
@@ -97,7 +95,7 @@ explain the dependency. Do not rebase somebody else's worktree during planning.
 When no useful complete package is sufficiently independent, recommend serial
 delivery and explain the shared boundary. Do not shrink the assignment to a
 trivial fragment solely to claim parallelism. Unknown plans limit confidence;
-ask only when the missing scope materially changes the recommendation.
+ask only when a plausible dependency leaves a material decision unresolved.
 
 ## Deliver the selected output
 
@@ -123,10 +121,10 @@ usable in a chat, task tracker, or automated workflow. Include:
 - **Verification:** concrete commands using existing test paths and shared
   checks from this checkout. Separate checks actually run during planning from
   commands the implementer still needs to run; do not invent passing results.
-- **Integration and return:** dependency/landing order, re-inventory before
-  integration, scoped cross-boundary tests after integration, and a return report
-  with branch/base/final commit or dirty status, changed paths, observed test
-  results, and unresolved risks. Report pending CI/review separately.
+- **Integration and return:** dependency/landing order, recheck relevant
+  concurrent changes before integration, scoped cross-boundary tests after
+  integration, and a report with branch, base, final commit or dirty status,
+  changed paths, observed test results, and unresolved risks. Report pending CI/review separately.
 
 Make planning facts sufficiently precise for a later review: include inspected
 SHAs and uncertain assignments. The snapshot is not an ownership lock; concurrent
