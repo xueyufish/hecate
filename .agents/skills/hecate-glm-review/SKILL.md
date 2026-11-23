@@ -1,20 +1,21 @@
 ---
 name: hecate-glm-review
-description: Review and repair a completed GLM implementation in an existing Hecate worktree against its stated goal and base revision. Use when GLM hands a branch back to Codex for verification, regression analysis, direct fixes, and integration readiness. Produces findings, repairs, and evidence; it does not create worktrees or branches, commit, push, merge, or invoke OpenSpec by itself.
+description: Review and repair a completed implementation in an existing Hecate worktree. Use when an implementer hands off a branch for verification, regression analysis, direct fixes, and an integration-readiness decision.
 license: MIT
 ---
 
-# Hecate GLM review and repair
+# Hecate implementation review and repair
 
-Review the implementation in the existing worktree where GLM finished the task.
-Treat the GLM handoff as evidence to verify, then repair confirmed findings in
-that same worktree and branch. The default result is a read-and-fix review that
-leaves the target branch ready for the user or integrator to inspect.
+Review the implementation in the existing worktree where the implementer
+finished the task. Verify the handoff, then repair confirmed findings in that
+same worktree and branch. Leave the result ready for the user or integrator
+to inspect.
 
 ## Establish the review target
 
-Use the worktree path, branch, base revision, task description, and GLM report from
-the user. If a path is missing, inspect registered worktrees with:
+Use the task description and the implementer's handoff to identify the worktree
+path, branch, and base revision. If a path is missing, inspect registered
+worktrees with:
 
 ```bash
 git worktree list --porcelain
@@ -25,8 +26,8 @@ silently review or edit a different checkout. A path under a requested worktree
 directory that is not registered by Git is evidence to report, not a branch to
 guess.
 
-Before any write, confirm that the target is the GLM implementation branch, is a
-registered Git worktree, and is not `main` or another protected integration branch.
+Before any write, confirm that the target is a registered Git worktree on the
+implementation branch. Reject `main` and other protected integration branches.
 If the target is detached, points at `main`, or cannot be identified, stop before
 editing and return `blocked` with the exact reason. Do not create a replacement
 worktree or branch to work around an invalid target.
@@ -39,12 +40,12 @@ Do not assume that a clean worktree means the task is complete.
 
 Resolve the comparison base in this order:
 
-1. An explicit base SHA or ref from the GLM handoff.
+1. An explicit base SHA or ref from the implementer's handoff.
 2. The target's recorded merge base with `origin/main`.
 3. A user-provided implementation start commit or tag.
 
 Record the selected base and HEAD. If the branch was already squash-merged into
-`origin/main`, `origin/main...HEAD` may hide the implementation; require the GLM
+`origin/main`, `origin/main...HEAD` may hide the implementation. Require the
 handoff's pre-implementation base or a specific commit range before claiming a
 complete review. Do not infer a range from commit count or branch name.
 
@@ -97,14 +98,14 @@ the missing acceptance decision instead of inventing one.
 
 ## Repair confirmed findings in place
 
-When this skill is explicitly invoked for a completed GLM implementation, repair
-confirmed findings directly in the identified GLM worktree and branch. Do not ask
+When this skill is explicitly invoked for a completed implementation, repair
+confirmed findings directly in the identified worktree and branch. Do not ask
 for per-finding confirmation. Keep repairs within the stated task and the findings
 required to make that task correct.
 
 The repair boundary is strict:
 
-- Edit only the identified GLM worktree; never edit another worktree or the main checkout.
+- Confine all edits to the identified implementation worktree.
 - Do not run `git checkout`, `reset`, `clean`, `stash`, `rebase`, merge, or commands that discard or relocate work.
 - Do not create a worktree or branch. Do not switch branches.
 - Do not commit, amend, push, merge, publish, open a pull request, or send messages.
@@ -112,7 +113,7 @@ The repair boundary is strict:
 
 Fix P0-P3 findings when the expected behavior and remediation are sufficiently
 clear. If a finding requires a product decision, broad redesign, ownership change,
-destructive migration, or edits outside the GLM task, stop that repair and report
+destructive migration, or edits outside the task, stop that repair and report
 it as unresolved instead of guessing. A failing check may be fixed in place when
 the cause is within the task; investigate before labeling it pre-existing.
 
@@ -123,15 +124,15 @@ After each logical repair:
 3. Re-review callers, error paths, security boundaries, and regression coverage.
 4. Continue with the next confirmed repair only if the target remains coherent.
 
-Preserve GLM's existing changes and worktree state. Do not rewrite its commits or
-silently discard untracked files. Leave the worktree with the repairs visible for
-the user or integrator to review and commit.
+Preserve the implementer's existing changes and worktree state. Do not rewrite
+their commits or silently discard untracked files. Leave the repairs visible
+for the user or integrator to review and commit.
 
 ## Verify the repaired implementation
 
-Use the GLM report to select focused checks, then reproduce the checks that matter
-for the changed paths. Prefer the repository's shared commands and the target's
-Python environment:
+Use the implementer's report to select focused checks, then reproduce the ones
+that matter for the changed paths. Prefer the repository's shared commands and
+the target's Python environment:
 
 ```bash
 python scripts/dev.py test <affected tests> -q
@@ -141,9 +142,10 @@ python scripts/dev.py check all
 On Windows, use `.venv/Scripts/python.exe`; on Unix, use `.venv/bin/python` when
 the worktree environment exists. Run focused tests before broad checks. Add
 integration or migration checks when the changed boundary requires them. Do not
-claim a check passed because GLM reported it; mark it as independently rerun or
-reported by GLM. If dependencies, services, credentials, or time prevent a check,
-state that limitation and explain its effect on the decision.
+claim a check passed solely on the implementer's report. Distinguish checks you
+reran from checks reported by the implementer. If dependencies, services,
+credentials, or time prevent a check, state that limitation and explain its
+effect on the decision.
 
 If a verification failure remains after a reasonable in-scope repair attempt,
 report the failure as unresolved with its command and evidence. Do not keep making
@@ -159,8 +161,8 @@ Respond in the user's language with this compact structure:
    explicitly when no findings were identified; do not claim that no bugs exist.
 3. **Repairs applied:** each repaired finding, changed file, behavior change, and
    any intentionally untouched finding with its reason.
-4. **Verification:** commands actually run, results, GLM-reported checks not
-   rerun, and blocked or unavailable checks.
+4. **Verification:** commands actually run, results, checks reported by the
+   implementer that were not rerun, and blocked or unavailable checks.
 5. **Integration decision:** `ready`, `ready with follow-up`, or `blocked`, with
    the reason and any required rebase or cross-worktree check.
 6. **Handoff notes:** changed paths, final dirty state, unresolved risks, and the
@@ -171,7 +173,7 @@ editing. If a target is valid but a finding needs a material product or ownershi
 decision, apply the safe in-scope repairs and return `ready with follow-up` or
 `blocked` for the unresolved decision.
 
-This skill reviews and repairs a completed GLM implementation. It does not choose
+This skill reviews and repairs a completed implementation. It does not choose
 the next parallel work package, create an OpenSpec change, or authorize push or
 merge. OpenSpec remains opt-in through a user's manual command or skill
 invocation.
