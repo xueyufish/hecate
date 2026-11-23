@@ -1,6 +1,6 @@
 ---
 name: hecate-parallel-plan
-description: Plan complete, independently verifiable Hecate work packages across concurrent Git worktrees. Use when choosing another parallel task, avoiding conflicts with ongoing work, or preparing an implementation handoff for GLM or another developer. Produces a grounded plan, not implementation or an OpenSpec change.
+description: Recommend the next independently verifiable Hecate work package, plan an already selected task, or do both. Use when checking a task against concurrent Git worktrees or preparing a handoff for an implementer.
 ---
 
 # Hecate parallel work planning
@@ -10,12 +10,22 @@ outcome with implementation, tests, and necessary documentation together. Neithe
 minimum diff nor maximum branch size is the objective. Keep each PR focused on one
 purpose; a work package may contain several related tasks and logical commits.
 
-## Establish the goal and live state
+## Choose the planning mode
 
-Use the user's full goal and known ongoing assignments. If the goal is absent,
-inspect the repository and available backlog first, then ask for the material
-priority that cannot be inferred. Distinguish a candidate inferred from backlog
-from a user-selected requirement. Do not invent work merely to fill a worker slot.
+- **Recommend only:** When asked to pick the next task, inspect the repository,
+  available backlog, and ongoing work. Recommend one work package with reasons,
+  potential overlap, dependencies, and brief acceptance criteria.
+- **Plan a selected task:** When the user supplies a concrete outcome or selects
+  a work package from an earlier recommendation, plan that scope directly.
+- **Recommend and plan:** When asked for both, or invoked without a task or
+  a narrower request, recommend one package and include its implementation
+  plan in the same response. Distinguish the recommendation from a
+  user-selected requirement.
+
+Ask about priority or scope only when the available evidence leaves a material
+decision unresolved. Do not invent work to fill a worker slot.
+
+## Establish the live state
 
 Read the current repository's `AGENTS.md`. Refresh `origin/main` with
 `git fetch origin` when assessing the latest mainline, unless the user requests
@@ -50,7 +60,7 @@ In Hecate, account for `packages/hecate-runtime` versus forwarding shims under
 `src/hecate/runtime`, domain boundaries, `execution/`, and `contracts/` consumers.
 
 Git reveals completed edits, not future intent. Combine observed changes with
-available task descriptions and user-provided GLM plans. Existing OpenSpec
+available task descriptions and plans from implementers. Existing OpenSpec
 artifacts can be read as evidence, but their presence does not activate OpenSpec.
 Mark unknown future scope explicitly. A clean or old worktree is not evidence
 that its owner has finished. Do not message other chats or developers merely
@@ -89,11 +99,16 @@ delivery and explain the shared boundary. Do not shrink the assignment to a
 trivial fragment solely to claim parallelism. Unknown plans limit confidence;
 ask only when the missing scope materially changes the recommendation.
 
-## Deliver a ready-to-use handoff
+## Deliver the selected output
 
-Respond in the user's language. Include a compact inventory/evidence summary,
-candidate conflict assessment, and one recommended package (or a serial outcome).
-Then provide a self-contained task message the user can paste to GLM containing:
+Respond in the user's language. Summarize the relevant inventory and evidence,
+including conflicts, dependencies, and any recommended serial order.
+
+For a recommendation-only request, give the recommended package, why it is
+worth doing now, and its brief acceptance criteria. End there.
+
+For planning, provide a self-contained handoff for the implementer. Keep it
+usable in a chat, task tracker, or automated workflow. Include:
 
 - **Outcome and acceptance:** observable behavior and meaningful tests.
 - **Work location:** suggested worktree name/path, available branch name, base
@@ -101,6 +116,7 @@ Then provide a self-contained task message the user can paste to GLM containing:
   repository branch conventions. Proposals are not created worktrees.
 - **Scope:** owned implementation/tests/docs and relevant entry points; shared
   owners, agreed interfaces, dependencies, and excluded independent work.
+- **Implementation steps:** the sequence of changes and relevant entry points.
 - **Autonomy:** complete related implementation, tests, and routine fixes without
   per-step approval. Pause for material requirement ambiguity, incompatible
   shared-interface changes, an actual ownership collision, or missing authority.
@@ -120,8 +136,9 @@ the requested artifact in an authorized topic checkout; otherwise return it in
 the conversation.
 
 Planning alone does not authorize implementation, worktree creation, commit,
-push, merge, or messaging GLM. If the user also requests execution, proceed within
-that authorization and repository rules. Preserve explicit push confirmation.
+push, merge, or contacting the implementer. If the user also requests execution,
+proceed within that authorization and repository rules. Preserve explicit push
+confirmation.
 Default to ordinary development; invoke OpenSpec only through the user's manual
 OpenSpec command or skill selection. This skill never runs propose/apply/archive
 as part of planning.
