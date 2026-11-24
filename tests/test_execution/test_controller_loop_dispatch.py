@@ -1303,6 +1303,38 @@ async def test_cancelled_dispatch_propagates_without_retryable_requeue(harness) 
     assert "dispatch_attempts" not in (record.extra or {})
 
 
+class _CancelledModelFuturePort(ScriptedLoopPort):
+    """Model call whose upstream future was cancelled independently."""
+
+    async def llm_invoke_structured(self, messages: list[dict], config: dict):
+        self.model_calls += 1
+        response = asyncio.get_running_loop().create_future()
+        response.cancel()
+        yield await response
+
+
+async def test_controller_retries_model_interruption_after_prior_task_cancellation(harness) -> None:
+    """An earlier cancellation on the caller does not cancel this dispatch."""
+
+    port = _CancelledModelFuturePort(final_text="unused")
+    t_ref, _task_uuid = await _submit_without_dispatch(harness, port)
+    worker = _worker_for(harness)
+
+    async def dispatch_after_cancellation() -> bool:
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.sleep(0)
+        return await worker.dispatch_once(t_ref)
+
+    assert await asyncio.create_task(dispatch_after_cancellation()) is False
+    record = harness["store"].get_task_state(t_ref)
+    assert record.lifecycle_state is TaskLifecycleState.QUEUED
+    assert record.extra["dispatch_attempts"] == 1
+    assert port.model_calls == 1
+
+
 class _RepeatedInputPort(_ProductionInputPort):
     """Two separate actions need input despite sharing identical arguments."""
 

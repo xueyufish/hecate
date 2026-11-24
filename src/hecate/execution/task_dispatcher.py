@@ -2298,8 +2298,10 @@ class PlatformTaskDispatcher:
                     "content": candidate.accepted_output.get("text", ""),
                     "acceptance": entry.acceptance_record,
                 }
+        dispatch_task = asyncio.current_task()
         while True:
             driver = ControllerExecutionDriver(controller, spec, should_cancel=should_cancel)
+            cancellations_before_schedule = dispatch_task.cancelling() if dispatch_task is not None else 0
             try:
                 result = await runtime_execution_service.execute(
                     RuntimeExecutionRequest(
@@ -2311,17 +2313,9 @@ class PlatformTaskDispatcher:
                     )
                 )
             except RuntimeScheduleCancelledError as exc:
-                # Only a cancellation DELIVERED to this dispatch (worker
-                # shutdown, cancel command, case deadline) is a
-                # cancellation: it must propagate so dispatch_once never
-                # spends its retry budget — or re-asks a model — for a
-                # schedule the cancellation already stopped (builtin.py
-                # converts the same signal back to CancelledError). An
-                # interruption merely raised by the runtime is not a
-                # delivered cancellation and keeps its recorded-failure
-                # requeue recovery.
-                task = asyncio.current_task()
-                if task is not None and task.cancelling():
+                # An upstream interruption keeps the worker's failure recovery.
+                # A previous, handled cancellation can leave the count nonzero.
+                if dispatch_task is not None and dispatch_task.cancelling() > cancellations_before_schedule:
                     raise asyncio.CancelledError from exc
                 raise
             if input_watch.requested is not None:
