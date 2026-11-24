@@ -1277,6 +1277,11 @@ async def test_cancelled_dispatch_propagates_without_retryable_requeue(harness) 
     The controller dispatch must match: swallowing it as a dispatch failure
     requeues and re-dispatches the task, re-asking the model and appending
     rounds to failure-evidence snapshots.
+
+    The cancellation is DELIVERED (``dispatch.cancel()``) — the only class
+    this contract covers. An interruption merely raised by the runtime keeps
+    its recorded-failure requeue recovery (the consumer scenario suites lock
+    that path).
     """
 
     port = _HangingModelCallPort()

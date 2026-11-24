@@ -2311,12 +2311,19 @@ class PlatformTaskDispatcher:
                     )
                 )
             except RuntimeScheduleCancelledError as exc:
-                # A cancelled surrounding task is a cancellation, not a
-                # retryable dispatch failure: builtin.py converts the same
-                # signal back to CancelledError ("loop shutdown"), and
-                # dispatch_once must not spend its retry budget — or re-ask
-                # a model — for a schedule the cancellation already stopped.
-                raise asyncio.CancelledError from exc
+                # Only a cancellation DELIVERED to this dispatch (worker
+                # shutdown, cancel command, case deadline) is a
+                # cancellation: it must propagate so dispatch_once never
+                # spends its retry budget — or re-asks a model — for a
+                # schedule the cancellation already stopped (builtin.py
+                # converts the same signal back to CancelledError). An
+                # interruption merely raised by the runtime is not a
+                # delivered cancellation and keeps its recorded-failure
+                # requeue recovery.
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise asyncio.CancelledError from exc
+                raise
             if input_watch.requested is not None:
                 # Both fresh execution and ledger replay reach this boundary.
                 # No process-local observation is required to recover the wait.
