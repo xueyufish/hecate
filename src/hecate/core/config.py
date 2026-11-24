@@ -410,11 +410,6 @@ class Settings(BaseSettings):
     # opt in by binding an offline eval task to the agent.
     SKILL_EVOLUTION_EVAL_WIRING_ENABLED: bool = False
 
-    # Prompt self-optimization (6.19). Disabled by default: dataset-driven
-    # prompt optimization burns real rollout + LLM budget, so deployments
-    # opt in explicitly after reviewing the cost accounting.
-    PROMPT_OPTIMIZATION_ENABLED: bool = False
-
     # Online evaluation scoring (7.2c): always-on LLM-as-Judge sampling of
     # production traces. Metered LLM cost — keep off until a workspace opts in.
     EVALUATION_ONLINE_SCORING_ENABLED: bool = False

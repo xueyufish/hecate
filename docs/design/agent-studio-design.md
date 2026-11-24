@@ -352,9 +352,12 @@ Per-version performance analytics linked to traces:
 - **Trace linkage** — Which conversations used which prompt version
 - **Protected labels** — RBAC-controlled labels prevent unauthorized production deployment
 
-### Prompt Self-Optimization
+### Prompt Self-Optimization (retired)
 
-Automatic prompt optimization using ACE/GEPA algorithms (6.19):
+M1-T1 retired the 6.19 optimization loop, its `/api/prompt-optimization` API
+and the `PROMPT_OPTIMIZATION_ENABLED` setting. Prompt versions published by
+the optimizer retain their provenance and ordinary version comparison and
+rollback behavior. The diagram shows the historical design.
 
 ```
 Evaluation Dataset → ACE/GEPA Algorithm → Iterative Prompt Improvement
