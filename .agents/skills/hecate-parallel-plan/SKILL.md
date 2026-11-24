@@ -66,15 +66,27 @@ skill is being used.
 
 ## Apply the evolution plan
 
-For work that implements or affects the
-[evolution plan](../../../docs/refactor/enterprise-agent-platform-evolution-plan.md),
-read the relevant milestone, task, and acceptance scenarios at the inspected
-revision. Include the applicable task ID and exit criteria in the recommendation
-or handoff. Check completed and in-flight work before choosing the next package.
-Verify each prerequisite on the proposed base or record the concrete interface
-and landing order needed for parallel work. For conditional tasks, verify the
-triggering evidence before recommending implementation. Use the evolution plan
-as the source for specific decisions and conditions.
+For roadmap recommendations, start with the
+[global task tracking table](../../../docs/refactor/enterprise-agent-platform-evolution-plan.md#全局任务跟踪)
+at the inspected revision. Follow the user's stated priority when given.
+Otherwise scan in table order for unchecked rows with workable remaining scope.
+Skip active work already covered by an implementer and work whose prerequisites
+or triggers are still unmet. Use partial progress and linked evidence to identify
+the remaining scope. Verify uncertain status against Git and relevant worktrees
+before recommending it.
+
+Read the candidate's task section and only the milestone, acceptance scenarios,
+and prerequisite sections needed to confirm the scope. Verify prerequisites on
+the proposed base. For a prerequisite that delivers a specific interface or
+capability, check that boundary. Record the interface and landing order if a
+dependent package can start before it lands. Verify the triggering evidence for
+conditional work. Include the task ID and exit criteria in the recommendation
+or handoff.
+
+For an explicitly selected roadmap task, go directly to its row and task section.
+If the inspected revision has no table, use its task sections and available
+status evidence. For work outside the evolution plan, use the relevant backlog
+and repository evidence.
 
 ## Choose package boundaries
 
