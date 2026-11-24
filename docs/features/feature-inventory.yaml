@@ -8395,11 +8395,12 @@ features:
   evidence: plan §六 self-optimization row (paused core expansion); docs/refactor/step2-review-report.md
     (planning/static evidence only; target behavior remains unverified)
   acceptance: Candidate/evaluation/human release; cannot self-authorize; usage unverified; Keep delivered
-    capability; learned artifacts need evidence and human/gated publishing
+    capability (1.3.6f); 6.19 loop retired 2026-11-24 (M1-T1); learned artifacts need evidence and human/gated
+    publishing
   responsibility: optional-ecosystem
   implementation_mode: builtin
-  provider_or_adapter: current builtin Python implementation; current prompt_optimization/self_evolution;
-    target optional optimization backend
+  provider_or_adapter: current builtin Python implementation; current self_evolution (prompt_optimization
+    retired 2026-11-24); target optional optimization backend
   enforcement_point: Prompt/Skill learning public contract and owning service; step11/15/19 conformance;
     protected actions require verified gateway receipts
   state_owner: candidate assets; governance approval/release
@@ -8409,10 +8410,12 @@ features:
   plan_mappings:
   - review-05
   - backend-13
-  target_boundary: current prompt_optimization/self_evolution; target optional optimization backend; target
-    deployment=in-process-plugin; step11/15/19; existing runs stay pinned
-  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
-    evidence
+  target_boundary: current self_evolution (prompt_optimization retired 2026-11-24); target optional optimization
+    backend; target deployment=in-process-plugin; step11/15/19; existing runs stay pinned
+  restart_or_exit: 6.19 code path removed 2026-11-24 (M1-T1, HECA-8) — production cutover still requires deployment
+    flag, external-caller and in-flight-run verification; published optimization versions keep
+    readable provenance and rollback; history tables converge in M1-T3; 1.3.6f retained — deletion requires
+    usage, replacement and data-exit evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
     actual production support requires per-profile tests
 - id: 1.3.20
@@ -8443,20 +8446,21 @@ features:
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
     actual production support requires per-profile tests
 - id: '6.19'
-  title: Prompt Self-Optimization
+  title: Prompt Self-Optimization ⊕ retired 2026-11-24
   phase: P4
   category: Agent Intelligence
-  status: delivered
+  status: retired
   maturity: unverified
   dependencies: []
   evidence: plan §六 self-optimization row (paused core expansion); docs/refactor/step2-review-report.md
     (planning/static evidence only; target behavior remains unverified)
   acceptance: Candidate/evaluation/human release; cannot self-authorize; usage unverified; Keep delivered
-    capability; learned artifacts need evidence and human/gated publishing
+    capability (1.3.6f); 6.19 loop retired 2026-11-24 (M1-T1); learned artifacts need evidence and human/gated
+    publishing
   responsibility: optional-ecosystem
   implementation_mode: builtin
-  provider_or_adapter: current builtin Python implementation; current prompt_optimization/self_evolution;
-    target optional optimization backend
+  provider_or_adapter: n/a (prompt_optimization removed 2026-11-24; published optimization versions keep
+    readable provenance and rollback; revival requires a new proposal)
   enforcement_point: Prompt/Skill learning public contract and owning service; step11/15/19 conformance;
     protected actions require verified gateway receipts
   state_owner: candidate assets; governance approval/release
@@ -8466,10 +8470,12 @@ features:
   plan_mappings:
   - review-05
   - backend-13
-  target_boundary: current prompt_optimization/self_evolution; target optional optimization backend; target
-    deployment=in-process-plugin; step11/15/19; existing runs stay pinned
-  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
-    evidence
+  target_boundary: n/a (prompt_optimization removed 2026-11-24); published optimization versions keep readable
+    provenance and rollback; history tables converge in M1-T3; revival requires a new proposal
+  restart_or_exit: 6.19 code path removed 2026-11-24 (M1-T1, HECA-8) — production cutover still requires deployment
+    flag, external-caller and in-flight-run verification; published optimization versions keep
+    readable provenance and rollback; history tables converge in M1-T3; 1.3.6f retained — deletion requires
+    usage, replacement and data-exit evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
     actual production support requires per-profile tests
 - id: '4.5'

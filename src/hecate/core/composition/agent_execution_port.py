@@ -99,8 +99,8 @@ class AgentExecutionPort(RuntimePort):
         # live row for every direct-loop config field (model, persona via
         # prompt_override below, tools via the whitelist filter below, skill
         # bindings, knowledge bases). Lazy + isinstance-checked so the generic
-        # duck-typed overrides (prompt-optimization, self-evolution) and any
-        # Pydantic-based definition object are unaffected.
+        # duck-typed overrides (self-evolution) and any Pydantic-based
+        # definition object are unaffected.
         version_definition = None
         if agent_definition is not None:
             from hecate.studio.agents.versioning import AgentVersionExecutionDefinition

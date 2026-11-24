@@ -749,7 +749,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ## Historical Sprint 8: P4 Kickoff — Intelligence (Month 15–16)
 
-> **Goal**: P4 intelligence features — Self-Learning, Agentic AI (RL, Prompt Optimization, Ontology Actions, OAG), Memory Intelligence. Make agents genuinely smart.
+> **Goal**: P4 intelligence features — Self-Learning, Agentic AI (RL, Ontology Actions, OAG), Memory Intelligence. Make agents genuinely smart.
 >
 > **2026-08-22 reclassification**: Sprint 8 scope also absorbs the 48 items deferred from P3 (see feature-catalog → P4 → "Deferred from P3"): Evaluation Suite (7.2b-e/7.3/7.4/7.4a/7.5 + 8.10/8.12), Security remainder (9.5a/9.11/7.10/2.10b/7.7), Deployment & Ops (13.1/13.1a/13.1b/13.4/13.4b/13.17/13.18), Advanced KB (3.2.4/3.3.2/3.3.3/3.4.1), Canvas nodes (1.1.24/1.1.25), Memory (4.3a; 4.14 ✅ 2026-09-21, 4.16 ✅ 2026-09-24, 4.25 ✅ 2026-09-24, 4.15 ✅ 2026-09-21, 4.17 ✅ 2026-09-20, 4.21 ✅ 2026-09-22, 4.22 ✅ 2026-09-22, 4.23 ✅ 2026-09-22, 4.24 ✅ 2026-09-22 delivered), AIP (6.16/6.18), Auth (11.16/11.17), 5.4a/5.8/5.9-enh, and 8 shipped-feature enhancements. Sequencing within Sprint 8 is open — no forced ordering inherited from P3.
 >
@@ -787,7 +787,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 6.15 | Agentic RL Framework | Evaluation ✅ + LLM ✅ | L |
-| 6.19 ✅ (2026-09-15) | Prompt Self-Optimization — 数据集驱动多轮 prompt 自优化闭环（离线、frozen-weight）：钉定数据集版本 + train/val 切分 → 基线 → 反思变异（MutationStrategy 可插拔，v1 GEPA 式；不引入 gepa/DSPy 依赖）→ 真实 agent rollout（agent_definition.prompt_override 注入，persona 旁路、工具/KB/模型配置不变）→ Jinja2 完整性门 → 接受门禁（主指标提升 ≥δ ∧ 确定性指标不回退，judge 软门）→ 安全扫描 → 人审 → 发布为新 prompt 版本（provenance + 自动 commit_message，不自动打 label，回滚走既有版本语义）。预算三档（light/medium/heavy）+ 硬上限 + 逐轮成本记账 + rollout trace 打标（可与生产 analytics 分离）。`PROMPT_OPTIMIZATION_ENABLED` 默认关（archive `2026-09-15-prompt-self-optimization`） | Evaluation ✅ + LLM ✅ | M |
+| 6.19 ⊕ retired 2026-11-24 (shipped 2026-09-15) | Prompt Self-Optimization — **⊕ Retired 2026-11-24 (M1-T1)**：优化闭环、`/api/prompt-optimization` 与 `PROMPT_OPTIMIZATION_ENABLED` 已物理删除，旧请求返回 404；已发布优化版本的 provenance 元数据仍可读、可比较、可回滚（回滚沿用既有版本语义），历史 run/candidate 表由 M1-T3 收敛，重开需新提案。原交付：数据集驱动多轮 prompt 自优化闭环（离线、frozen-weight）：钉定数据集版本 + train/val 切分 → 基线 → 反思变异（MutationStrategy 可插拔，v1 GEPA 式；不引入 gepa/DSPy 依赖）→ 真实 agent rollout（agent_definition.prompt_override 注入，persona 旁路、工具/KB/模型配置不变）→ Jinja2 完整性门 → 接受门禁（主指标提升 ≥δ ∧ 确定性指标不回退，judge 软门）→ 安全扫描 → 人审 → 发布为新 prompt 版本（provenance + 自动 commit_message，不自动打 label，回滚走既有版本语义）。预算三档（light/medium/heavy）+ 硬上限 + 逐轮成本记账 + rollout trace 打标（可与生产 analytics 分离）。`PROMPT_OPTIMIZATION_ENABLED` 默认关（archive `2026-09-15-prompt-self-optimization`） | Evaluation ✅ + LLM ✅ | M |
 | 6.20 | Ontology Action System | Knowledge Graph (P5 deferred — rebase on GraphRAG/LlamaIndex integration when triggered) | L |
 | 6.22 | OAG (Ontology-Augmented Generation) | 6.20 + RAG ✅ *(blocked by 6.20's P5 KG dependency)* | L |
 
@@ -850,7 +850,6 @@ Order is priority, not mandate — any change still goes through independent `/o
 - [ ] Hallucination detection operational
 - [x] Self-Learning loop operational (1.3.6f ✅ 2026-09-15 — archived `skill-evolution-loop`; skill-package closed loop supersedes the retired 1.3.6/1.3.6a–e skeleton; `SKILL_EVOLUTION_ENABLED` flag-gated)
 - [ ] Agentic RL Framework with data flywheel
-- [ ] Prompt Self-Optimization with ACE/GEPA
 - [ ] Ontology Action System with writeback *(closure = P5 KG integration trigger; backfilled when triggered)*
 - [ ] OAG complete (RAG + Logic + Actions) *(closure = P5 KG integration trigger; backfilled when triggered)*
 - [ ] Sleep-time Memory Consolidation operational
@@ -1123,7 +1122,7 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 | **M5: P3 Enterprise** | Month 10 | Platform SPI complete: ChannelBase + AuthProvider + i18n SPI ✅ (NotifierABC merged into ChannelBase); A2A Protocol with Signed Agent Cards; Model Hub (Catalog + Lifecycle Manager); Enterprise Identity: SSO + SCIM + Vault + Budget Management ✅ |
 | **M6: P3 Security & Ops** | Month 12 | Ops Center (Dashboard + Agent Health + Conversation Analytics + Tool Execution Analytics + CI/CD Gating + Agent Catalog Governance); Security (DLP + Runtime Protection + Red Teaming); Plugin System; Deployment infrastructure (SaaS + Canary + Horizontal Scaling + Backup) |
 | **M7: P3 Complete** | Month 14 | P3 re-scoped 125/125 (100%); Event-Sourced State (log-as-truth + DeltaChannel); Dynamic Orchestration; Run Replay Phase 1; Browser Automation Tool; Skill Provider Registry; Advanced RAG (Reranking + Incremental + Quality Eval); Multi-Channel Wave 1 (11.2 simplified ✅ + 11.3 ✅ + 11.9 Slack ✅); Evaluation Suite (7.6a/b dropped); Canvas (Human Input/Form + Trigger; 1.1.18-20 deferred); Memory Enhancement |
-| **M8: P4 Intelligence** | Month 16 | Hallucination Detection operational; Self-Learning loop; Agentic RL Framework; Prompt Self-Optimization; Ontology Action System; OAG complete; Sleep-time Memory Consolidation; LLM-Managed Memory; Memory Intelligence features |
+| **M8: P4 Intelligence** | Month 16 | Hallucination Detection operational; Self-Learning loop; Agentic RL Framework; Ontology Action System; OAG complete; Sleep-time Memory Consolidation; LLM-Managed Memory; Memory Intelligence features |
 | **M9: P4 Complete** | Month 18 | P4 99/99 remaining (100%); GraphRAG Query Engine (P5-trigger); Agentic RAG; Temporal Memory; Lazy GraphRAG (P5-trigger); Peer Selection; Agent Team Templates; ACP Support (2.13); Distributed Team Orchestration; Deterministic Hooks; Asynchronous Execution API; 5-Level Intent Recognition; Simulation Environment; Computer-use (6.27a); Voice Agent Pipeline (11.11); DataAgent; VibeCoding; Multi-Stream Modes; Projection Registry (8.21) + Atomic File Locks (13.20); Canvas Intelligence; Model Service Publishing (6.47) + Quick Wins (6.48); Intent Package Asset (6.49) |
 | **M10: P5 Complete** | Month 20 | P5 46/46 (100%); Asset Marketplace; Partner Monetization; Industry Templates; PyPI SDK; End-User App; Mobile GUI; EU AI Act Compliance; Knowledge Graph Visualization; Ontology tools; Voice/Vision; Edge/Lite; Plugin Security; Agentic Resource Discovery; All P5 features delivered |
 
@@ -1172,7 +1171,7 @@ Task Memory (4.21) → Trajectory Learning → Experience Retrieval
 Evaluation → Agentic RL Framework (6.15) → Data Flywheel → Model Optimization
 Canvas + Graph DSL → NL2Agent (6.16) → NL2Flow → Workflow Auto-Generation
 EventStore → Trace Annotation (6.18) → Evaluation Datasets → Agentic RL
-Evaluation → Prompt Self-Optimization (6.19 ✅) → ACE/GEPA Algorithm → Auto-Optimized Prompts
+Evaluation → Prompt Self-Optimization (6.19 ⊕ retired 2026-11-24) → ACE/GEPA Algorithm → Auto-Optimized Prompts
 Knowledge Graph (3.5.1, P5 deferred) → Ontology Action System (6.20) → Object Actions → Writeback
 EventStore → Decision Lineage (6.21, P5 deferred) → Decision Audit → Compliance
 6.20 + RAG → OAG (6.22) → RAG + Logic + Actions Closed Loop *(blocked by 6.20's P5 KG dependency)*

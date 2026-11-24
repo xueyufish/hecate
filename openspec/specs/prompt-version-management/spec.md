@@ -61,7 +61,7 @@ The system SHALL support a `commit_message: str | None` field on `PromptVersionM
 - **THEN** each version in the response SHALL include its `commit_message` field (may be null)
 
 ### Requirement: Protected label enforcement
-The system SHALL enforce role-based access control on protected prompt labels. Labels listed in `PROTECTED_PROMPT_LABELS` config (default: `["production"]`) SHALL require `admin` role to add, remove, or carry onto any new version — covering explicit create/update payloads, label carry-over by omission, and rollback copies. Non-admin users attempting any of these SHALL receive 403 Forbidden. Unprotected label operations SHALL remain EDITOR-capable, and versions legally published without labels (e.g. by prompt self-optimization) SHALL remain fully manageable and readable.
+The system SHALL enforce role-based access control on protected prompt labels. Labels listed in `PROTECTED_PROMPT_LABELS` config (default: `["production"]`) SHALL require `admin` role to add, remove, or carry onto any new version — covering explicit create/update payloads, label carry-over by omission, and rollback copies. Non-admin users attempting any of these SHALL receive 403 Forbidden. Unprotected label operations SHALL remain EDITOR-capable, and versions legally published without labels, including those published by the retired prompt optimizer, SHALL remain fully manageable and readable.
 
 Protected-label checks SHALL also run when an update supplies labels but omits the template; omission SHALL NOT silently accept a forbidden label request.
 

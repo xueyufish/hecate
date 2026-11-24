@@ -298,11 +298,11 @@ The **Agentic RL Framework** implements a data flywheel for agent self-optimizat
 
 1. **Trace Collection** — Production traces from EventStore
 2. **Labeling** — Auto-labeling (LLM-as-Judge) + human annotation
-3. **Training Data** — Prompt optimization datasets + RL training sets
-4. **Optimization** — Prompt self-optimization (ACE/GEPA) + optional model fine-tuning
+3. **Training Data** — Evaluation datasets and RL training sets
+4. **Optimization** — Evaluate candidate changes to agent behavior, with optional model fine-tuning
 5. **Validation** — A/B testing against baseline + canary release
 
-See [ADR-013: Agentic RL Framework](adr/013-agentic-rl-framework.md).
+The legacy 6.19 prompt optimization loop was retired in M1-T1. See [ADR-013: Agentic RL Framework](adr/013-agentic-rl-framework.md).
 
 ---
 

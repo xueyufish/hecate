@@ -146,13 +146,12 @@ class EvaluationEngine:
                 When provided, the tag filter does not apply: the frozen
                 set is authoritative.
             agent_definition: Optional per-invocation override forwarded to
-                ``agent_execute`` on the ``agent`` answer source (6.19 —
-                the optimization pipeline injects candidate templates as
-                ``prompt_override``). ``None`` keeps production behavior.
+                ``agent_execute`` on the ``agent`` answer source. Version-bound
+                evaluation uses it to supply a frozen execution definition.
+                ``None`` uses the agent's current configuration.
             rollout_capture: Optional list sink collecting one
                 ``{"item_id", "generated", "usage"}`` entry per agent
-                invocation (6.19 rollout accounting). The engine never
-                reads it back.
+                invocation for callers that account for rollout usage.
 
         Returns:
             Aggregated :class:`EvaluationRunResult` with scores and averages.
@@ -477,13 +476,13 @@ class EvaluationEngine:
         Args:
             query: The item query, sent as a single user message.
             agent_id: The agent under test.
-            agent_definition: Optional per-invocation override (e.g. the
-                prompt-optimization pipeline injects candidate templates as
+            agent_definition: Optional per-invocation override (e.g.
+                version-bound evaluation injects a frozen persona as
                 ``prompt_override``); ``None`` keeps the agent's configured
                 behavior exactly as production sees it.
             rollout_capture: Optional list sink; when provided, one entry
                 ``{"item_id", "generated", "usage"}`` is appended per call
-                so the caller can account rollout usage (6.19). The engine
+                so the caller can account rollout usage. The engine
                 itself never reads it back.
 
         Returns:

@@ -1,3 +1,14 @@
+> **RETIRED (2026-11-24, M1-T1)** — the prompt self-optimization loop is
+> physically removed: `src/hecate/ops/prompt_optimization/`, the
+> `/api/prompt-optimization/*` endpoints and `PROMPT_OPTIMIZATION_ENABLED`
+> no longer exist (legacy requests return 404). The requirements below are
+> kept as the historical record of the shipped 6.19 loop and are no longer
+> current gates. Optimization-published prompt versions retain readable
+> provenance (`metadata_.source="prompt_optimization"`) and support version
+> comparison and rollback. The `prompt_optimization_runs` and
+> `prompt_optimization_candidates` tables remain in the database for M1-T3.
+> Revival requires a new proposal.
+
 ## Purpose
 
 Orchestrates evaluation-dataset-driven prompt self-optimization runs: validates run configuration, evaluates the base prompt as baseline, iterates mutation rounds where candidate prompt templates are rolled out against the real agent via prompt override, scores candidates with the evaluation engine, reflects on failure trajectories to propose new candidates, and enforces acceptance gates, budgets, and stop conditions — without ever mutating the production prompt or agent configuration.
