@@ -1,3 +1,14 @@
+> **RETIRED (2026-11-24, M1-T1)** — the prompt self-optimization review and
+> publish flow is physically removed with the 6.19 loop (`ops/prompt_optimization/`,
+> the `/api/prompt-optimization/*` endpoints and `PROMPT_OPTIMIZATION_ENABLED`;
+> legacy requests return 404). The requirements below are kept as the
+> historical record and are no longer current gates. Versions already
+> published from optimization candidates stay first-class prompt versions:
+> their provenance metadata (`metadata_.source="prompt_optimization"`) stays
+> readable and compare/rollback keep the existing prompt version semantics —
+> rollback copies the target content forward as a new version. Revival
+> requires a new proposal.
+
 ## Purpose
 
 Lets users review and publish the output of prompt self-optimization runs: gate-passing candidates are presented with full evidence (diff, metric deltas, failure details, reflection summary, cost), passed through content safety scanning, and only become live prompt versions after explicit human approval — never auto-published.

@@ -121,9 +121,6 @@
         <mxCell id="r3_agenticrl" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=0;dashed=1;" value="Agentic RL Framework" vertex="1">
           <mxGeometry height="26" width="170" x="555" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r3_promptopt" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=0;dashed=1;" value="Prompt Self-Optimization" vertex="1">
-          <mxGeometry height="26" width="170" x="740" y="68" as="geometry" />
-        </mxCell>
         <mxCell id="r3_asyncapi" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=0;dashed=1;" value="Async Execution API" vertex="1">
           <mxGeometry height="26" width="170" y="106" as="geometry" />
         </mxCell>

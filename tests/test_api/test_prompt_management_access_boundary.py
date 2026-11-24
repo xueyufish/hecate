@@ -732,6 +732,9 @@ async def test_optimization_style_unlabeled_version_remains_manageable(env, llm_
     """A legal labels=[] published version is fully manageable and readable."""
     prompt = _seed_prompt(env["db"], env["ws"].id, "Base.", versions=1)
     await env["db"].flush()
+    run_id = str(uuid.uuid4())
+    candidate_id = str(uuid.uuid4())
+    provenance = {"source": "prompt_optimization", "run_id": run_id, "candidate_id": candidate_id}
     env["db"].add(
         PromptVersionModel(
             prompt_id=prompt.id,
@@ -739,7 +742,7 @@ async def test_optimization_style_unlabeled_version_remains_manageable(env, llm_
             template="Optimized {{q}}.",
             variables=["q"],
             labels=[],
-            metadata_={"source": "prompt_optimization", "run_id": str(uuid.uuid4()), "candidate_id": str(uuid.uuid4())},
+            metadata_=provenance,
             workspace_id=env["ws"].id,
         )
     )
@@ -759,6 +762,27 @@ async def test_optimization_style_unlabeled_version_remains_manageable(env, llm_
         summary = await http.post(f"{_BASE}/{prompt.id}/versions/2/summary")
         assert summary.status_code == 200
     assert len(llm_spy["calls"]) == 1
+
+    # Retired-loop provenance stays readable, comparable and rollback-able:
+    # rolling back onto the legacy optimization version keeps its metadata
+    # intact and lands its content as a new version (existing semantics).
+    async with _client_as(viewer) as http:
+        legacy = await http.get(f"{_BASE}/{prompt.id}/versions/2")
+        assert legacy.status_code == 200
+        assert legacy.json()["metadata_"] == provenance
+    async with _client_as(editor) as http:
+        rolled = await http.post(f"{_BASE}/{prompt.id}/rollback/2")
+        assert rolled.status_code == 200
+        assert rolled.json()["current_version"] == 4
+        assert rolled.json()["version"]["template"] == "Optimized {{q}}."
+        assert rolled.json()["version"]["variables"] == ["q"]
+        assert rolled.json()["version"]["labels"] == []
+        diff = await http.get(f"{_BASE}/{prompt.id}/diff", params={"from_version": 2, "to_version": 4})
+        assert diff.status_code == 200
+        assert diff.json()["added_lines"] == 0 and diff.json()["removed_lines"] == 0
+        legacy = await http.get(f"{_BASE}/{prompt.id}/versions/2")
+        assert legacy.status_code == 200
+        assert legacy.json()["metadata_"] == provenance
 
 
 @pytest.mark.parametrize("operation", ["update", "rollback", "delete"])

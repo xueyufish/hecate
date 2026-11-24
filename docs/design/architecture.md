@@ -175,7 +175,7 @@ Each separable candidate unit designates an internal package, a public applicati
 |---|---|---|---|---|
 | MCP handlers write `AgentModel` rows directly | `tools/mcp/server.py` (agent create/update) | tools/mcp + studio/engineering; implementation/acceptance owners assigned at change start | Action-enforcement work moves CRUD behind the owning service | MCP handlers no longer write agent tables |
 | MCP handlers write `KnowledgeBase` rows directly | `tools/mcp/server.py` (knowledge create) | tools/mcp + Knowledge provider owner; people assigned at change start | Knowledge ownership lands with the knowledge domain service | MCP handlers no longer write knowledge tables |
-| Prompt-optimization writes `PromptVersionModel` directly | `ops/prompt_optimization/review.py` | ops/prompt_optimization + prompt-owning studio service; people assigned at change start | Candidate/review flow moves behind the prompt-owning service | ops stops writing prompt version tables |
+| Legacy prompt optimizer wrote `PromptVersionModel` directly | Former `ops/prompt_optimization/review.py` | Ops and the prompt-owning Studio service | M1-T1 retired the 6.19 loop. Published versions retain provenance. M1-T3 handles the history tables. | Met. Ops has stopped writing prompt version tables. |
 | Function-level lazy imports crossing domains | `src/hecate/runtime/` (inventory in `src/hecate/runtime/AGENTS.md`, each row with its own exit condition) | runtime + each referenced capability owner; people assigned at change start | Tracked per row in that inventory; standalone-profile cleanup lands with the shared-assembly work | Each row's recorded exit condition |
 
 ---

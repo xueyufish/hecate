@@ -119,12 +119,12 @@ mappings:
   disposition: optional-component
   responsibility: optional-ecosystem
   target_mode: in-process-plugin
-  provider_or_adapter: current prompt_optimization/self_evolution; target optional optimization backend
+  provider_or_adapter: current self_evolution (prompt_optimization retired 2026-11-24); target optional optimization backend
   state_owner: candidate assets; governance approval/release
   step: 11/15/19
   milestone: M-B (conditional)
   acceptance: Candidate/evaluation/human release; cannot self-authorize; usage unverified
-  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+  restart_or_exit: 6.19 code path removed 2026-11-24 (M1-T1, HECA-8) — production cutover still requires deployment flag, external-caller and in-flight-run verification; published optimization versions keep readable provenance and rollback; history tables converge in M1-T3; 1.3.6f retained — deletion requires usage, replacement and data-exit evidence
 - key: review-06
   section: review
   scope: Graph editor/DSL
@@ -801,8 +801,8 @@ mappings:
   state_owner: optimization provider; governance release
   step: 11/15
   milestone: M-B (conditional)
-  acceptance: Keep delivered capability; learned artifacts need evidence and human/gated publishing
-  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+  acceptance: Keep delivered capability (1.3.6f); 6.19 loop retired 2026-11-24 (M1-T1); learned artifacts need evidence and human/gated publishing
+  restart_or_exit: 6.19 code path removed 2026-11-24 (M1-T1, HECA-8) — production cutover still requires deployment flag, external-caller and in-flight-run verification; published optimization versions keep readable provenance and rollback; history tables converge in M1-T3; 1.3.6f retained — deletion requires usage, replacement and data-exit evidence
 - key: defer-01
   section: defer
   scope: Agentic RL

@@ -69,9 +69,11 @@ class PromptVersionModel(BaseModel):
     variables: Mapped[list[str]] = mapped_column(JSON, default=list)
     labels: Mapped[list[str]] = mapped_column(JSON, default=list)
     commit_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Provenance metadata (6.19): optimization-published versions carry
+    # Provenance metadata: versions published by the retired 6.19 prompt
+    # self-optimization loop carry
     # {"source": "prompt_optimization", "run_id", "candidate_id", scores}.
-    # Manual versions leave it unset. Stored as "metadata" in the DB.
+    # Historical rows stay readable and their compare/rollback semantics are
+    # unchanged; manual versions leave it unset. Stored as "metadata" in the DB.
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True, default=None)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
