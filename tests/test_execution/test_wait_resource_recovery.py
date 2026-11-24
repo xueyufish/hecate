@@ -24,6 +24,13 @@ connection checkouts and process CPU time. Parent monotonic timestamps
 measure recovery and wake latency. Each test writes a separate JSON file
 under HECATE_WAITRES_EVIDENCE_DIR, including the source digests and database
 tier; the PostgreSQL CI step retains these files as an artifact.
+
+Timer backlog drills cover the production wake path the injected-clock
+cases cannot. The worker's wait reconciler uses the database clock to wake
+the timer while a multi-batch workload is still queued. The takeover
+drill pauses the original worker at a completed cycle before stopping it.
+Queue depth immediately before the wake scan identifies the backlog
+window. Evidence records the observed latencies and worker configuration.
 """
 
 from __future__ import annotations
@@ -43,7 +50,7 @@ from typing import Any
 import pytest
 from hecate_durable.storage.lease import task_dispatch_lease_key
 
-from hecate.contracts.execution.durable import ControlCommandKind
+from hecate.contracts.execution.durable import ControlCommandKind, TaskLifecycleState
 from hecate.contracts.execution.references import task_ref as make_task_ref
 from tests.test_execution.test_controller_loop_dispatch import (
     ORG,
@@ -303,7 +310,7 @@ async def _wait_state(stack: dict[str, Any], task_uuid: uuid.UUID, *states: str,
     )
 
 
-def _child_env(stack: dict[str, Any], mode: str, role: str) -> dict[str, str]:
+def _child_env(stack: dict[str, Any], mode: str, role: str, extra: dict[str, str] | None = None) -> dict[str, str]:
     from tests.test_execution._agent_child_db import child_environment
 
     env = child_environment(stack)
@@ -327,17 +334,20 @@ def _child_env(stack: dict[str, Any], mode: str, role: str) -> dict[str, str]:
             "PYTHONPATH": str(_REPO),
         }
     )
+    env.update(extra or {})
     return env
 
 
-def _spawn_worker(stack: dict[str, Any], mode: str, role: str, timeout: float = 30.0) -> subprocess.Popen:
+def _spawn_worker(
+    stack: dict[str, Any], mode: str, role: str, timeout: float = 30.0, extra_env: dict[str, str] | None = None
+) -> subprocess.Popen:
     log_path = Path(stack["tmp_path"]) / f"worker-{role}.log"
     log_handle = open(log_path, "w", encoding="utf-8")  # noqa: SIM115 - lives with the process
     stack["worker_logs"].append((log_handle, log_path))
     process = subprocess.Popen(
         [sys.executable, "-m", "tests.test_execution._wait_resource_process"],
         cwd=str(_REPO),
-        env=_child_env(stack, mode, role),
+        env=_child_env(stack, mode, role, extra_env),
         stdout=log_handle,
         stderr=subprocess.STDOUT,
     )
@@ -717,5 +727,360 @@ async def test_timer_wait_holds_no_resources_and_each_scan_wakes_once(stack, rea
             "duplicate_scans": {"before_due": 0, "due": 1, "after": 0},
             "terminal": record.lifecycle_state.value,
             "observed_from": parked_at.isoformat(),
+        },
+    )
+
+
+# -- timer wake under queue backlog and worker takeover -----------------------
+
+_BACKLOG_TASKS = 20
+_BACKLOG_KNOBS = {
+    "HECATE_WAITRES_WAKE_SECONDS": "8",
+    "HECATE_WAITRES_ASK_DELAY_SECONDS": "0.5",
+    "HECATE_WAITRES_BATCH": "4",
+}
+_BACKLOG_BATCH = int(_BACKLOG_KNOBS["HECATE_WAITRES_BATCH"])
+
+
+def _worker_config(extra_env: dict[str, str]) -> dict[str, Any]:
+    return {
+        "timer_wake_seconds": float(extra_env.get("HECATE_WAITRES_WAKE_SECONDS", "300") or 300),
+        "ask_delay_seconds": float(extra_env.get("HECATE_WAITRES_ASK_DELAY_SECONDS", "0") or 0),
+        "dispatch_batch": int(extra_env.get("HECATE_WAITRES_BATCH", "32") or 32),
+        "poll_interval_seconds": float(extra_env.get("HECATE_WAITRES_POLL_INTERVAL", "0.2") or 0.2),
+        "lease_ttl_seconds": 30,
+        "max_attempts": 3,
+    }
+
+
+def _model_counts(stack: dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in _trace_lines(stack["model_trace"]):
+        kind = entry.get("task_kind", "controller")
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def _queue_depth(stack: dict[str, Any]) -> int:
+    return len(stack["store"].list_tasks({TaskLifecycleState.QUEUED}))
+
+
+def _cycle_entries(stack: dict[str, Any], role: str | None = None) -> list[dict]:
+    trace = str(Path(stack["tmp_path"]) / f"cycles-{role or stack['role']}.jsonl")
+    return _trace_lines(trace)
+
+
+async def _wait_cycle_entry(
+    stack: dict[str, Any], predicate, *, role: str | None = None, timeout: float = 60.0
+) -> dict:
+    """Wait for a cycle the worker process itself reports (the handshake)."""
+
+    name = role or stack["role"]
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for entry in _cycle_entries(stack, role):
+            if predicate(entry):
+                return entry
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"worker {name} never reported a matching cycle: {_cycle_entries(stack, role)[-3:]}")
+
+
+async def _submit_backlog(stack: dict[str, Any], count: int) -> list[uuid.UUID]:
+    """Deterministic load: one scripted model ask per task, no business calls."""
+
+    submitted = []
+    for _ in range(count):
+        result, _port = await _submit(stack, "timer", messages=[{"role": "user", "content": "direct"}])
+        submitted.append(uuid.UUID(result.task_ref.id))
+    return submitted
+
+
+async def _observe_pre_due_window(stack: dict[str, Any], task_uuid, t_ref, wait, deadline):
+    """Fixed pre-due window: no wake before due and no manual consumption."""
+
+    counts = (len(_trace_lines(stack["model_trace"])), len(_trace_lines(stack["tool_trace"])))
+    manual = await _wake(stack, task_uuid, wait, "timer", f"manual-{task_uuid}")
+    assert manual.record.state.value == "rejected", manual.detail
+    assert "timer waits reject manual wake" in (manual.detail or "")
+    samples = await _cycles(stack)
+    assert all(sample["wait_processed"] == 0 for sample in samples)
+    handle = await asyncio.to_thread(
+        stack["store"].leases.acquire,
+        task_dispatch_lease_key(t_ref.issuer_domain, t_ref.id),
+        "probe-reader",
+        5,
+    )
+    assert handle is not None, "dispatch lease still held after a completed timer park cycle"
+    await asyncio.to_thread(
+        stack["store"].leases.release, handle.lease_key, handle.holder, fencing_token=handle.fencing_token
+    )
+    record = await asyncio.to_thread(stack["store"].get_task_state, t_ref)
+    assert record.lifecycle_state.value == "waiting_input"
+    assert record.extra["wait"]["consumed"] is False
+    assert "timer_wake" not in record.extra
+    assert (len(_trace_lines(stack["model_trace"])), len(_trace_lines(stack["tool_trace"]))) == counts
+    assert await asyncio.to_thread(stack["store"].list_input_revisions, t_ref) == []
+    assert await asyncio.to_thread(stack["store"].wait_now) < deadline
+    return manual, samples
+
+
+async def _observe_timer_completion(stack, task_uuid, deadline, wake_entry):
+    assert wake_entry["queued_at_scan"] > 0, f"the scan ran after the queue drained: {wake_entry}"
+    record = await _wait_state(stack, task_uuid, "succeeded", timeout=90.0)
+    terminal_observed_at = await asyncio.to_thread(stack["store"].wait_now)
+    wake = record.extra["timer_wake"]
+    woke_at = datetime.fromisoformat(wake["woke_at"])
+    wake_observed_at = datetime.fromisoformat(wake_entry["wake_observed_at"])
+    assert deadline <= woke_at <= wake_observed_at <= terminal_observed_at
+    assert record.extra["wait"]["consumed"] is True
+    latency = {
+        "due_to_wake_seconds": (wake_observed_at - deadline).total_seconds(),
+        "wake_to_terminal_seconds": (terminal_observed_at - wake_observed_at).total_seconds(),
+        "wake_observed_at": wake_observed_at.isoformat(),
+        "terminal_observed_at": terminal_observed_at.isoformat(),
+        "source": "database clock sampled after the worker scan and at parent terminal observation",
+    }
+    return record, wake, latency
+
+
+async def test_backlogged_worker_scan_wakes_the_due_timer_wait_once(stack) -> None:
+    """The production scan wakes a due timer wait under a multi-batch backlog.
+
+    The wait becomes due on the database clock while the worker process is
+    still draining a multi-batch workload. Its own wait reconciler
+    consumes the wake exactly once, and every queued task still completes.
+    """
+
+    knobs = dict(_BACKLOG_KNOBS)
+    _spawn_worker(stack, "timer", "A", extra_env=knobs)
+    result, _port = await _submit(
+        stack,
+        "timer",
+        controller={
+            "max_turns": 8,
+            "timer_wait": {},
+            "deadline": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        },
+    )
+    task_uuid = uuid.UUID(result.task_ref.id)
+    t_ref = make_task_ref("hecate", str(task_uuid))
+    parked = await _wait_state(stack, task_uuid, "waiting_input")
+    wait = parked.extra["wait"]
+    assert wait["wake_kind"] == "timer" and wait["consumed"] is False
+    deadline = datetime.fromisoformat(wait["wait_expires_at"])
+    run_before = await asyncio.to_thread(stack["store"].run_for_task, t_ref)
+    actions_before = await asyncio.to_thread(stack["store"].list_run_actions, run_before)
+    dispatch_starts = parked.extra.get("dispatch_starts", 0)
+    tool_at_park = len(_trace_lines(stack["tool_trace"]))
+    parked_at = datetime.now(UTC)
+    manual, pre_due_samples = await _observe_pre_due_window(stack, task_uuid, t_ref, wait, deadline)
+
+    backlog = await _submit_backlog(stack, _BACKLOG_TASKS)
+    depth_after_submission = await asyncio.to_thread(_queue_depth, stack)
+    wake_entry = await _wait_cycle_entry(stack, lambda entry: entry["wait_processed"] >= 1, role="A", timeout=30.0)
+    record, wake, latency = await _observe_timer_completion(stack, task_uuid, deadline, wake_entry)
+    for backlog_id in backlog:
+        await _wait_state(stack, backlog_id, "succeeded", timeout=120.0)
+    await _cycles(stack)
+    entries = _cycle_entries(stack, "A")
+    assert entries[-1]["wait_processed"] == 1, f"wait consumed more than once: {entries[-1]}"
+    max_queued_before_wake = max(entry["queued_before"] for entry in entries if entry["cycle"] <= wake_entry["cycle"])
+    assert max_queued_before_wake > _BACKLOG_BATCH, entries
+
+    assert record.extra["wait"]["contract_ref"] == wait["contract_ref"]
+    assert record.extra["wait"]["wait_expires_at"] == wait["wait_expires_at"]
+    assert record.extra["timer_wake"]["execution_id"] == wait["contract_ref"]["execution_id"]
+    assert record.extra["dispatch_starts"] == dispatch_starts + 1
+    assert await asyncio.to_thread(stack["store"].run_for_task, t_ref) == run_before
+    actions_after = await asyncio.to_thread(stack["store"].list_run_actions, run_before)
+    assert actions_after[0] == actions_before[0]
+    assert len(actions_after) == len(actions_before) + 1
+    assert await asyncio.to_thread(stack["store"].list_input_revisions, t_ref) == []
+    assert len(_trace_lines(stack["tool_trace"])) == tool_at_park + 1
+    counts = _model_counts(stack)
+    assert counts.get("controller") == 3, counts
+    assert counts.get("direct", 0) == _BACKLOG_TASKS, counts
+    assert await asyncio.to_thread(_queue_depth, stack) == 0
+
+    await _write_evidence(
+        stack,
+        {
+            "scenario": "backlogged-worker-wake",
+            "wait_type": "timer",
+            "task_ref": {"id": str(task_uuid), "issuer": "hecate"},
+            "run_ref": run_before.to_dict(),
+            "worker_pid": stack["pids"]["A"],
+            "worker_config": _worker_config(knobs),
+            "queue": {
+                "backlog_tasks": _BACKLOG_TASKS,
+                "depth_after_submission": depth_after_submission,
+                "max_queued_before_wake": max_queued_before_wake,
+                "wake_cycle": {
+                    "cycle": wake_entry["cycle"],
+                    "queued_before": wake_entry["queued_before"],
+                    "queued_at_scan": wake_entry["queued_at_scan"],
+                    "queued_after": wake_entry["queued_after"],
+                },
+            },
+            "wake": {
+                "deadline": wait["wait_expires_at"],
+                "woke_at": wake["woke_at"],
+                "consumed_by": "worker production scan (database clock)",
+                "worker_waits_processed": entries[-1]["wait_processed"],
+                "lease_probe": "reacquirable-after-park",
+                "manual_wake": manual.record.state.value,
+                "redispatches": record.extra["dispatch_starts"] - dispatch_starts,
+            },
+            "latency": latency,
+            "observation": {
+                "from": parked_at.isoformat(),
+                "pre_due_cycles": pre_due_samples,
+                "cycles": entries,
+            },
+            "model_asks": counts,
+            "business_calls_total": len(_trace_lines(stack["tool_trace"])),
+            "other_tasks": [{"id": str(task_id), "terminal": "succeeded"} for task_id in backlog],
+            "terminal": record.lifecycle_state.value,
+        },
+    )
+
+
+async def test_replacement_worker_recovers_and_wakes_after_a_mid_backlog_takeover(stack) -> None:
+    """A replacement process wakes the due timer wait it never parked.
+
+    Worker A is stopped between dispatch cycles while backlog tasks are
+    still queued and before the deadline; the deadline passes with no
+    worker running. Worker B takes over the queue and its production scan,
+    on the database clock, consumes the wake and resumes the ORIGINAL Task
+    and Run with the same deadline and the declaring receipt untouched.
+    """
+
+    knobs = {**_BACKLOG_KNOBS, "HECATE_WAITRES_WAKE_SECONDS": "12"}
+    worker_a = _spawn_worker(stack, "timer", "A", extra_env={**knobs, "HECATE_WAITRES_PAUSE_AFTER_BACKLOG_CYCLE": "1"})
+    result, _port = await _submit(
+        stack,
+        "timer",
+        controller={
+            "max_turns": 8,
+            "timer_wait": {},
+            "deadline": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        },
+    )
+    task_uuid = uuid.UUID(result.task_ref.id)
+    t_ref = make_task_ref("hecate", str(task_uuid))
+    parked = await _wait_state(stack, task_uuid, "waiting_input")
+    wait = parked.extra["wait"]
+    assert wait["wake_kind"] == "timer" and wait["consumed"] is False
+    deadline = datetime.fromisoformat(wait["wait_expires_at"])
+    run_before = await asyncio.to_thread(stack["store"].run_for_task, t_ref)
+    actions_before = await asyncio.to_thread(stack["store"].list_run_actions, run_before)
+    dispatch_starts = parked.extra.get("dispatch_starts", 0)
+    tool_at_park = len(_trace_lines(stack["tool_trace"]))
+    parked_at = datetime.now(UTC)
+
+    manual, pre_due_samples = await _observe_pre_due_window(stack, task_uuid, t_ref, wait, deadline)
+
+    backlog = await _submit_backlog(stack, _BACKLOG_TASKS)
+    takeover_entry = await _wait_cycle_entry(stack, lambda entry: entry["paused_after_cycle"], role="A")
+    assert takeover_entry["queued_before"] > _BACKLOG_BATCH
+    assert takeover_entry["wait_processed"] == 0
+    assert takeover_entry["queued_after"] > 0
+    assert takeover_entry["inflight"] == takeover_entry["heartbeats"] == takeover_entry["connections"] == 0
+    worker_a.kill()
+    await asyncio.to_thread(worker_a.wait, 15)
+    killed_at = time.monotonic()
+    stopped_before_due_at = await asyncio.to_thread(stack["store"].wait_now)
+    assert stopped_before_due_at < deadline, "worker A must be stopped before the database deadline"
+    queue_at_takeover = await asyncio.to_thread(_queue_depth, stack)
+    assert queue_at_takeover >= takeover_entry["queued_after"]
+    assert await asyncio.to_thread(stack["store"].list_tasks, {TaskLifecycleState.RUNNING}) == []
+
+    # Handshake: the deadline passes inside the takeover window — no worker
+    # runs, the wait stays parked and unconsumed.
+    due_deadline = time.monotonic() + 30
+    while time.monotonic() < due_deadline:
+        due_observed_at = await asyncio.to_thread(stack["store"].wait_now)
+        if due_observed_at >= deadline:
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise AssertionError("the deadline never passed during the takeover window")
+    record = await asyncio.to_thread(stack["store"].get_task_state, t_ref)
+    assert record.lifecycle_state.value == "waiting_input" and record.extra["wait"]["consumed"] is False
+    assert "timer_wake" not in record.extra
+
+    takeover_window = time.monotonic() - killed_at
+    _spawn_worker(stack, "timer", "B", extra_env=knobs)
+
+    wake_entry = await _wait_cycle_entry(stack, lambda entry: entry["wait_processed"] >= 1, role="B", timeout=30.0)
+    assert wake_entry["cycle"] == 1, wake_entry
+    record, wake, latency = await _observe_timer_completion(stack, task_uuid, deadline, wake_entry)
+    for backlog_id in backlog:
+        await _wait_state(stack, backlog_id, "succeeded", timeout=120.0)
+    await _cycles(stack)
+    entries = _cycle_entries(stack, "B")
+    assert entries[-1]["wait_processed"] == 1, f"wait consumed more than once: {entries[-1]}"
+
+    assert record.extra["wait"]["contract_ref"] == wait["contract_ref"]
+    assert record.extra["wait"]["wait_expires_at"] == wait["wait_expires_at"]
+    assert record.extra["timer_wake"]["execution_id"] == wait["contract_ref"]["execution_id"]
+    assert record.extra["dispatch_starts"] == dispatch_starts + 1
+    assert await asyncio.to_thread(stack["store"].run_for_task, t_ref) == run_before
+    actions_after = await asyncio.to_thread(stack["store"].list_run_actions, run_before)
+    assert actions_after[0] == actions_before[0]
+    assert len(actions_after) == len(actions_before) + 1
+    assert await asyncio.to_thread(stack["store"].list_input_revisions, t_ref) == []
+    assert len(_trace_lines(stack["tool_trace"])) == tool_at_park + 1
+    counts = _model_counts(stack)
+    assert counts.get("controller") == 3, counts
+    assert counts.get("direct") == _BACKLOG_TASKS, counts
+    assert await asyncio.to_thread(_queue_depth, stack) == 0
+
+    await _write_evidence(
+        stack,
+        {
+            "scenario": "mid-backlog-takeover",
+            "wait_type": "timer",
+            "task_ref": {"id": str(task_uuid), "issuer": "hecate"},
+            "run_ref": run_before.to_dict(),
+            "worker_config": _worker_config(knobs),
+            "queue": {
+                "backlog_tasks": _BACKLOG_TASKS,
+                "queue_at_takeover": queue_at_takeover,
+                "wake_cycle": {
+                    "cycle": wake_entry["cycle"],
+                    "queued_before": wake_entry["queued_before"],
+                    "queued_at_scan": wake_entry["queued_at_scan"],
+                    "queued_after": wake_entry["queued_after"],
+                },
+            },
+            "takeover": {
+                "killed_pid": stack["pids"]["A"],
+                "recovery_pid": stack["pids"]["B"],
+                "killed_between_cycles": True,
+                "worker_stopped_before_due_at": stopped_before_due_at.isoformat(),
+                "deadline_observed_without_worker_at": due_observed_at.isoformat(),
+                "stop_to_replacement_start_seconds": takeover_window,
+            },
+            "wake": {
+                "deadline": wait["wait_expires_at"],
+                "woke_at": wake["woke_at"],
+                "consumed_by": "replacement production scan (database clock)",
+                "worker_waits_processed": entries[-1]["wait_processed"],
+                "lease_probe": "reacquirable-after-park",
+                "manual_wake": manual.record.state.value,
+                "redispatches": record.extra["dispatch_starts"] - dispatch_starts,
+            },
+            "latency": latency,
+            "observation": {
+                "from": parked_at.isoformat(),
+                "pre_due_cycles": pre_due_samples,
+                "cycles_before_takeover": _cycle_entries(stack, "A"),
+                "cycles_after_takeover": entries,
+            },
+            "model_asks": counts,
+            "business_calls_total": len(_trace_lines(stack["tool_trace"])),
+            "other_tasks": [{"id": str(task_id), "terminal": "succeeded"} for task_id in backlog],
+            "terminal": record.lifecycle_state.value,
         },
     )

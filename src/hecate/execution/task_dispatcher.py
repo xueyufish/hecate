@@ -1671,6 +1671,7 @@ class PlatformTaskDispatcher:
         from hecate_runtime.execution_service import (
             RuntimeEventDecision,
             RuntimeExecutionRequest,
+            RuntimeScheduleCancelledError,
             runtime_execution_service,
         )
         from hecate_runtime.harness_turn import HarnessTurnPipeline
@@ -2297,17 +2298,26 @@ class PlatformTaskDispatcher:
                     "content": candidate.accepted_output.get("text", ""),
                     "acceptance": entry.acceptance_record,
                 }
+        dispatch_task = asyncio.current_task()
         while True:
             driver = ControllerExecutionDriver(controller, spec, should_cancel=should_cancel)
-            result = await runtime_execution_service.execute(
-                RuntimeExecutionRequest(
-                    runtime=driver,
-                    session_id=engine_session,
-                    initial_input={},
-                    should_cancel=should_cancel,
-                    observer=observe,
+            cancellations_before_schedule = dispatch_task.cancelling() if dispatch_task is not None else 0
+            try:
+                result = await runtime_execution_service.execute(
+                    RuntimeExecutionRequest(
+                        runtime=driver,
+                        session_id=engine_session,
+                        initial_input={},
+                        should_cancel=should_cancel,
+                        observer=observe,
+                    )
                 )
-            )
+            except RuntimeScheduleCancelledError as exc:
+                # An upstream interruption keeps the worker's failure recovery.
+                # A previous, handled cancellation can leave the count nonzero.
+                if dispatch_task is not None and dispatch_task.cancelling() > cancellations_before_schedule:
+                    raise asyncio.CancelledError from exc
+                raise
             if input_watch.requested is not None:
                 # Both fresh execution and ledger replay reach this boundary.
                 # No process-local observation is required to recover the wait.

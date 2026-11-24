@@ -25,6 +25,36 @@ while the worker is stopped. Replacement workers cannot execute new work under
 these dispositions. A separate turn-cap case verifies that pre-park turns still
 count against the original limit.
 
+## Timer wake under backlog and worker takeover
+
+The timer drills use the production wait reconciler in the worker process
+and let the wait expire on the database clock. After the park, the parent
+submits more than one dispatch batch of work. Each queued task makes one
+scripted model call with a fixed delay.
+
+In the first drill a single worker drains the backlog while the deadline
+passes. The worker records queue depth immediately before each scan, so
+the consuming scan must show that sibling tasks are still queued. In the
+takeover drill worker A pauses after completing a cycle with queued work
+remaining. The parent stops A at that boundary and uses the database
+clock to verify that the deadline passes while both workers are offline.
+Worker B starts against the same database and wakes the original Task
+and Run on its first scan.
+
+Both drills check that a manual wake is rejected and that the worker
+consumes the wait once across the observed cycles, at or after its
+deadline. The completed action receipt, wait contract and deadline
+survive recovery without executing the declaring action again. The
+parked wait releases the dispatch lease, heartbeat tasks and checked-out
+connections, and all queued tasks finish successfully.
+
+Evidence records database-clock samples after the wake scan returns and
+after the parent observes terminal state. The first segment measures the
+deadline to the first sample. The second measures the interval between
+the samples. Both include observation overhead. Evidence also includes
+the database tier, queue depth, dispatch batch and worker configuration.
+Every observation window is bounded.
+
 ## Evidence and measurement
 
 Each test writes a separate JSON file. Set `HECATE_WAITRES_EVIDENCE_DIR` to retain
@@ -35,8 +65,8 @@ and worker PIDs. Connection credentials and wait tokens are excluded.
 Completed worker cycles record CPU seconds from `time.process_time()`, monotonic
 timestamps, inflight and heartbeat counts, SQLAlchemy pool checkouts, dispatches,
 and model/tool calls. Idle-cycle CPU and wall deltas include shared scanners.
-Recovery and wake latency use the parent's monotonic clock with explicit
-observation boundaries. Resource release and execution correctness are the hard
+Earlier recovery drills measure latency with the parent's monotonic clock.
+Resource release and execution correctness are the hard
 assertions. Performance measurements establish a baseline. Provider token usage
 and monetary costs are unknown for the scripted model.
 
