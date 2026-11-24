@@ -64,6 +64,18 @@ Call out unknown work only when it could materially change the proposed scope
 or landing order. Do not message other chats or developers merely because this
 skill is being used.
 
+## Apply the evolution plan
+
+For work that implements or affects the
+[evolution plan](../../../docs/refactor/enterprise-agent-platform-evolution-plan.md),
+read the relevant milestone, task, and acceptance scenarios at the inspected
+revision. Include the applicable task ID and exit criteria in the recommendation
+or handoff. Check completed and in-flight work before choosing the next package.
+Verify each prerequisite on the proposed base or record the concrete interface
+and landing order needed for parallel work. For conditional tasks, verify the
+triggering evidence before recommending implementation. Use the evolution plan
+as the source for specific decisions and conditions.
+
 ## Choose package boundaries
 
 Compare plausible complete outcomes against ongoing work. Include implementation,
@@ -71,6 +83,13 @@ tests, required configuration/docs, and observable acceptance criteria in each
 candidate. Stop expanding when another independent purpose or substantial new
 shared dependency would be introduced. Prefer a concise recommendation over an
 exhaustive decomposition of the whole repository.
+
+Use roadmap tasks as scope and dependency references. Split a broad task by
+independently verifiable outcomes when it spans separate PR purposes. For
+retirements, check callers, entry points, and data or migrations still used by
+retained capabilities. Assign shared boundaries to a named package and specify
+what dependents can use once it lands. Keep each package runnable on its proposed
+base and state which milestone criteria remain for later packages.
 
 Classify the evidence, rather than promising zero conflicts:
 
@@ -120,7 +139,10 @@ usable in a chat, task tracker, or automated workflow. Include:
   shared-interface changes, an actual ownership collision, or missing authority.
 - **Verification:** concrete commands using existing test paths and shared
   checks from this checkout. Separate checks actually run during planning from
-  commands the implementer still needs to run; do not invent passing results.
+  commands the implementer still needs to run. Identify any acceptance evidence
+  that requires real PostgreSQL, object storage, a model, network isolation, or
+  client interoperability. Record the environment and distinguish simulated,
+  skipped, and unverified cases from observed acceptance results.
 - **Integration and return:** dependency/landing order, recheck relevant
   concurrent changes before integration, scoped cross-boundary tests after
   integration, and a report with branch, base, final commit or dirty status,
