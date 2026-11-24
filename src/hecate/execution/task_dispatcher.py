@@ -1671,6 +1671,7 @@ class PlatformTaskDispatcher:
         from hecate_runtime.execution_service import (
             RuntimeEventDecision,
             RuntimeExecutionRequest,
+            RuntimeScheduleCancelledError,
             runtime_execution_service,
         )
         from hecate_runtime.harness_turn import HarnessTurnPipeline
@@ -2299,15 +2300,23 @@ class PlatformTaskDispatcher:
                 }
         while True:
             driver = ControllerExecutionDriver(controller, spec, should_cancel=should_cancel)
-            result = await runtime_execution_service.execute(
-                RuntimeExecutionRequest(
-                    runtime=driver,
-                    session_id=engine_session,
-                    initial_input={},
-                    should_cancel=should_cancel,
-                    observer=observe,
+            try:
+                result = await runtime_execution_service.execute(
+                    RuntimeExecutionRequest(
+                        runtime=driver,
+                        session_id=engine_session,
+                        initial_input={},
+                        should_cancel=should_cancel,
+                        observer=observe,
+                    )
                 )
-            )
+            except RuntimeScheduleCancelledError as exc:
+                # A cancelled surrounding task is a cancellation, not a
+                # retryable dispatch failure: builtin.py converts the same
+                # signal back to CancelledError ("loop shutdown"), and
+                # dispatch_once must not spend its retry budget — or re-ask
+                # a model — for a schedule the cancellation already stopped.
+                raise asyncio.CancelledError from exc
             if input_watch.requested is not None:
                 # Both fresh execution and ledger replay reach this boundary.
                 # No process-local observation is required to recover the wait.

@@ -1253,6 +1253,51 @@ async def test_input_wait_recovers_after_outcome_commit_before_park(harness, mon
     assert port.business_calls == [{"sku": "S-9"}]
 
 
+class _HangingModelCallPort(ScriptedLoopPort):
+    """Model call that blocks until the dispatch is cancelled mid-flight."""
+
+    def __init__(self) -> None:
+        super().__init__(final_text="unused")
+        self.model_call_started = asyncio.Event()
+
+    async def llm_invoke_structured(self, messages: list[dict], config: dict):
+        self.model_calls += 1
+        self.model_call_started.set()
+        await asyncio.Event().wait()
+        yield {"content": "unreachable", "tool_calls": None}
+
+
+async def test_cancelled_dispatch_propagates_without_retryable_requeue(harness) -> None:
+    """A cancelled schedule is a cancellation, never a retryable dispatch failure.
+
+    ``RuntimeExecutionService.execute`` converts the delivered
+    ``CancelledError`` into ``RuntimeScheduleCancelledError`` (it carries the
+    partial result); ``builtin.py`` converts it back so the worker never
+    spends its retry budget on a schedule the cancellation already stopped.
+    The controller dispatch must match: swallowing it as a dispatch failure
+    requeues and re-dispatches the task, re-asking the model and appending
+    rounds to failure-evidence snapshots.
+    """
+
+    port = _HangingModelCallPort()
+    t_ref, _task_uuid = await _submit_without_dispatch(harness, port)
+    worker = _worker_for(harness)
+    dispatch = asyncio.create_task(worker.dispatch_once(t_ref))
+    await asyncio.wait_for(port.model_call_started.wait(), timeout=30)
+    dispatch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch
+
+    # The cancellation consumed no retry budget and asked no second model
+    # question: the task stays RUNNING for stale-lease recovery (the same
+    # contract test_input_wait_recovers_after_outcome_commit_before_park
+    # locks for a raw CancelledError).
+    assert port.model_calls == 1
+    record = harness["store"].get_task_state(t_ref)
+    assert record.lifecycle_state is TaskLifecycleState.RUNNING
+    assert "dispatch_attempts" not in (record.extra or {})
+
+
 class _RepeatedInputPort(_ProductionInputPort):
     """Two separate actions need input despite sharing identical arguments."""
 
