@@ -1,6 +1,6 @@
 ---
 name: hecate-parallel-plan
-description: Recommend the next independently verifiable Hecate work package, plan an already selected task, or do both. Use when checking a task against concurrent Git worktrees or preparing a handoff for an implementer.
+description: Plan a Hecate roadmap task by ID (such as M1-T1) or a selected outcome, recommend the next independently verifiable work package, or do both. Use for worktree overlap checks and implementation handoffs.
 ---
 
 # Hecate parallel work planning
@@ -12,11 +12,13 @@ purpose; a work package may contain several related tasks and logical commits.
 
 ## Choose the planning mode
 
+- **Plan a selected task:** A roadmap ID supplied as the target, even on its own
+  (for example, `M1-T1`), selects this mode. Go directly to that task. A concrete
+  outcome or a work package selected from an earlier recommendation also
+  selects this mode. Treat IDs cited as examples or dependencies as context.
 - **Recommend only:** When asked to pick the next task, inspect the repository,
   available backlog, and ongoing work. Recommend one work package with reasons,
   potential overlap, dependencies, and brief acceptance criteria.
-- **Plan a selected task:** When the user supplies a concrete outcome or selects
-  a work package from an earlier recommendation, plan that scope directly.
 - **Recommend and plan:** When asked for both, or invoked without a task or
   a narrower request, recommend one package and include its implementation
   plan in the same response. Distinguish the recommendation from a
@@ -83,10 +85,15 @@ dependent package can start before it lands. Verify the triggering evidence for
 conditional work. Include the task ID and exit criteria in the recommendation
 or handoff.
 
-For an explicitly selected roadmap task, go directly to its row and task section.
-If the inspected revision has no table, use its task sections and available
-status evidence. For work outside the evolution plan, use the relevant backlog
-and repository evidence.
+For a selected roadmap ID, look up its exact table row and detailed task
+section. If the revision has no table, use its task sections and available
+status evidence. If the ID cannot be matched, report that and ask which task
+was intended. Use the section to define the full task scope unless the user
+narrows it. Account for every in-scope deliverable and exit criterion. Cite
+verified completed work, plan the remaining work, and state when blocked work
+can resume. Keep the selected task as the handoff's goal even if another task
+could start sooner. For work outside the evolution plan, use the relevant
+backlog and repository evidence.
 
 ## Choose package boundaries
 
@@ -96,12 +103,13 @@ candidate. Stop expanding when another independent purpose or substantial new
 shared dependency would be introduced. Prefer a concise recommendation over an
 exhaustive decomposition of the whole repository.
 
-Use roadmap tasks as scope and dependency references. Split a broad task by
-independently verifiable outcomes when it spans separate PR purposes. For
-retirements, check callers, entry points, and data or migrations still used by
-retained capabilities. Assign shared boundaries to a named package and specify
-what dependents can use once it lands. Keep each package runnable on its proposed
-base and state which milestone criteria remain for later packages.
+Split a broad task by independently verifiable outcomes when it spans separate
+PR purposes. Within a selected task's handoff, cover all packages, their landing
+order, and the combined exit criteria. For retirements, check callers, entry
+points, and data or migrations still used by retained capabilities. Assign
+shared boundaries to a named package and specify what dependents can use once
+it lands. Keep each package runnable on its proposed base and state which
+milestone criteria remain for later packages.
 
 Classify the evidence, rather than promising zero conflicts:
 
@@ -136,8 +144,12 @@ including conflicts, dependencies, and any recommended serial order.
 For a recommendation-only request, give the recommended package, why it is
 worth doing now, and its brief acceptance criteria. End there.
 
-For planning, provide a self-contained handoff for the implementer. Keep it
-usable in a chat, task tracker, or automated workflow. Include:
+For planning, make the answer itself a self-contained handoff the user can
+forward to an implementation agent. Open with the task ID and title when
+available, then state the objective as an assignment. Include the repository
+context and decisions needed to execute without the planning conversation.
+For a selected task, begin the final response directly with the handoff.
+Include:
 
 - **Outcome and acceptance:** observable behavior and meaningful tests.
 - **Work location:** suggested worktree name/path, available branch name, base
