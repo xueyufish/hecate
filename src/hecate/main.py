@@ -75,7 +75,6 @@ from hecate.ops.api.preflight import router as preflight_router
 from hecate.ops.api.quotas import quotas_router
 from hecate.ops.api.schedules import router as schedules_router
 from hecate.ops.api.security_findings import router as security_findings_router
-from hecate.ops.api.synthesis import router as synthesis_router
 from hecate.ops.api.tool_analytics import router as tool_analytics_router
 from hecate.ops.api.tool_decisions import router as tool_decisions_router
 from hecate.ops.api.traces import router as traces_router
@@ -431,7 +430,6 @@ app.include_router(tool_decisions_router, prefix="/api", tags=["security"])
 app.include_router(security_findings_router, prefix="/api", tags=["security"])
 app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(evaluation_router, prefix="/api", tags=["evaluation"])
-app.include_router(synthesis_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_tasks_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_annotations_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_backflow_router, prefix="/api", tags=["evaluation"])

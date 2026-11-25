@@ -359,7 +359,7 @@ class EvaluationTaskService:
 
         The caller commits the request session and then hands the run to
         :meth:`runner.OfflineTaskRunner.run_in_background`, mirroring the
-        synthesis-job flow.
+        queued-run handoff flow.
         """
         task = await self._get_task_or_raise(task_id, workspace_id)
         if task.task_type != TaskType.OFFLINE.value:

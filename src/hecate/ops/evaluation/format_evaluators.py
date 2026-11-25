@@ -2,9 +2,9 @@
 
 Four evaluators that operate on the generated answer without invoking any
 LLM call. Used both as fast regression checks and as ground-truth
-assertions on synthesized items (the AI synthesis pipeline tags items with
-``strategy:*`` so these evaluators can score them in CI runs without
-incurring LLM cost).
+assertions on dataset items. Items synthesized by the retired AI
+synthesis pipeline keep their ``strategy:*`` provenance tags and can
+still be scored in CI runs without incurring LLM cost.
 
 - :class:`ContainsEvaluator` — checks ``expected_answer`` (or a pattern from
   ``metadata["pattern"]``) appears as a substring of the generated answer.
