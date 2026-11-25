@@ -1,4 +1,4 @@
-"""Dataset ORM model and Pydantic schemas for fine-tuning data management."""
+"""Dataset ORM model and Pydantic schemas for evaluation dataset storage."""
 
 from __future__ import annotations
 

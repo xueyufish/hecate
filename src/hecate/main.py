@@ -489,14 +489,13 @@ app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alert
 app.include_router(quotas_router, prefix="/api", tags=["quotas"])
 app.include_router(i18n_router, tags=["i18n"])
 
-# hecate-llm model_hub routers (cost_management, fine_tuning, inference,
+# hecate-llm model_hub routers (cost_management, inference,
 # model_catalog, model_lifecycle, monitoring_models) moved to the
 # packages/hecate-llm wheel in PR4b. Required dependency, but keep the
 # lazy mount guard for shape consistency with memory/ops routers and so
 # test/script contexts can override it cleanly.
 try:
     from hecate_llm.api.management.cost_management import router as cost_management_router
-    from hecate_llm.api.management.fine_tuning import router as fine_tuning_router
     from hecate_llm.api.management.inference import router as inference_router
     from hecate_llm.api.management.model_catalog import router as model_catalog_router
     from hecate_llm.api.management.model_lifecycle import router as model_lifecycle_router
@@ -505,7 +504,6 @@ try:
     app.include_router(monitoring_models_router)
     app.include_router(cost_management_router)
     app.include_router(inference_router)
-    app.include_router(fine_tuning_router)
     app.include_router(model_catalog_router, tags=["model-catalog"])
     app.include_router(model_lifecycle_router, tags=["model-lifecycle"])
 except ImportError:
