@@ -1,31 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
-const { api } = vi.hoisted(() => ({
-  api: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), stream: vi.fn() },
-}));
-
-vi.mock("@/lib/api-client", () => ({ api }));
+import userEvent from "@testing-library/user-event";
 
 import { ControllerConfigSection } from "../controller-config";
-
-const PACKAGES = { items: [{ id: "pkg-1", name: "billing-intents" }] };
-const VERSIONS = {
-  items: [
-    {
-      id: "v2",
-      name: "v2",
-      published_at: "2026-09-13T00:00:00Z",
-      content: { categories: [{ name: "billing" }, { name: "tech" }, { name: "hr" }] },
-    },
-    {
-      id: "v1",
-      name: "v1",
-      published_at: "2026-09-12T00:00:00Z",
-      content: { categories: [{ name: "billing" }] },
-    },
-  ],
-};
 
 const NODES = [
   { id: "a1", type: "agent", data: { label: "Billing Agent", config: {} } },
@@ -43,11 +20,6 @@ function setup(config: Record<string, unknown>) {
 describe("ControllerConfigSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    api.get.mockImplementation((url: string) => {
-      if (url === "/api/intent-packages") return Promise.resolve(PACKAGES);
-      if (url.includes("/versions")) return Promise.resolve(VERSIONS);
-      return Promise.reject(new Error(`unexpected ${url}`));
-    });
   });
 
   it("requires an intent package reference", async () => {
@@ -60,47 +32,63 @@ describe("ControllerConfigSection", () => {
     expect(await screen.findByText(/default workflow is required/i)).toBeTruthy();
   });
 
-  it("renders mapping rows from the selected version categories", async () => {
+  it("renders mapping rows from existing category targets", async () => {
     setup({
       intent_package: { package_id: "pkg-1", version_id: "v2" },
-      category_targets: { billing: "a1" },
+      category_targets: { billing: "a1", tech: "a2" },
       default_workflow: "a2",
     });
-    await waitFor(() => expect(screen.getByText("billing")).toBeTruthy());
+    expect(await screen.findByText("billing")).toBeTruthy();
     expect(screen.getByText("tech")).toBeTruthy();
-    expect(screen.getByText("hr")).toBeTruthy();
   });
 
-  it("flags mapping categories removed from the package version", async () => {
-    setup({
+  it("emits package reference changes through onChange", async () => {
+    const { onChange } = setup({ default_workflow: "a2" });
+    fireEvent.change(screen.getByPlaceholderText(/published package id/i), {
+      target: { value: "pkg-9" },
+    });
+    expect(
+      onChange.mock.calls.some(
+        ([field, value]) =>
+          field === "intent_package" &&
+          (value as Record<string, unknown>).package_id === "pkg-9"
+      )
+    ).toBe(true);
+  });
+
+  it("clears the reference when the package id is emptied", async () => {
+    const { onChange } = setup({
       intent_package: { package_id: "pkg-1", version_id: "v2" },
-      category_targets: { billing: "a1", legacy: "a1" },
       default_workflow: "a2",
     });
-    await waitFor(() => expect(screen.getByText(/removed from package/i)).toBeTruthy());
-    expect(screen.getByText("legacy")).toBeTruthy();
+    const input = screen.getByPlaceholderText(/published package id/i);
+    await userEvent.clear(input);
+    expect(
+      onChange.mock.calls.some(([field, value]) => field === "intent_package" && value === null)
+    ).toBe(true);
   });
 
-  it("emits version pin changes through onChange", async () => {
+  it("adds mappings through onChange", async () => {
     const { onChange } = setup({
       intent_package: { package_id: "pkg-1" },
+      category_targets: {},
       default_workflow: "a2",
     });
-    // The versions effect pins the latest published version.
-    await waitFor(() =>
-      expect(
-        onChange.mock.calls.some(
-          ([field, value]) =>
-            field === "intent_package" &&
-            (value as Record<string, unknown>).version_id === "v2"
-        )
-      ).toBe(true)
-    );
+    await userEvent.type(screen.getByPlaceholderText("category"), "billing");
+    await userEvent.click(screen.getByText("add mapping"));
+    expect(
+      onChange.mock.calls.some(
+        ([field, value]) =>
+          field === "category_targets" &&
+          (value as Record<string, string>).billing === ""
+      )
+    ).toBe(true);
   });
 
   it("lists workflow targets limited to declared nodes", async () => {
     setup({
       intent_package: { package_id: "pkg-1", version_id: "v2" },
+      category_targets: { billing: "a1" },
       default_workflow: "a2",
     });
     await screen.findByText("billing");

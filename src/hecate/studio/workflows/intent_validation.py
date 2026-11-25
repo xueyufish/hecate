@@ -1,10 +1,13 @@
-"""Studio-side existence validation for intent package references (5.1/6.49).
+"""Workflow-side existence validation for intent package references (5.1/6.49).
 
 The runtime compiler validates *shape* (non-empty mappings, declared
 targets); this module validates *existence* — that referenced intent
 packages exist in the workspace, that version pins resolve to published
 versions, and that mapping/category keys exist in the referenced version.
-It runs on the workflow save path, which owns DB access.
+It runs on the workflow save path, which owns DB access. It lives at the
+retained Workflow boundary since the intent-package management module was
+retired in M1-T1; published evidence for existing graphs keeps flowing
+through ``core/composition/intent_evidence.py``.
 """
 
 from __future__ import annotations
