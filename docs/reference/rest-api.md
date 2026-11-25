@@ -86,7 +86,6 @@ See [Manage agent memory](../how-to/manage-agent-memory.md) for operational reci
 | `/api/models/cost` | Cost management and accounting |
 | `/api/model-pricing` | Per-model pricing data |
 | `/api/inference` | Inference endpoints and parameters |
-| `/api/fine-tuning` | Fine-tuning jobs |
 
 ### Guardrails and security
 
