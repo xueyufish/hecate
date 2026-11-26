@@ -163,8 +163,7 @@ Read the re-check with these boundaries:
   during reservation releases that known-unissued request's reservation;
   a failed release stays pending reconciliation, without inventing usage.
 - Queries, cancellation and the admin shutdown stay available, and the
-  host version lock is not released — switching versions still requires a
-  stopped host.
+  profile lock remains held when the runner serves an explicit artifact.
 - The running definition keeps using its startup-verified snapshot; a
   policy re-read never reloads the artifact.
 

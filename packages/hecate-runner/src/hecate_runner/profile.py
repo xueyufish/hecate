@@ -795,8 +795,8 @@ def load_profile(
 
     ``profile_dir`` is always the HOST configuration directory: runner.json,
     identity.json, secret references and evidence resolve against it, and
-    ``Profile.directory`` keeps that meaning. ``artifact_dir`` (release
-    layout) names where the manifest, signature envelope and listed files
+    ``Profile.directory`` keeps that meaning. ``artifact_dir`` names where the
+    manifest, signature envelope and listed files
     live; it defaults to ``profile_dir`` for the single-directory layout.
 
     The preview gate runs after structural validation: a manifest declaring

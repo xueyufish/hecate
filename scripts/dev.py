@@ -36,8 +36,6 @@ CHECK_TARGETS = (
     "tests/",
     "scripts/feature_inventory.py",
     "scripts/dev.py",
-    "scripts/runner_env_prepare.py",
-    "scripts/runner_env_install.py",
 )
 CHECKS = {
     "lint": ("ruff", "check", *CHECK_TARGETS),
@@ -47,8 +45,6 @@ CHECKS = {
         "src/",
         "packages/",
         "scripts/dev.py",
-        "scripts/runner_env_prepare.py",
-        "scripts/runner_env_install.py",
     ),
 }
 HOOK_NAMES = ("pre-commit", "commit-msg", "pre-push")

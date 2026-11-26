@@ -41,14 +41,9 @@ uv build --package hecate-runner
 pip install dist/hecate_runner-*.whl   # pulls hecate-runtime and hecate-durable — never the full hecate app
 ```
 
-For machines without network access, prepare a hash-pinned wheelhouse
-delivery on a build machine and install it offline (`--no-index
---require-hashes`, every wheel digest-checked against a verifiable
-manifest); the installer writes an install receipt, and a release-managed
-host can check at cold start with `--deployment-manifest` that
-the active signed artifact and the running environment match the
-composed deployment; see
-[Deliver the Runner environment offline](../../docs/how-to/deploy-runner-environment.md).
+For locked installations from a workspace, including offline installation
+with a prepared uv cache, see
+[Install the Runner from a locked workspace](../../docs/how-to/deploy-runner-environment.md).
 
 The wheel carries the authoritative execution-contract JSON Schema snapshot in
 `hecate_runner/_contract_schemas`. The source of truth remains
@@ -108,30 +103,13 @@ available). See
 [Sign runner artifacts](../../docs/how-to/sign-runner-artifacts.md) for the
 full workflow, rotation and revocation semantics.
 
-## Release-managed hosts: offline install, switching, rollback
+## Select a signed artifact
 
-A host directory can also be release-managed: signed artifacts install into
-digest-addressed `releases/<manifest-sha256>/` directories, an atomic
-`active.json` records the selection, and `runner.json`, `identity.json`,
-secrets and evidence stay in the stable host root. `hecate-runner-release`
-provides `install`, `list`/`status`, `activate` and `rollback`; the real
-startup entry consumes the selection with `hecate-runner --host <dir>
---artifact-trust <policy.json>`, re-verifying the committed release under
-the current policy and holding the host lock (shared with the management
-commands) for its whole lifetime — a serving host cannot be switched, and
-a host whose local SQLite ledger still carries non-terminal tasks refuses to
-switch. Version selection requires the generation read from status, and the
-recorded database binding cannot be removed or redirected during a switch.
-Cold start only: no hot upgrade, no live-run migration, no remote
-activation, and no shared-database multi-host switching. Artifacts can
-also travel as standard bundles: `hecate-runner-release pack` verifies the
-artifact and writes a deterministic tar.gz of exactly the signed layout,
-and `install --bundle` re-reads it with hard bounds (member count,
-per-member and total size; portable names only — no traversal, links,
-devices, sparse, duplicate, undeclared or case-colliding members) into
-isolated staging before the usual gates. The bundle is transport only: no
-host configuration, no install scripts, no dependency downloads. See
-[Install, switch and roll back runner releases](../../docs/how-to/install-runner-releases.md).
+Use `--profile DIR --artifact DIR --artifact-trust POLICY_JSON` to keep
+operator configuration and state separate from the selected artifact.
+`hecate-runner-release` supports packing signed artifacts and installing
+and listing them under the profile's `releases/` directory.
+See [Install and start signed Runner artifacts](../../docs/how-to/install-runner-releases.md).
 
 ## Durable profile
 

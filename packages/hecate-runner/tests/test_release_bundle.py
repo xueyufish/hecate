@@ -29,16 +29,8 @@ from hecate_runner.artifact_signing import (
     load_trust_policy,
     sign_manifest,
 )
-from hecate_runner.release import (
-    ACTIVE_POINTER_NAME,
-    ReleaseError,
-    activate_release,
-    install_bundle,
-    install_release,
-    load_host_selection,
-    read_active_selection,
-    rollback_release,
-)
+from hecate_runner.profile import load_profile
+from hecate_runner.release import ReleaseError, install_bundle, install_release
 from hecate_runtime.manifest import sha256_hex
 
 PUBLISHER = "publisher:acme"
@@ -173,23 +165,9 @@ def test_packed_bundle_installs_and_runs_like_the_directory(tmp_path, _shutdown_
 
     host = _write_host(tmp_path)
     install_bundle(host, bundle_path, policy)
-    activate_release(host, sha, policy, expected_generation=0)
-    profile, lock = load_host_selection(host, policy)
+    profile = load_profile(host, artifact_dir=host / "releases" / sha, artifact_trust=policy)
     assert profile.artifact_directory.name == sha
     assert b"version-a" in profile.entry_content
-    lock.release()
-
-    # Switch and rollback run through the same machinery.
-    artifact_b, sha_b = _make_artifact(tmp_path, "artifact-b", "version-b", private_pem)
-    bundle_b = tmp_path / "release-b.tar.gz"
-    _pack(artifact_b, bundle_b, policy)
-    install_bundle(host, bundle_b, policy)
-    activate_release(host, sha_b, policy, expected_generation=1)
-    profile_b, lock = load_host_selection(host, policy)
-    assert b"version-b" in profile_b.entry_content
-    lock.release()
-    rollback_release(host, policy, expected_generation=2)
-    assert read_active_selection(host).manifest_sha256 == sha
 
 
 def test_pack_carries_only_whitelisted_members(tmp_path, _shutdown_env) -> None:
@@ -346,7 +324,6 @@ def test_bundle_refuses_malicious_member_names(tmp_path, _shutdown_env, evil: st
     with pytest.raises(ReleaseError):
         install_bundle(host, _craft_bundle(tmp_path, members), policy)
     assert not (host / "releases").exists() or not any((host / "releases").iterdir())
-    assert not (host / ACTIVE_POINTER_NAME).exists()
 
 
 @pytest.mark.parametrize(
@@ -462,7 +439,6 @@ def test_bundle_refuses_corrupted_and_truncated_archives(tmp_path, _shutdown_env
 
     # The host is untouched by every refusal.
     assert not (host / "releases").exists() or not any((host / "releases").iterdir())
-    assert not (host / ACTIVE_POINTER_NAME).exists()
 
 
 def _tar_bytes(members: list) -> bytes:
@@ -529,8 +505,6 @@ def test_bundle_failure_retry_and_nested_signature(tmp_path, _shutdown_env) -> N
     # signature reference and idempotent re-install.
     assert install_bundle(host, bundle_path, policy) == sha
     assert install_bundle(host, bundle_path, policy) == sha
-    activate_release(host, sha, policy, expected_generation=0)
-    assert read_active_selection(host).manifest_sha256 == sha
     installed_release = host / "releases" / sha
     assert (installed_release / "signatures" / "current.json").is_file()
     assert not (installed_release / "runner.json").exists()
@@ -554,7 +528,6 @@ def test_valid_signed_bundle_requires_a_complete_gzip_stream(tmp_path, _shutdown
     host = _write_host(tmp_path)
     with pytest.raises(ReleaseError):
         install_bundle(host, path, policy)
-    assert not (host / ACTIVE_POINTER_NAME).exists()
     assert not (host / "releases").exists()
 
 
