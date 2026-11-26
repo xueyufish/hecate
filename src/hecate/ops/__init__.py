@@ -18,6 +18,8 @@ Sub-modules
 - ``notification.py`` — notification dispatcher with IM templates.
 - ``ops_center/`` — agent health / fleet monitoring.
 - ``quota.py`` — quota definitions + usage tracking.
+- ``maintenance/`` — lifecycle maintenance jobs (compliance checker,
+  garbage collector) and their interval scheduler.
 - ``retention.py`` — event-log retention policy.
 - ``scheduling/`` — scheduled task execution.
 

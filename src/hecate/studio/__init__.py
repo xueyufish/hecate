@@ -18,9 +18,6 @@ Sub-modules
   and hands it to the Pregel runtime for execution.
 - ``agents/`` — multi-agent coordination primitives: task allocator,
   agent-to-agent message bus, negotiator.
-- ``meta_agents/`` — meta-level agents: compliance checker, drift
-  detector, scheduler, garbage collector. These watch the agent fleet
-  itself rather than user requests.
 - ``data/`` — JSON template fixtures for orchestration patterns and
   agent templates. Loaded by ``api/management/agent_templates.py``
   via ``TEMPLATES_DIR = .../studio/data/agent_templates``.

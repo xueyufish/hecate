@@ -19,7 +19,7 @@ the task write boundary: creation requires an explicit active workspace
 before the EDITOR role floor, and the service always receives the
 resolved task's real workspace.
 
-Offline run execution follows the synthesis-job flow: the handler persists a
+Offline run execution follows the queued-run handoff flow: the handler persists a
 ``queued`` run row, commits, spawns the background runner, and returns 202.
 """
 
@@ -282,7 +282,7 @@ async def trigger_task_run(
         raise _validation_error(str(exc)) from exc
 
     # The background runner opens its own session — the queued row must be
-    # committed before the handoff (same flow as the synthesis job API).
+    # committed before the handoff.
     await db.commit()
     await OfflineTaskRunner(db).run_in_background(run.id, task_id)
     return {"run_id": str(run.id), "status": run.status}

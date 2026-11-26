@@ -19,11 +19,7 @@ import uuid
 
 from sqlalchemy import select
 
-from hecate.models.intent_package import (
-    IntentPackageCategoryModel,
-    IntentPackageSampleModel,
-    IntentPackageVersionModel,
-)
+from hecate.models.intent_package import IntentPackageVersionModel
 from hecate.runtime.intent.types import EvidenceCategory, EvidencePayload, IntentEvidencePort
 
 logger = logging.getLogger(__name__)
@@ -31,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 class StudioIntentEvidenceProvider(IntentEvidencePort):
     """Load published evidence for intent packages from the studio store."""
+
+    def __init__(self, workspace_id: uuid.UUID | None = None) -> None:
+        self._workspace_id = workspace_id
 
     async def get_evidence(
         self,
@@ -40,16 +39,19 @@ class StudioIntentEvidenceProvider(IntentEvidencePort):
     ) -> EvidencePayload:
         from hecate.core.database import async_session_factory
 
+        if self._workspace_id is not None:
+            if workspace_id is not None and workspace_id != self._workspace_id:
+                raise LookupError("Intent evidence is outside the execution workspace")
+            workspace_id = self._workspace_id
         async with async_session_factory() as session:
             stmt = select(IntentPackageVersionModel).where(
                 IntentPackageVersionModel.package_id == package_id,
+                IntentPackageVersionModel.workspace_id == workspace_id,
                 IntentPackageVersionModel.published_at.is_not(None),
                 ~IntentPackageVersionModel.deleted,
             )
             if version_id is not None:
                 stmt = stmt.where(IntentPackageVersionModel.id == version_id)
-            if workspace_id is not None:
-                stmt = stmt.where(IntentPackageVersionModel.workspace_id == workspace_id)
             stmt = stmt.order_by(
                 IntentPackageVersionModel.published_at.desc(),
                 IntentPackageVersionModel.id.desc(),
@@ -61,55 +63,17 @@ class StudioIntentEvidenceProvider(IntentEvidencePort):
                     msg += f" pinned to version {version_id}"
                 raise LookupError(msg)
 
-            categories = (
-                (
-                    await session.execute(
-                        select(IntentPackageCategoryModel)
-                        .where(
-                            IntentPackageCategoryModel.package_id == package_id,
-                            ~IntentPackageCategoryModel.deleted,
-                        )
-                        .order_by(
-                            IntentPackageCategoryModel.position.asc(),
-                            IntentPackageCategoryModel.id.asc(),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-
-            samples_by_category: dict[str, list[str]] = {}
-            if categories:
-                sample_rows = (
-                    (
-                        await session.execute(
-                            select(IntentPackageSampleModel)
-                            .where(
-                                IntentPackageSampleModel.category_id.in_([c.id for c in categories]),
-                                ~IntentPackageSampleModel.deleted,
-                            )
-                            .order_by(
-                                IntentPackageSampleModel.position.asc(),
-                                IntentPackageSampleModel.id.asc(),
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
-                )
-                for sample in sample_rows:
-                    samples_by_category.setdefault(str(sample.category_id), []).append(sample.utterance)
-
+            # The save path validates against this same immutable snapshot.
+            # Retained draft rows may contain changes made after the release.
             payload_categories = tuple(
                 EvidenceCategory(
-                    name=category.name,
-                    description=category.description,
-                    domain=category.domain,
-                    policy_gated=bool(category.policy_gated),
-                    samples=tuple(samples_by_category.get(str(category.id), [])),
+                    name=category["name"],
+                    description=category.get("description"),
+                    domain=category.get("domain"),
+                    policy_gated=bool(category.get("policy_gated", False)),
+                    samples=tuple(sample["utterance"] for sample in category.get("samples", [])),
                 )
-                for category in categories
+                for category in (version.content or {}).get("categories", [])
             )
             return EvidencePayload(
                 package_id=package_id,
@@ -119,9 +83,9 @@ class StudioIntentEvidenceProvider(IntentEvidencePort):
             )
 
 
-def create_intent_evidence_port() -> IntentEvidencePort:
-    """Factory used by the composition wiring."""
-    return StudioIntentEvidenceProvider()
+def create_intent_evidence_port(workspace_id: uuid.UUID | None = None) -> IntentEvidencePort:
+    """Create an evidence port scoped to an execution workspace."""
+    return StudioIntentEvidenceProvider(workspace_id)
 
 
 __all__ = ["StudioIntentEvidenceProvider", "create_intent_evidence_port"]

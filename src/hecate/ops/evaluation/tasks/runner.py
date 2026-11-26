@@ -1,6 +1,6 @@
 """Async execution for offline task runs.
 
-Mirrors the synthesis-job lifecycle (``queued → running → completed/failed``,
+Runs the queued-run lifecycle (``queued → running → completed/failed``,
 :func:`asyncio.create_task` + a fresh session per execution): the API request
 persists a ``queued`` run row and commits, then hands off here; the spawned
 task reopens the run, executes the task's evaluators against its dataset via
@@ -70,10 +70,9 @@ class OfflineTaskRunner:
     """Execute offline task runs in the background.
 
     Args:
-        db: Async SQLAlchemy session. As with the synthesis job service,
-            the background task opens its own session via
-            ``async_session_factory`` so the request's session can close
-            cleanly while the run executes.
+        db: Async SQLAlchemy session. The background task opens its own
+            session via ``async_session_factory`` so the request's session
+            can close cleanly while the run executes.
     """
 
     def __init__(self, db: AsyncSession) -> None:

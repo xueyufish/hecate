@@ -182,17 +182,18 @@ async def replay_agent_plugin_mcp() -> None:
 
 
 async def start_meta_agents(app: FastAPI) -> None:
-    """Start the meta-agent scheduler (compliance + garbage collector).
+    """Start the maintenance scheduler (compliance + garbage collector).
 
-    DriftDetector is intentionally not registered — it needs an
-    expected-baseline source that deployment tooling must define
-    first.
+    The jobs live in ``hecate.ops.maintenance``; the legacy meta-agent
+    suite (drift detector, skill self-evolution tick) was retired in
+    M1-T1. Only the still-consumed compliance cleanup and garbage
+    collection jobs remain registered.
     """
     from hecate.core.config import settings
     from hecate.core.database import async_session_factory
-    from hecate.studio.meta_agents.compliance_checker import ComplianceCheckerAgent
-    from hecate.studio.meta_agents.garbage_collector import GarbageCollectorAgent
-    from hecate.studio.meta_agents.scheduler import MetaAgentScheduler
+    from hecate.ops.maintenance.compliance_checker import ComplianceCheckerAgent
+    from hecate.ops.maintenance.garbage_collector import GarbageCollectorAgent
+    from hecate.ops.maintenance.scheduler import MetaAgentScheduler
 
     if not settings.META_AGENTS_ENABLED:
         app.state.meta_scheduler = None
@@ -212,17 +213,6 @@ async def start_meta_agents(app: FastAPI) -> None:
         scheduler.register("compliance_checker", compliance_agent.run, interval_seconds=interval)
 
         registered = ["garbage_collector", "compliance_checker"]
-        if settings.SKILL_EVOLUTION_ENABLED:
-            from hecate.studio.self_evolution.agent import EvolutionAgent
-
-            evolution_agent = EvolutionAgent()
-
-            async def _evolution_tick() -> None:
-                async with async_session_factory() as session:
-                    await evolution_agent.run(session)
-
-            scheduler.register("skill_evolution", _evolution_tick, interval_seconds=interval)
-            registered.append("skill_evolution")
 
         await scheduler.start()
         app.state.meta_scheduler = scheduler

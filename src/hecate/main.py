@@ -75,7 +75,6 @@ from hecate.ops.api.preflight import router as preflight_router
 from hecate.ops.api.quotas import quotas_router
 from hecate.ops.api.schedules import router as schedules_router
 from hecate.ops.api.security_findings import router as security_findings_router
-from hecate.ops.api.synthesis import router as synthesis_router
 from hecate.ops.api.tool_analytics import router as tool_analytics_router
 from hecate.ops.api.tool_decisions import router as tool_decisions_router
 from hecate.ops.api.traces import router as traces_router
@@ -85,13 +84,11 @@ from hecate.studio.api.agents import router as agents_router
 from hecate.studio.api.channels import router as studio_channels_router
 from hecate.studio.api.collaboration_patterns import router as collaboration_patterns_router
 from hecate.studio.api.conversations import router as conversations_router
-from hecate.studio.api.intent_packages import router as intent_packages_router
 from hecate.studio.api.memory_governance import router as memory_governance_router
 from hecate.studio.api.orchestration_templates import router as orchestration_templates_router
 from hecate.studio.api.plugins import router as plugins_router
 from hecate.studio.api.prompts import router as prompts_router
 from hecate.studio.api.replay import router as replay_router
-from hecate.studio.api.self_evolution import router as self_evolution_router
 from hecate.studio.api.sessions import router as sessions_router
 from hecate.studio.api.workflows import router as workflows_router
 from hecate.tools.api.gateway import router as gateway_router
@@ -432,7 +429,6 @@ app.include_router(tool_decisions_router, prefix="/api", tags=["security"])
 app.include_router(security_findings_router, prefix="/api", tags=["security"])
 app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(evaluation_router, prefix="/api", tags=["evaluation"])
-app.include_router(synthesis_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_tasks_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_annotations_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_backflow_router, prefix="/api", tags=["evaluation"])
@@ -451,13 +447,11 @@ app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(skills_router, prefix="/api", tags=["skills"])
 app.include_router(skill_versions_router, prefix="/api", tags=["skill-versions"])
 app.include_router(conversations_router, prefix="/api", tags=["conversations"])
-app.include_router(self_evolution_router, prefix="/api", tags=["self-evolution"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
 app.include_router(orchestration_templates_router, prefix="/api", tags=["orchestration-templates"])
 app.include_router(collaboration_patterns_router, prefix="/api", tags=["collaboration-patterns"])
 app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
-app.include_router(intent_packages_router, prefix="/api", tags=["intent-packages"])
 app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
 
 # Memory + knowledge routes moved to hecate-memory in PR2.1. Lazy mount
@@ -493,14 +487,13 @@ app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alert
 app.include_router(quotas_router, prefix="/api", tags=["quotas"])
 app.include_router(i18n_router, tags=["i18n"])
 
-# hecate-llm model_hub routers (cost_management, fine_tuning, inference,
+# hecate-llm model_hub routers (cost_management, inference,
 # model_catalog, model_lifecycle, monitoring_models) moved to the
 # packages/hecate-llm wheel in PR4b. Required dependency, but keep the
 # lazy mount guard for shape consistency with memory/ops routers and so
 # test/script contexts can override it cleanly.
 try:
     from hecate_llm.api.management.cost_management import router as cost_management_router
-    from hecate_llm.api.management.fine_tuning import router as fine_tuning_router
     from hecate_llm.api.management.inference import router as inference_router
     from hecate_llm.api.management.model_catalog import router as model_catalog_router
     from hecate_llm.api.management.model_lifecycle import router as model_lifecycle_router
@@ -509,7 +502,6 @@ try:
     app.include_router(monitoring_models_router)
     app.include_router(cost_management_router)
     app.include_router(inference_router)
-    app.include_router(fine_tuning_router)
     app.include_router(model_catalog_router, tags=["model-catalog"])
     app.include_router(model_lifecycle_router, tags=["model-lifecycle"])
 except ImportError:

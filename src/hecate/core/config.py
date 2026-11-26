@@ -370,10 +370,11 @@ class Settings(BaseSettings):
     AGENT_ENV_CREDENTIAL_SCOPING: bool = False
     AGENT_ENV_SANDBOX_ENFORCEMENT: bool = False
 
-    # Meta-agents (13.9a-d): lifecycle ops agents run by MetaAgentScheduler
-    # in the app lifespan. Default off — opt-in per deployment. The drift
-    # detector is intentionally not registered yet (needs an expected-
-    # baseline source); GC and compliance checker are wired.
+    # Lifecycle maintenance jobs (13.9a-d): compliance checker and
+    # garbage collector run by the maintenance scheduler (MetaAgentScheduler
+    # in ``ops/maintenance/``) in the app lifespan. Default off — opt-in
+    # per deployment. The legacy meta-agent suite (drift detector, skill
+    # self-evolution) was retired in M1-T1.
     META_AGENTS_ENABLED: bool = False
     META_AGENTS_INTERVAL_SECONDS: int = 3600
 
@@ -397,18 +398,6 @@ class Settings(BaseSettings):
     # `AgentModel.skill_discovery_enabled` — the layers only narrow, never
     # widen. Default False so upgrades are behaviour-neutral.
     SKILL_DISCOVERY_ENABLED: bool = False
-    # Self-evolution closed loop (1.3.6f). Disabled by default: the loop is
-    # switched on per deployment after eval-gate review.
-    SKILL_EVOLUTION_ENABLED: bool = False
-    SKILL_EVOLUTION_QUALITY_THRESHOLD: float = 0.6
-    SKILL_EVOLUTION_ATTRIBUTION_MODEL: str = "gpt-4o-mini"
-    SKILL_EVOLUTION_RUN_LLM_CALL_LIMIT: int = 50
-    # Behavioral evaluation wiring for the evolution gate: when on, the gate
-    # runs the agent's bound offline evaluation task (7.2c) with/without the
-    # candidate skill instead of skipping those checks. Off by default — two
-    # full evaluation legs per candidate are a real cost, and deployments
-    # opt in by binding an offline eval task to the agent.
-    SKILL_EVOLUTION_EVAL_WIRING_ENABLED: bool = False
 
     # Online evaluation scoring (7.2c): always-on LLM-as-Judge sampling of
     # production traces. Metered LLM cost — keep off until a workspace opts in.

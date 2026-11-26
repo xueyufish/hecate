@@ -115,7 +115,7 @@ export function OverviewView({ overview, startDate, endDate }: OverviewViewProps
             </div>
             <p
               className="text-xs text-muted-foreground"
-              title="Share of completed runs executed on datasets with fewer than 20 items; expand small datasets (e.g. AI synthesis) to make quality numbers trustworthy"
+              title="Share of completed runs executed on datasets with fewer than 20 items; expand small datasets to make quality numbers trustworthy"
             >
               low-sample runs · {overview.coverage.active_datasets} datasets
               {overview.coverage.median_items !== null

@@ -107,12 +107,14 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   a `dependency_warning` event — the 5.9e bind-time contract is
   unchanged. With the global switch off, the loader issues no extra
   queries (upgrade-neutral default).
-- **Learned skills are knowledge-only and human-gated** — candidates from
-  the evolution loop (`studio/self_evolution/`) are published as
-  `SkillModel` rows with `source="learned"` + provenance
-  (`learned_run_id`, `failure_category`) only after an explicit review
-  decision; generation rejects any draft containing fenced code blocks.
-  The loop is off unless `SKILL_EVOLUTION_ENABLED=true`.
+- **Learned skills keep readable provenance; the evolution loop is
+  retired** — the legacy self-evolution loop (`studio/self_evolution/`, the
+  `/api/self-evolution/*` API, `SKILL_EVOLUTION_*` settings and the
+  evolution tick) is physically removed in M1-T1; legacy requests return
+  404. Skill versions it published keep their `source="learned"` +
+  provenance (`learned_run_id`, `failure_category`) and stay readable,
+  comparable and rollback-able through the ordinary skill-version surface.
+  The loop is rebuilt in M4 on the unified evaluation and release gate.
 - **Prompt optimization is retired; its history stays readable** — the 6.19
   loop (`ops/prompt_optimization/`, the `/api/prompt-optimization` API and
   `PROMPT_OPTIMIZATION_ENABLED`) is physically removed; legacy requests

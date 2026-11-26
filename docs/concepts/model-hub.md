@@ -127,5 +127,5 @@ Every `LLMService` call records token usage (input + output), which feeds the [c
 - [Agents and Execution Modes](agents.md) — where `model` config lives on an agent
 - [Observability](observability.md) — how token usage and cost metrics flow from LLM calls
 - [Extension Points](../reference/extension-points.md) — the `EnginePort.llm_invoke` method signature
-- [Model Hub Design](../design/model-hub-design.md) — full L2 breakdown: catalog, lifecycle, governance, fine-tuning, cost budgets
+- [Model Hub Design](../design/model-hub-design.md) — full L2 breakdown: catalog, lifecycle, governance, cost budgets (the fine-tuning section documents a retired feature; see the M1-T1 retirement notes)
 - [ADR-022: Model Hub Enhancement](../design/adr/022-model-hub-enhancement.md) — architecture decisions for the routing and resilience layer

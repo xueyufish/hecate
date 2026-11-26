@@ -1,7 +1,9 @@
 """Suggestion worker for generating opening remarks and follow-up questions.
 
-Calls SuggestionService to produce either opening greetings with starter
+Calls the injected suggestion service to produce either opening greetings with starter
 questions or follow-up question suggestions based on the conversation context.
+The duck-typed interface stays until M1-T2; without an injected service the
+worker emits no suggestions.
 """
 
 from __future__ import annotations

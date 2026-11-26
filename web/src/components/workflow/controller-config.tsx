@@ -1,36 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
-import { api } from "@/lib/api-client";
+import { useMemo, useState } from "react";
 
 /**
  * Controller node config panel (2.6a / 1.1.21).
  *
- * Sections: intent package picker (published versions + optional pin),
- * category→workflow mapping editor rendered from the referenced version's
- * categories (removed categories flagged for reassignment), start/default/
- * end workflow assignment, and the global-intent section. Validation errors
- * surface inline on the offending field; an invalid config persists nothing
- * beyond the normal graph save path, which re-validates server-side.
+ * Sections: intent package reference (manual IDs — the intent-package
+ * management API was retired in M1-T1, so references resolve to already
+ * published versions server-side), category→workflow mapping editor,
+ * start/default/end workflow assignment, and the global-intent section.
+ * Validation errors surface inline on the offending field; an invalid
+ * config persists nothing beyond the normal graph save path, which
+ * re-validates server-side.
  */
 
 interface ControllerConfigSectionProps {
   config: Record<string, unknown>;
   allNodes: { id: string; type: string; data: Record<string, unknown> }[];
   onChange: (field: string, value: unknown) => void;
-}
-
-interface PackageItem {
-  id: string;
-  name: string;
-}
-
-interface VersionItem {
-  id: string;
-  name: string;
-  published_at: string | null;
-  content: { categories?: Array<{ name: string; description?: string | null }> };
 }
 
 export function ControllerConfigSection({
@@ -42,10 +29,7 @@ export function ControllerConfigSection({
   const categoryTargets = (config.category_targets as Record<string, string>) || {};
   const globalIntent = (config.global_intent as Record<string, unknown>) || {};
 
-  const [packages, setPackages] = useState<PackageItem[]>([]);
-  const [versions, setVersions] = useState<VersionItem[]>([]);
-  const [versionCategories, setVersionCategories] = useState<string[]>([]);
-  const [removedCategories, setRemovedCategories] = useState<string[]>([]);
+  const [newCategory, setNewCategory] = useState("");
 
   const selectedPackageId = (packageRef.package_id as string) || "";
   const selectedVersionId = (packageRef.version_id as string) || "";
@@ -54,52 +38,6 @@ export function ControllerConfigSection({
     () => allNodes.filter((n) => n.type === "agent" || n.type === "conversation"),
     [allNodes]
   );
-
-  useEffect(() => {
-    api
-      .get<{ items: PackageItem[] }>("/api/intent-packages")
-      .then((data) => setPackages(data.items || []))
-      .catch(() => setPackages([]));
-  }, []);
-
-  useEffect(() => {
-    if (!selectedPackageId) {
-      setVersions([]);
-      return;
-    }
-    api
-      .get<{ items: VersionItem[] }>(
-        `/api/intent-packages/${selectedPackageId}/versions?published_only=true`
-      )
-      .then((data) => {
-        setVersions(data.items || []);
-        // No pin or the pin vanished → default to latest published.
-        if (
-          !(data.items || []).some((v) => v.id === selectedVersionId) &&
-          data.items?.length
-        ) {
-          onChange("intent_package", { package_id: selectedPackageId, version_id: data.items[0].id });
-        }
-      })
-      .catch(() => setVersions([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPackageId]);
-
-  useEffect(() => {
-    const version = versions.find((v) => v.id === selectedVersionId) || versions[0];
-    if (!version) {
-      setVersionCategories([]);
-      return;
-    }
-    // Fetch the full version (list items already carry content).
-    const names = (version.content?.categories || []).map((c) => c.name);
-    setVersionCategories(names);
-    // Categories whose mapping survived a version switch but which the new
-    // version no longer defines must be reassigned.
-    const known = new Set(names);
-    setRemovedCategories(Object.keys(categoryTargets).filter((k) => !known.has(k)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [versions, selectedVersionId]);
 
   function updateMapping(category: string, target: string) {
     const next = { ...categoryTargets };
@@ -111,36 +49,34 @@ export function ControllerConfigSection({
     onChange("category_targets", next);
   }
 
-  function handlePackageSelect(id: string) {
-    if (!id) {
-      onChange("intent_package", null);
-      setVersions([]);
-      setVersionCategories([]);
+  function addMapping() {
+    const category = newCategory.trim();
+    if (!category || categoryTargets[category] !== undefined) {
       return;
     }
-    // Version resets to latest published (the versions effect pins it).
-    onChange("intent_package", { package_id: id });
+    setNewCategory("");
+    onChange("category_targets", { ...categoryTargets, [category]: "" });
   }
 
   return (
     <>
-      {/* Intent package picker */}
+      {/* Intent package reference (manual IDs) */}
       <div>
         <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          Intent Package
+          Intent Package ID
         </label>
-        <select
+        <input
+          type="text"
           className="w-full rounded-md border px-2 py-1.5 text-sm"
           value={selectedPackageId}
-          onChange={(e) => handlePackageSelect(e.target.value)}
-        >
-          <option value="">Select a package...</option>
-          {packages.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+          onChange={(e) => {
+            const packageId = e.target.value.trim();
+            if (packageId !== selectedPackageId) {
+              onChange("intent_package", packageId ? { package_id: packageId } : null);
+            }
+          }}
+          placeholder="Published package ID"
+        />
         {!selectedPackageId && (
           <p className="mt-1 text-xs text-amber-600">
             An intent package reference is required.
@@ -152,74 +88,75 @@ export function ControllerConfigSection({
       {selectedPackageId && (
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">
-            Package Version (default: latest published)
+            Package Version ID (default: latest published)
           </label>
-          <select
+          <input
+            type="text"
             className="w-full rounded-md border px-2 py-1.5 text-sm"
             value={selectedVersionId}
-            onChange={(e) =>
-              onChange("intent_package", {
-                package_id: selectedPackageId,
-                version_id: e.target.value || undefined,
-              })
-            }
-          >
-            {versions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-                {v.published_at ? "" : " (unpublished)"}
-              </option>
-            ))}
-          </select>
+            onChange={(e) => {
+              const versionId = e.target.value.trim();
+              onChange("intent_package", versionId
+                ? { package_id: selectedPackageId, version_id: versionId }
+                : { package_id: selectedPackageId });
+            }}
+            placeholder="Optional published version ID"
+          />
         </div>
       )}
 
       {/* Category → workflow mapping editor */}
-      {versionCategories.length > 0 && (
-        <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">
-            Intent → Workflow Mapping
-          </label>
-          <div className="space-y-2">
-            {versionCategories.map((category) => (
-              <div key={category} className="flex items-center gap-2">
-                <span className="w-24 truncate rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
-                  {category}
-                </span>
-                <select
-                  className="flex-1 rounded-md border px-1 py-1 text-xs"
-                  value={categoryTargets[category] || ""}
-                  onChange={(e) => updateMapping(category, e.target.value)}
-                >
-                  <option value="">Target...</option>
-                  {agentNodes.map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {(n.data?.label as string) || n.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
-            {removedCategories.map((category) => (
-              <div key={category} className="flex items-center gap-2 rounded border border-red-300 bg-red-50 p-1.5">
-                <AlertTriangle className="h-3 w-3 text-red-600" />
-                <span className="w-24 truncate text-[10px] font-medium text-red-700 line-through">
-                  {category}
-                </span>
-                <span className="flex-1 text-[10px] text-red-600">
-                  Removed from package — reassign
-                </span>
-                <button
-                  className="text-[10px] text-red-700 underline"
-                  onClick={() => updateMapping(category, "")}
-                >
-                  drop
-                </button>
-              </div>
-            ))}
+      <div>
+        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+          Intent → Workflow Mapping
+        </label>
+        <div className="space-y-2">
+          {Object.keys(categoryTargets).map((category) => (
+            <div key={category} className="flex items-center gap-2">
+              <span className="w-24 truncate rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                {category}
+              </span>
+              <select
+                className="flex-1 rounded-md border px-1 py-1 text-xs"
+                value={categoryTargets[category] || ""}
+                onChange={(e) => updateMapping(category, e.target.value)}
+              >
+                <option value="">Target...</option>
+                {agentNodes.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {(n.data?.label as string) || n.id}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="text-[10px] text-muted-foreground underline"
+                onClick={() => updateMapping(category, "")}
+              >
+                drop
+              </button>
+            </div>
+          ))}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              className="w-24 rounded-md border px-1.5 py-1 text-[10px]"
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              placeholder="category"
+            />
+            <button
+              className="rounded-md border px-2 py-1 text-[10px] font-medium"
+              onClick={addMapping}
+            >
+              add mapping
+            </button>
           </div>
         </div>
-      )}
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Category names are validated against the referenced published
+          version on save.
+        </p>
+      </div>
 
       {/* Start / default / end workflow assignment */}
       <div>

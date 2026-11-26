@@ -1,5 +1,12 @@
 # Deliver the Runner environment offline
 
+> **Frozen (M1-T1, 2026-11-26).** The offline wheelhouse install chain
+> and the atomic-pointer cold switch are frozen against extension and
+> their deletion is pending verification of production consumers. Do not
+> build new capability on this flow. Unblock conditions are recorded in
+> the M1-T1 task section of
+> [`docs/refactor/enterprise-agent-platform-evolution-plan.md`](../refactor/enterprise-agent-platform-evolution-plan.md).
+
 Use a build machine to package the Runner workspace wheels and the
 third-party wheels pinned by the workspace `uv.lock`. The target machine
 installs the verified wheelhouse from local storage. Prepare a separate

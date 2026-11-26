@@ -204,7 +204,7 @@ M1 删除独立图执行栈与全栈历史包袱、重建干净的数据基线�
 
 | 完成 | 任务 | 状态 | 前置依赖 | 进展与验收证据 |
 | --- | --- | --- | --- | --- |
-| ☐ | M1-T1 · 退役遗留外围模块 | 部分完成 | 无 | 旧 Prompt 自动优化已随 [#418](https://github.com/xueyufish/hecate/pull/418) 退役，其余范围待核实 |
+| ☐ | M1-T1 · 退役遗留外围模块 | 代码已退役，部署核对待验 | 无 | 旧 Prompt 自动优化已随 [#418](https://github.com/xueyufish/hecate/pull/418) 退役；本轮在同一分支按阶段物理退役：旧自演化与遗留 Meta Agent（合规检查/垃圾回收及启停迁 `ops/maintenance/`，Skill 使用事件与手工发布回滚保留）、数据集合成（历史样本以 `strategy:*` 标记留存在普通数据集）、微调管理（`fine_tuning_jobs` 留在恢复清单，历史表归 M1-T3）、Intent Package 管理（引用校验迁 `studio/workflows/intent_validation.py`，`IntentEvidencePort` 供存量图取证据）、Studio 建议服务（Chat/Channel/Web 的 `enable_suggestions` 面保留）；重复状态目录经启动/执行/恢复/备份消费者盘点全部保留。整体验证：OpenAPI 退役契约回归 `tests/test_api/test_peripheral_retirement.py` + 四组验收命令；Runner 旧安装链已冻结扩展，安装器与冷切换删除标为**待验**（解除条件见 M1-T1 小节） |
 | ☐ | M1-T2 · 退役图执行栈、画布与 runtime shim | 等待前置 | M1-T1 | — |
 | ☐ | M1-T3 · 收敛数据模型与 PostgreSQL 迁移基线 | 等待前置 | M1-T1、M1-T2 | 最后一个旧模型消费者退出后重建基线 |
 | ☐ | M1-T4 · 清理过时文档与失效门禁 | 待核实 | 随 M1-T1 至 M1-T3 同步推进 | 按已退役范围分批清理，随退役工作收尾 |
@@ -248,8 +248,10 @@ M1 删除独立图执行栈与全栈历史包袱、重建干净的数据基线�
 - **修改（Modify）**：
   - 停用旧演化与合成调度时，保留仍被消费的合规清理作业、基础样本/评测核心路径、手工 Skill 发布与回滚能力。
   - 盘点 `packages/hecate-runner/` 依赖，冻结其扩展并在确认无生产消费者后退役离线 wheelhouse 安装器与冷切换脚本（保留受管投递所需的最小契约注册与回执）。
+    - **M1-T1 执行记录（2026-11-26）**：仓库侧盘点完成——`deploy/`、`pilots/`、发布流程均无旧安装链消费者，基线 CI 使用 wheelhouse 安装与冷切换/回滚演练（`runtime-wheel-clean-install`），部署手册 `docs/how-to/deploy-runner-environment.md` 仍记载该流程；Runner 声明为 technical preview。**安装器（`scripts/runner_env_prepare.py`/`runner_env_install.py`）与冷切换（`hecate_runner/release.py` 原子指针切换、`deployment.py` 回执校验）的删除标为待验**，本轮冻结扩展、不改 Runner 代码；受管投递最小契约（注册与回执、历史 Task/Run 读取、恢复不重放）保留并由 SC06 场景取证。解除条件：①生产部署清单确认无 wheelhouse/冷切换部署主机（或已迁移）；②无在途受管投递/发布处于切换中；③为离线主机安装给出替代路径或明确豁免；④`hecate-runner --host` 启动与 release 宿主布局解耦方案确认。
 - **新增（Add）**：
   - 新增主应用最小核心 Profile 冷启动与 OpenAPI 路由契约回归测试。
+- **部署前核对**：在实际部署中盘点已退役 API 的调用方、仍依赖 Intent Package 管理的已发布 Workflow、非终态合成作业及其目标数据集、未结束的供应商微调作业和现有模型部署。合成调度停用后，非终态作业不会自动结案。供应商作业可用历史 `provider_job_id` 核对，切换前确认兼容或处置方案。
 - **独立验证命令**：`python -m pytest tests/test_api/ tests/test_core/ -q`
 
 #### Task M1-T2：删除 Pregel 图执行栈、可视化画布与 `runtime` 转发 Shim，收敛分裂包与反向依赖

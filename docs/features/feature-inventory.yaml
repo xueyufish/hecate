@@ -2464,18 +2464,18 @@ features:
   title: Configuration Drift Detection
   phase: P3
   category: Deployment & Operations
-  status: delivered
-  maturity: null
+  status: retired
+  maturity: unverified
   dependencies: []
-  evidence: null
-  acceptance: null
-  responsibility: null
-  implementation_mode: null
-  provider_or_adapter: null
-  enforcement_point: null
-  state_owner: null
-  milestone: null
-  superseded_by: null
+  evidence: "M1-T1 retirement inventory (docs/refactor/enterprise-agent-platform-evolution-plan.md M1-T1 row); the drift detector was never registered on the maintenance scheduler and was deleted with the legacy meta-agent suite"
+  acceptance: "Never-registered drift detector deleted 2026-11-26 (M1-T1); retained compliance/GC jobs keep META_AGENTS_* enable-disable and shutdown semantics (tests/test_services/test_maintenance/); revival requires a new proposal"
+  responsibility: optional-ecosystem
+  implementation_mode: builtin
+  provider_or_adapter: "n/a (configuration drift detector removed 2026-11-26 in M1-T1; revival requires a new proposal)"
+  enforcement_point: "n/a (never registered; retained maintenance jobs are wired via core/composition/wiring.py)"
+  state_owner: "n/a"
+  milestone: "n/a"
+  superseded_by: "n/a"
 - id: 13.9d
   title: Compliance Checker Agent
   phase: P3
@@ -3205,7 +3205,7 @@ features:
   title: AI-Synthesized Evaluation Dataset
   phase: P4
   category: Evaluation & Testing
-  status: delivered
+  status: retired
   maturity: unverified
   dependencies: []
   evidence: ops/evaluation engine; plan §六 evaluation row; docs/refactor/step2-review-report.md (planning/static
@@ -5238,7 +5238,7 @@ features:
   title: Model Fine-Tuning
   phase: P4
   category: Model Management
-  status: delivered
+  status: retired
   maturity: unverified
   dependencies: []
   evidence: hecate-llm hub; plan §六 model-hub row (external integration / optional); docs/refactor/step2-review-report.md
@@ -5601,18 +5601,18 @@ features:
   title: Intent Package Asset
   phase: P4
   category: Agent Intelligence
-  status: delivered
-  maturity: null
+  status: retired
+  maturity: unverified
   dependencies: []
-  evidence: null
-  acceptance: null
-  responsibility: null
-  implementation_mode: null
-  provider_or_adapter: null
-  enforcement_point: null
-  state_owner: null
-  milestone: null
-  superseded_by: null
+  evidence: "M1-T1 implementation and review (tests/test_core/test_intent_evidence.py, tests/test_api/test_peripheral_retirement.py); docs/refactor/enterprise-agent-platform-evolution-plan.md M1-T1 row"
+  acceptance: "Management requests return 404; workflow create/update still validate intent references (studio/workflows/intent_validation.py); existing published graphs resolve published evidence and reject cross-workspace or unpublished pins (tests/test_core/test_intent_evidence.py, tests/test_services/test_workflow/)"
+  responsibility: optional-ecosystem
+  implementation_mode: builtin
+  provider_or_adapter: "n/a (intent-package management API and publish flow removed 2026-11-26 in M1-T1; existing published versions keep resolving through IntentEvidencePort)"
+  enforcement_point: "workflow save-path intent reference validation and runtime evidence resolution via IntentEvidencePort"
+  state_owner: "intent package versions (published evidence rows for existing graphs; history tables converge in M1-T3)"
+  milestone: "n/a"
+  superseded_by: "n/a"
 - id: '6.24'
   title: Object Log & Decision Log
   phase: P4
@@ -8389,7 +8389,7 @@ features:
   title: Self-Evolution Skill Loop
   phase: P4
   category: Agent Runtime
-  status: delivered
+  status: retired
   maturity: unverified
   dependencies: []
   evidence: plan §六 self-optimization row (paused core expansion); docs/refactor/step2-review-report.md
