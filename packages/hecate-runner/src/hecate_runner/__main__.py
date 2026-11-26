@@ -38,7 +38,7 @@ from .managed import (
     managed_principal_for,
 )
 from .profile import Profile, ProfileError, load_profile, resolve_secret_ref
-from .release import ReleaseError, load_host_selection
+from .release import RELEASES_DIR, HostLock, ReleaseError
 from .server import RunnerServer
 from .tools import BusinessApiToolDispatcher
 
@@ -47,14 +47,8 @@ logger = logging.getLogger(__name__)
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hecate-runner", description="Standalone Hecate execution host (preview)")
-    source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--profile", type=Path, help="profile directory (manifest, config, identity)")
-    source.add_argument(
-        "--host",
-        type=Path,
-        help="release-managed host directory: start the release committed in active.json "
-        "(requires --artifact-trust; management via hecate-runner-release)",
-    )
+    parser.add_argument("--profile", type=Path, required=True, help="profile directory (config and identity)")
+    parser.add_argument("--artifact", type=Path, help="explicit signed artifact directory (requires --artifact-trust)")
     parser.add_argument(
         "--artifact-trust",
         type=Path,
@@ -68,19 +62,6 @@ def main(argv: list[str] | None = None) -> int:
         help="re-read the --artifact-trust policy before every new model request and real "
         "tool dispatch, so revoking a publisher or key stops new calls while serving "
         "(requires --artifact-trust; without it admission stays startup-only)",
-    )
-    parser.add_argument(
-        "--deployment-manifest",
-        type=Path,
-        default=None,
-        help="deployment composition binding the active release to a verified offline "
-        "environment (--host only; requires --expected-deployment-sha256)",
-    )
-    parser.add_argument(
-        "--expected-deployment-sha256",
-        default=None,
-        dest="expected_deployment_sha256",
-        help="deployment digest received over an independent trusted channel",
     )
     parser.add_argument(
         "--business-api",
@@ -105,49 +86,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    deployment = None
-    if args.deployment_manifest is not None or args.expected_deployment_sha256 is not None:
-        if args.host is None:
-            print(
-                "hecate-runner: --deployment-manifest composes the host's active release; use --host",
-                file=sys.stderr,
-            )
-            return 2
-        if args.deployment_manifest is None or args.expected_deployment_sha256 is None:
-            print(
-                "hecate-runner: --deployment-manifest and --expected-deployment-sha256 are required together",
-                file=sys.stderr,
-            )
-            return 2
-        from .deployment import DeploymentError, load_deployment_manifest
-
-        try:
-            deployment = load_deployment_manifest(args.deployment_manifest, args.expected_deployment_sha256)
-        except DeploymentError as exc:
-            print(f"hecate-runner: deployment manifest error: {exc}", file=sys.stderr)
-            return 2
+    if args.artifact is not None and artifact_trust is None:
+        print("hecate-runner: --artifact requires --artifact-trust", file=sys.stderr)
+        return 2
 
     host_lock = None
     profile: Profile
-    if args.host is not None:
-        if artifact_trust is None:
-            print(
-                "hecate-runner: --host requires --artifact-trust: the committed selection is "
-                "re-verified under the current policy at every start",
-                file=sys.stderr,
-            )
-            return 2
-        try:
-            profile, host_lock = load_host_selection(args.host, artifact_trust, deployment=deployment)
-        except (ProfileError, ReleaseError) as exc:
-            print(f"hecate-runner: host startup error: {exc}", file=sys.stderr)
-            return 2
-    else:
-        try:
-            profile = load_profile(args.profile, artifact_trust=artifact_trust)
-        except ProfileError as exc:
-            print(f"hecate-runner: profile error: {exc}", file=sys.stderr)
-            return 2
+    try:
+        profile = load_profile(args.profile, artifact_dir=args.artifact, artifact_trust=artifact_trust)
+        if args.artifact is not None:
+            admission = profile.artifact_admission
+            if profile.artifact_directory.parent == profile.directory / RELEASES_DIR and (
+                admission is None or profile.artifact_directory.name != admission.manifest_sha256
+            ):
+                raise ProfileError("installed artifact directory does not match its signed manifest digest")
+            host_lock = HostLock(profile.directory)
+            host_lock.acquire()
+    except (ProfileError, ReleaseError, OSError) as exc:
+        print(f"hecate-runner: profile startup error: {exc}", file=sys.stderr)
+        return 2
 
     try:
         # Freeze from the policy admission verified, while retaining ownership
@@ -405,9 +362,7 @@ def _run_profile(profile: Profile, args: argparse.Namespace, *, trust_guard: Any
     admission_label = (
         f"strict publisher={admission.publisher_ref} key={admission.key_id}" if admission else "digest-only"
     )
-    # In release mode the started content is the committed selection; the
-    # short digest names it without implying a live revocation check.
-    release_label = f"release={profile.artifact_directory.name}" if args.host is not None else "release=profile"
+    artifact_label = f"artifact={profile.artifact_directory.name}" if args.artifact is not None else "artifact=profile"
     # Optional port disclosure for harnesses that start the runner with an
     # OS-assigned port (profile port 0); written after bind succeeds. The
     # temp+rename publication is atomic, so a poller that sees the file
@@ -429,7 +384,7 @@ def _run_profile(profile: Profile, args: argparse.Namespace, *, trust_guard: Any
         f"hecate-runner: serving on {profile.config.host}:{actual_port} "
         f"(backend={profile.manifest.backend_type}, model={profile.config.model_backend}, "
         f"tools={list(profile.config.tool_allowlist)}, durable={durable is not None}, "
-        f"managed={managed is not None}, {release_label}, artifact-admission={admission_label}, "
+        f"managed={managed is not None}, {artifact_label}, artifact-admission={admission_label}, "
         f"{trust_label})",
         flush=True,
     )

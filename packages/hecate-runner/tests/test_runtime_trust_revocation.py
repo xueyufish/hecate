@@ -668,32 +668,30 @@ async def test_actual_decided_action_replay_preserves_the_ledger_after_revocatio
 def test_guard_initialization_failure_releases_the_host_lock(tmp_path, _shutdown_env, monkeypatch) -> None:
     from hecate_runner import __main__ as entry
     from hecate_runner import runtime_trust
-    from hecate_runner.release import HostLock, activate_release, install_release
+    from hecate_runner.release import HostLock, install_release
 
     profile, path, startup, _public = _admitted(tmp_path)
     sha = install_release(profile.directory, profile.directory, startup)
-    activate_release(profile.directory, sha, startup, expected_generation=0)
-    load_selection = entry.load_host_selection
-    held = []
-
-    def capture_lock(*args, **kwargs):
-        result = load_selection(*args, **kwargs)
-        held.append(result[1])
-        return result
+    artifact = profile.directory / "releases" / sha
 
     def failed_guard(*args, **kwargs):
         raise RuntimeError("injected guard initialization failure")
 
-    monkeypatch.setattr(entry, "load_host_selection", capture_lock)
     monkeypatch.setattr(runtime_trust, "RuntimeTrustGuard", failed_guard)
-    try:
-        with pytest.raises(RuntimeError, match="injected guard"):
-            entry.main(["--host", str(profile.directory), "--artifact-trust", str(path), "--artifact-trust-recheck"])
-        with HostLock(profile.directory):
-            pass
-    finally:
-        for lock in held:
-            lock.release()
+    with pytest.raises(RuntimeError, match="injected guard"):
+        entry.main(
+            [
+                "--profile",
+                str(profile.directory),
+                "--artifact",
+                str(artifact),
+                "--artifact-trust",
+                str(path),
+                "--artifact-trust-recheck",
+            ]
+        )
+    with HostLock(profile.directory):
+        pass
 
 
 @pytest.mark.parametrize("approval", [False, True])
