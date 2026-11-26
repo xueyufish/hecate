@@ -369,6 +369,7 @@ class WorkflowExecutionService:
 
         # Resolve graph config based on mode
         execution_mode = "conversational"
+        evidence_workspace_id = workspace_id
         if agent_mode == "chat":
             graph_config = build_chat_graph(
                 model=model,
@@ -387,7 +388,10 @@ class WorkflowExecutionService:
             graph_config = await self._load_workflow_graph(
                 workflow_id, version=workflow_version, selector=version_selector
             )
-            execution_mode = await self._load_workflow_mode(workflow_id) if workflow_id else "conversational"
+            if workflow_id is not None:
+                execution_mode, workflow_workspace_id = await self._load_workflow_execution_scope(workflow_id)
+                if evidence_workspace_id is None:
+                    evidence_workspace_id = workflow_workspace_id
         else:
             msg = f"Unknown agent mode: {agent_mode}"
             raise ValueError(msg)
@@ -435,7 +439,7 @@ class WorkflowExecutionService:
                 suggestion_service=self._suggestion_service,
                 # 2.6a controller — evidence provider built per execution by
                 # the composition root, mirroring the pre-extraction behavior.
-                controller_evidence_port=create_intent_evidence_port(),
+                controller_evidence_port=create_intent_evidence_port(evidence_workspace_id),
             ),
             context_chain_factory=self._context_chain_factory,
             citation_provenance=self._citation_provenance,
@@ -865,6 +869,8 @@ class WorkflowExecutionService:
         tools: list[dict] | None = None,
         kb_ids: list[str] | None = None,
         agent_persona: str | None = None,
+        *,
+        workspace_id: uuid.UUID | None = None,
     ) -> _CompositeWorker:
         """Create a composite worker with all production Workers.
 
@@ -877,6 +883,7 @@ class WorkflowExecutionService:
             tools: Available tools for ToolWorker.
             kb_ids: Knowledge base IDs for KnowledgeWorker.
             agent_persona: Agent persona for SuggestionWorker.
+            workspace_id: Scope for published intent evidence.
 
         Returns:
             CompositeWorker that routes to specialized Workers.
@@ -899,14 +906,14 @@ class WorkflowExecutionService:
             suggestion_service=self._suggestion_service,
             # 2.6a controller — evidence provider wired from the composition
             # root; the runtime worker itself stays studio-free.
-            controller_evidence_port=create_intent_evidence_port(),
+            controller_evidence_port=create_intent_evidence_port(workspace_id),
         )
         return create_composite_worker(deps, tools, kb_ids, agent_persona)
 
-    async def _load_workflow_mode(self, workflow_id: uuid.UUID) -> str:
-        """Load execution_mode from the WorkflowModel."""
+    async def _load_workflow_execution_scope(self, workflow_id: uuid.UUID) -> tuple[str, uuid.UUID | None]:
+        """Load the workflow's execution mode and workspace."""
         if self._db is None:
-            return "conversational"
+            return "conversational", None
         result = await self._db.execute(
             select(WorkflowModel).where(
                 WorkflowModel.id == workflow_id,
@@ -914,7 +921,9 @@ class WorkflowExecutionService:
             )
         )
         workflow = result.scalar_one_or_none()
-        return workflow.execution_mode if workflow else "conversational"
+        if workflow is None:
+            return "conversational", None
+        return workflow.execution_mode, workflow.workspace_id
 
     async def _load_workflow_graph(
         self,
@@ -1102,7 +1111,7 @@ class WorkflowExecutionService:
         # snapshot path folds into a fresh projection, never runtime state).
         runtime = PregelRuntime(
             graph=compiled,
-            worker=self._create_composite_worker(tools, kb_ids, None),
+            worker=self._create_composite_worker(tools, kb_ids, None, workspace_id=session.workspace_id),
             checkpoint_store=self._build_fork_checkpoint_store(user_id),
             event_store=self._event_store,
             context_engine=PriorityContextEngine(),
@@ -1268,7 +1277,7 @@ class WorkflowExecutionService:
 
         if workflow_id is not None:
             graph_config = await self._load_workflow_graph(workflow_id)
-            execution_mode = await self._load_workflow_mode(workflow_id)
+            execution_mode, _ = await self._load_workflow_execution_scope(workflow_id)
         else:
             system_prompt = "You are a helpful assistant."
             if session is not None and self._db is not None and session.agent_id:

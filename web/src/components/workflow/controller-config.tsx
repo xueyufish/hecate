@@ -49,20 +49,6 @@ export function ControllerConfigSection({
     onChange("category_targets", next);
   }
 
-  function handleReferenceChange(field: "package_id" | "version_id", value: string) {
-    const next: Record<string, unknown> = { ...packageRef };
-    if (value) {
-      next[field] = value;
-    } else {
-      delete next[field];
-    }
-    if (!next.package_id) {
-      onChange("intent_package", null);
-      return;
-    }
-    onChange("intent_package", next);
-  }
-
   function addMapping() {
     const category = newCategory.trim();
     if (!category || categoryTargets[category] !== undefined) {
@@ -83,7 +69,12 @@ export function ControllerConfigSection({
           type="text"
           className="w-full rounded-md border px-2 py-1.5 text-sm"
           value={selectedPackageId}
-          onChange={(e) => handleReferenceChange("package_id", e.target.value)}
+          onChange={(e) => {
+            const packageId = e.target.value.trim();
+            if (packageId !== selectedPackageId) {
+              onChange("intent_package", packageId ? { package_id: packageId } : null);
+            }
+          }}
           placeholder="Published package ID"
         />
         {!selectedPackageId && (
@@ -103,7 +94,12 @@ export function ControllerConfigSection({
             type="text"
             className="w-full rounded-md border px-2 py-1.5 text-sm"
             value={selectedVersionId}
-            onChange={(e) => handleReferenceChange("version_id", e.target.value)}
+            onChange={(e) => {
+              const versionId = e.target.value.trim();
+              onChange("intent_package", versionId
+                ? { package_id: selectedPackageId, version_id: versionId }
+                : { package_id: selectedPackageId });
+            }}
             placeholder="Optional published version ID"
           />
         </div>

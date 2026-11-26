@@ -68,6 +68,33 @@ describe("ControllerConfigSection", () => {
     ).toBe(true);
   });
 
+  it("drops the old version pin when switching packages", () => {
+    const { onChange } = setup({
+      intent_package: { package_id: "pkg-1", version_id: "v2" },
+      default_workflow: "a2",
+    });
+    const input = screen.getByPlaceholderText(/published package id/i);
+    fireEvent.change(input, { target: { value: " pkg-1 " } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: " pkg-9 " } });
+    expect(onChange).toHaveBeenLastCalledWith("intent_package", { package_id: "pkg-9" });
+  });
+
+  it("sets or clears an explicit version pin", () => {
+    const { onChange } = setup({
+      intent_package: { package_id: "pkg-1", version_id: "v1" },
+      default_workflow: "a2",
+    });
+    const input = screen.getByPlaceholderText(/optional published version id/i);
+    fireEvent.change(input, { target: { value: "v2" } });
+    expect(onChange).toHaveBeenLastCalledWith("intent_package", {
+      package_id: "pkg-1",
+      version_id: "v2",
+    });
+    fireEvent.change(input, { target: { value: "" } });
+    expect(onChange).toHaveBeenLastCalledWith("intent_package", { package_id: "pkg-1" });
+  });
+
   it("adds mappings through onChange", async () => {
     const { onChange } = setup({
       intent_package: { package_id: "pkg-1" },

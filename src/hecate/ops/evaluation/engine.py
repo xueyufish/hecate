@@ -72,7 +72,7 @@ class EvaluationEngine:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        # 6.49: per-run evidence cache keyed by (package_id, version_id);
+        # 6.49: evidence cache keyed by (workspace, package_id, version_id);
         # False marks a failed resolution so we do not retry every item.
         self._intent_evidence_cache: dict = {}
 
@@ -181,6 +181,14 @@ class EvaluationEngine:
         if answer_source == AnswerSource.INTENT and intent_package is None:
             msg = "answer_source='intent' requires intent_package"
             raise ValueError(msg)
+        intent_workspace_id = None
+        if answer_source == AnswerSource.INTENT:
+            if run is not None:
+                intent_workspace_id = run.workspace_id
+            if intent_workspace_id is None:
+                dataset = await self.db.get(EvaluationDatasetModel, dataset_id)
+                if dataset is not None:
+                    intent_workspace_id = dataset.workspace_id
 
         if run is None:
             run = EvaluationRunModel(
@@ -289,6 +297,7 @@ class EvaluationEngine:
                             repetitions=repetitions,
                             run=run,
                             intent_package=intent_package,
+                            intent_workspace_id=intent_workspace_id,
                             agent_definition=agent_definition,
                             rollout_capture=rollout_capture,
                             correlation_task_id=workflow_correlation_task_id,
@@ -514,7 +523,9 @@ class EvaluationEngine:
             )
         return generated
 
-    async def _generate_answer_via_intent(self, query: str, intent_package: dict) -> str:
+    async def _generate_answer_via_intent(
+        self, query: str, intent_package: dict, workspace_id: uuid.UUID | None
+    ) -> str:
         """Classify the query with the intent recognition engine (6.49).
 
         The recognized label becomes the generated answer; the exact-match
@@ -534,10 +545,10 @@ class EvaluationEngine:
         package_id = uuid.UUID(str(intent_package.get("package_id")))
         pin = intent_package.get("version_id")
         version_id = uuid.UUID(str(pin)) if pin else None
-        cache_key = (package_id, version_id)
+        cache_key = (workspace_id, package_id, version_id)
         evidence = self._intent_evidence_cache.get(cache_key)
         if evidence is None and evidence is not False:
-            evidence = await resolve_evidence(create_intent_evidence_port(), package_id, version_id)
+            evidence = await resolve_evidence(create_intent_evidence_port(workspace_id), package_id, version_id)
             self._intent_evidence_cache[cache_key] = evidence or False
 
         engine = IntentRecognitionEngine()
@@ -562,6 +573,7 @@ class EvaluationEngine:
         run: EvaluationRunModel,
         semaphore: asyncio.Semaphore | None = None,
         intent_package: dict | None = None,
+        intent_workspace_id: uuid.UUID | None = None,
         agent_definition: Any | None = None,
         rollout_capture: list[dict] | None = None,
         correlation_task_id: uuid.UUID | None = None,
@@ -603,7 +615,7 @@ class EvaluationEngine:
                     rollout_capture[-1]["item_id"] = str(item.id)
                 return generated
             if answer_source == AnswerSource.INTENT:
-                return await self._generate_answer_via_intent(item.query, intent_package or {})
+                return await self._generate_answer_via_intent(item.query, intent_package or {}, intent_workspace_id)
             if answer_source == AnswerSource.WORKFLOW:
                 content, traj = await self._generate_answer_via_workflow(
                     query=item.query,
